@@ -2,6 +2,7 @@ import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normaliz
 import { initAtmosphere } from '/scene.js';
 import { chooseSpeaker, createActorContext, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
+import { getChannel } from '/interactions/channels.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -21,6 +22,7 @@ const builderCharacter = () => state.characters.find(c => c.id === builderCharac
 const BUILDER_SECTIONS = {
   identity: [
     ['name','Name','text','What do other people call this character?'],
+    ['handle','Messaging handle','text','Optional social username; e.g. @mara.vale.'],
     ['tagline','One-line introduction','text','A memorable hook for the character library.'],
     ['description','Appearance & identity','textarea','Visible features, age (if relevant), mannerisms, and durable facts.'],
     ['tags','Tags · comma-separated','tags','Genre, setting, themes, archetypes.'],
@@ -225,11 +227,13 @@ function renderMessages() {
     container.append(empty); return;
   }
   for (const [index, m] of session.messages.entries()) {
-    const article = el('article','',`message ${m.role}`);
+    const channel=getChannel(m.channelId);
+    const article = el('article','',`message ${m.role} channel-${channel.id}`);
     const who = m.role === 'assistant' ? state.characters.find(c=>c.id === (m.speakerId || session.characterId)) : null;
     const portrait = portraitNode(m.role === 'assistant' ? who?.name : state.persona.name || 'Y', who, 'portrait');
     const bubble = el('div','','bubble');
-    bubble.append(el('div',m.role === 'user' ? state.persona.name || 'You' : who?.name || 'Character','speaker'));
+    const displayName = m.role === 'user' ? state.persona.name || 'You' : (channel.id === 'text_message' && who?.handle ? (who.handle.startsWith('@') ? who.handle : '@' + who.handle) : who?.name || 'Character');
+    bubble.append(el('div',`${displayName} · ${channel.label}`,'speaker'));
     const prose = el('div', m.content, 'message-text');
     bubble.append(prose);
     const actions = el('div', '', 'message-actions');
@@ -269,9 +273,13 @@ function timelineClockLabel(session) {
 }
 function renderHeader() {
   const s = activeSession(); const c = activeCharacter();
+  const channel=getChannel(s?.channelId);
+  $('channel-select').value=channel.id;
+  $('channel-description').textContent=channel.id==='in_person'?'Shared place · spoken and visible interaction':channel.id==='phone_call'?'Audio-only · no remote visual cues':'Private one-to-one text · no scene narration';
+  $('message-input').placeholder=channel.id==='in_person'?'Your character’s dialogue or actions…':channel.id==='phone_call'?'Say something on the call…':'Write a message…';
   $('scene-title').textContent = s?.title || 'New story';
   const displayTime=timelineClockLabel(s) || s?.worldTime;
-  $('scene-meta').textContent = s ? [(s.location||c?.scenario||'Location unspecified'),displayTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
+  $('scene-meta').textContent = s ? [(channel.id==='in_person'?(s.location||c?.scenario||'Location unspecified'):(channel.id==='phone_call'?'Audio-only call · separate locations':'Text conversation · separate locations')),displayTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
   $('stage-name').textContent = c?.name || 'Unknown';
   $('stage-avatar').replaceChildren(portraitNode(c?.name, c, 'avatar-internal'));
   const stageImage = $('stage-portrait');
@@ -849,13 +857,13 @@ async function generate(mode = 'normal') {
     }
     const hits=new Set(retrieved.map(x=>x.id));
     const scopedLore=[...retrieved.map(x=>({...x,alwaysActive:true})),...state.lore.filter(x=>!hits.has(x.id))];
-    const prompt=createActorContext({session:{...session,messages:history,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages});
+    const prompt=createActorContext({session:{...session,messages:history,channelId:retry?(previous.channelId||'in_person'):session.channelId,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages});
     if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
     $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
     const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
     if (!response.ok) {const issue=await response.json().catch(()=>({error:`HTTP ${response.status}`}));throw new Error(issue.error||`HTTP ${response.status}`);}
     if (!response.body) throw new Error('Model server returned no response stream');
-    assistant=retry ? previous : {id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,witnessIds:[...session.castIds]};
+    assistant=retry ? previous : {id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,channelId:getChannel(session.channelId).id,sentAt:Date.now(),witnessIds:getChannel(session.channelId).id==='in_person'?[...session.castIds]:[actorId]};
     if (!retry) session.messages.push(assistant); else assistant.content='';
     renderMessages();
     const reader=response.body.getReader();const decode=new TextDecoder();let pending='';let done=false;
@@ -896,11 +904,21 @@ function send() {
   if (running) return;
   const message=$('message-input').value.trim();if(!message)return;
   if(!activeSession()){showError('Create or restore a scene first.');return;}
-  activeSession().messages.push({id:crypto.randomUUID(),role:'user',content:message,witnessIds:[...activeSession().castIds]});$('message-input').value='';activeSession().updatedAt=Date.now();save();renderLists();renderMessages();generate();
+  const session=activeSession();const channel=getChannel(session.channelId);
+  const target=sceneActor({...session,messages:[...session.messages,{role:'user',content:message}]});
+  const recipients=channel.id==='in_person'?[...session.castIds]:target?[target.id]:[];
+  session.messages.push({id:crypto.randomUUID(),role:'user',channelId:channel.id,content:message,sentAt:Date.now(),witnessIds:recipients});$('message-input').value='';session.updatedAt=Date.now();save();renderLists();renderMessages();generate();
 }
 
 $('new-session').onclick=()=>{if(!running){if(!activeCharacter()){showError('Create or restore a character first.');return;}startSession();}};
 $('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
+$('channel-select').onchange=()=>{
+  const s=activeSession();if(!s||running){renderHeader();return;}
+  const next=getChannel($('channel-select').value).id;
+  s.channelId=next;
+  if(next!=='in_person'){const actor=sceneActor(s);if(actor){s.speakerId=actor.id;s.speakerMode='manual';}}
+  save();renderHeader();renderMessages();
+};
 $('send').onclick=send;
 $('stop').onclick=()=>controller?.abort();
 $('regenerate').onclick=()=>generate('retry');

@@ -149,3 +149,18 @@
 .relationship-panel{padding:10px 12px;border:1px solid var(--border);background:var(--composer);border-radius:9px;margin:9px 0}
 .relationship-panel strong{font-size:12px}.relationship-panel p{font-size:11px;color:var(--muted);margin-bottom:0;line-height:1.6}
 #advance-hours{min-width:70px;width:90px}
+
+/* Communication-medium presentation: the underlying actors and world remain unchanged. */
+.channel-toolbar{display:flex;align-items:center;gap:10px;padding:0 0 11px;color:var(--text-dim);font-size:11px}
+.channel-toolbar label{font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:10px}
+.channel-toolbar select{width:auto;min-width:160px;padding:7px 10px;background:var(--composer);font-size:12px}
+.channel-toolbar span{color:var(--muted);font-size:11px}
+.message.channel-text_message .bubble{background:var(--composer);border:1px solid var(--border-strong);border-radius:17px 17px 17px 5px;padding:12px 16px;max-width:75%}
+.message.channel-text_message.user .bubble{background:var(--player);border-radius:17px 17px 5px 17px}
+.message.channel-text_message .message-text,.message.channel-text_message.user .message-text{background:transparent;border:0;border-radius:0;padding:0;font:inherit;font-size:14px;line-height:1.5}
+.message.channel-text_message .speaker{margin-bottom:5px;text-transform:none;letter-spacing:.02em}
+.message.channel-phone_call .bubble{border-left:2px solid var(--accent);padding-left:12px}
+.message.channel-phone_call .message-text{font-family:inherit;font-size:15px;line-height:1.7}
+.message.channel-phone_call .speaker{text-transform:none;letter-spacing:.02em}
+.reading-mode .message.channel-text_message .message-text,.reading-mode .message.channel-text_message.user .message-text{font:inherit;font-size:14px;line-height:1.5}
+@media(max-width:630px){.channel-toolbar{flex-wrap:wrap}.channel-toolbar span{width:100%}}

@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v0.6.0 (world atlas and social graph foundations).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v0.7.0 (interaction-channel foundation).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -43,6 +43,16 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v0.7: Interaction channels (third foundation milestone)
+
+- **Medium selection**: Switch an existing scene between **In person**, **Phone call**, and **Messaging** using the visible Interaction selector above the composer. Previous messages retain their original channel and presentation; switching the medium does not move or teleport characters.
+- **Channel-aware NPC context**: Phone generation receives audio-only instructions, suppresses unrelated physical scene descriptions, and receives only explicitly audio-transmitted current observations. Text generation asks the same character for concise message content without stage directions and only receives explicitly delivered current-message observations. In-person scenes retain full local sensory context.
+- **Actor separation**: Remote calls/messages are one-to-one with the selected NPC for this milestone, while in-person scenes retain the full cast. Player messages record recipient/witness IDs. NPC prompts remain scoped to character knowledge and witnessed history.
+- **Distinct UI**: Conversation messages retain their channel identifiers. Text renders as message bubbles and supports a character's optional social handle; phone replies use a dialogue/transcript treatment. The dynamic header identifies remote communication rather than showing an implied shared room.
+- **No new runtime dependencies**. Existing SQLite JSON snapshots keep using the compatible scene schema. Unknown old channels normalize to in-person; earlier saved messages retain their original content.
+- **Verification**: 51 passing automated Node tests including perception filtering, phone/text prompt redaction, channel migration, and local channel-module HTTP serving. Offline Chromium interaction confirmed selector changes, persistence, and preservation of text-message formatting without JavaScript errors.
+- **Not yet guaranteed**: Natural-language models can still violate style instructions. Strong structured-output validation, real phone audio, delivery/read states, social-media group chats, video calling, NPC schedules, phone contact identities, and multi-channel media attachments are later milestones. The current "Phone call" is text-based, not live voice streaming.
 
 ## v0.6: World Atlas, relationships, and fictional clock (second foundation milestone)
 

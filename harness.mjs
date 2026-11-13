@@ -1,4 +1,5 @@
 import { describeMind } from './psychology.mjs';
+import { getChannel, channelObservations } from './interactions/channels.mjs';
 // Deterministic orchestration primitives. No LLM output can commit world events here.
 const id = () => crypto.randomUUID();
 const MODES = new Set(['manual', 'natural', 'round-robin']);
@@ -13,6 +14,7 @@ export function normalizeScene(session, characters = []) {
     castIds,
     speakerId: castIds.includes(session?.speakerId) ? session.speakerId : (castIds[0] || null),
     speakerMode: MODES.has(session?.speakerMode) ? session.speakerMode : 'natural',
+    channelId: getChannel(session?.channelId).id,
     location: typeof session?.location === 'string' ? session.location.slice(0, 250) : '',
     worldTime: typeof session?.worldTime === 'string' ? session.worldTime.slice(0, 120) : '',
     atmosphere: typeof session?.atmosphere === 'string' ? session.atmosphere.slice(0, 1200) : '',
@@ -49,7 +51,8 @@ export function actorVisibleHistory(session, actorId, characters, history = sess
       if (speakerId === actorId) return { role: 'assistant', content: m.content, pinned: m.pinned };
       if (!cast.has(speakerId)) return null;
       const name = characters.find(c => c.id === speakerId)?.name || 'Another character';
-      return { role: 'user', content: `[Observed ${name} speaking or acting]\n${m.content}`, pinned: m.pinned };
+      const observation = m.channelId === 'text_message' ? `Received text from ${name}` : m.channelId === 'phone_call' ? `Heard ${name} on the call` : `Observed ${name} speaking or acting`;
+      return { role: 'user', content: `[${observation}]\n${m.content}`, pinned: m.pinned };
     }).filter(Boolean);
 }
 
@@ -107,19 +110,23 @@ export function createActorContext({ session, characters, actorId, persona, lore
   const history = actorVisibleHistory(session, actorId, characters);
   const candidateLore = lore.filter(entry => canKnowLore(entry, actorId, session.id));
   const castNames = (session.castIds || []).filter(cid => cid !== actorId).map(cid => characters.find(c => c.id === cid)?.name).filter(Boolean);
-  const seenEvents = actorVisibleEvents(session, actorId);
+  const channel = getChannel(session.channelId);
+  const inPerson = channel.id === 'in_person';
+  const seenEvents = inPerson ? actorVisibleEvents(session,actorId) : channelObservations(session.sceneEvents,channel.id,actorId);
+  const actingCharacter = inPerson ? actor : { ...actor, scenario: '' };
   const director=session.director || {mode:'collaborative'};
   const directorNotes=director.mode==='sandbox'?'Sandbox: avoid forcing planned plot turns or conveniently timed interruptions.':director.mode==='directed'?'Directed: favor established scene goals and authored beats when plausible; never force player decisions.':'Collaborative: offer plausible opportunities and balanced pacing without railroading.';
-  const sceneNotes = [`Location: ${session.location || 'Unspecified'}`,  `Time: ${session.worldTime || 'Unspecified'}`,
-    session.atmosphere && `Atmosphere: ${session.atmosphere}`, castNames.length && `Other present characters: ${castNames.join(', ')}`,
+  const sceneNotes = [inPerson ? `Shared location: ${session.location || 'Unspecified'}` : 'Remote communication: participants stay in their own physical locations; do not assume they can see each other.', `Time: ${session.worldTime || 'Unspecified'}`,
+    `Interaction channel: ${channel.label}. Perception limits: ${channel.perceptible.join(', ')}.`,
+    inPerson && session.atmosphere && `Atmosphere: ${session.atmosphere}`, castNames.length && `Other present characters: ${castNames.join(', ')}`,
     directorNotes,
     `Scene controls (0-1): pacing ${Number(director.pace??.5).toFixed(2)}, tension ${Number(director.tension??.5).toFixed(2)}, initiative ${Number(director.initiative??.5).toFixed(2)}, narration ${Number(director.narration??.5).toFixed(2)}. Treat as tendencies, not quotas.`,
     session.direction && `Scene direction (style and pacing, never overriding agency): ${session.direction}`,
     seenEvents.length && `Events this character actually witnessed:\n${seenEvents.map(e => `- ${e.description}`).join('\n')}`].filter(Boolean).join('\n');
-  const summary = (session.castIds || []).length > 1 ? session.publicSummary : (session.summary || '');
-  const assembled = buildMessages({ character: actor, persona, summary, authorNote: session.authorNote,
+  const summary = inPerson ? ((session.castIds || []).length > 1 ? session.publicSummary : (session.summary || '')) : ''; // Do not inject unseen shared-scene narration in remote channels.
+  const assembled = buildMessages({ character: actingCharacter, persona, summary, authorNote: session.authorNote,
     emotion: session.emotionByActor?.[actorId] || session.emotion,
-    lore: candidateLore, history, sceneNotes,
+    lore: candidateLore, history, sceneNotes, styleInstruction: channel.direction,
     psychologyNotes: session.psychologyByActor?.[actorId] ? describeMind(session.psychologyByActor[actorId],actor.name) : '' });
   assembled.actorId = actorId;
   return assembled;
