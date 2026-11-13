@@ -20,6 +20,8 @@ Open a terminal **in the project folder** and run:
 npm start
 ```
 
+To stop the server from the same terminal, type **`quit`** or **`exit`** and press Enter (or use **Ctrl+C**). The app closes its HTTP server and SQLite database cleanly.
+
 Then open **http://127.0.0.1:4173** in your browser. Start your local model server first (or start it later and click **Find local models** in the Setup tab). On Windows PowerShell, to use LM Studio instead of KoboldCpp:
 
 ```powershell

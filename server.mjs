@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createInterface } from 'node:readline';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -113,5 +114,28 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = Number(process.env.PORT || 4173);
   const server = createApp({ lmUrl: process.env.INFERENCE_URL || process.env.LM_STUDIO_URL || DEFAULT_INFERENCE_URL });
-  server.listen(port, '127.0.0.1', () => console.log(`AI RP Studio: http://127.0.0.1:${port}`));
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    terminal.close();
+    console.log('Stopping AI RP Studio...');
+    server.close(err => {
+      if (err) {
+        console.error('Shutdown error:', err);
+        process.exitCode = 1;
+      } else console.log('AI RP Studio stopped.');
+    });
+  };
+  terminal.on('line', line => {
+    if (/^(quit|exit)$/i.test(line.trim())) shutdown();
+  });
+  terminal.on('SIGINT', shutdown);
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`AI RP Studio: http://127.0.0.1:${server.address().port}`);
+    console.log('Type quit or exit and press Enter to stop.');
+  });
 }
