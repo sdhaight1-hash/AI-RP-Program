@@ -16,6 +16,7 @@ const ALLOWED = new Map([
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/engine.mjs', ['../engine.mjs', 'text/javascript; charset=utf-8']],
   ['/harness.mjs', ['../harness.mjs', 'text/javascript; charset=utf-8']],
+  ['/psychology.mjs', ['../psychology.mjs', 'text/javascript; charset=utf-8']],
 ]);
 const json = (res, status, data) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
