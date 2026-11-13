@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>AI RP Studio — Local Stories</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand"><div class="brand-mark">✦</div><div><strong>AI RP <span>STUDIO</span></strong><small>LOCAL STORY ENGINE</small></div></div>
+      <div class="rail-section"><div class="section-head"><span>SESSIONS</span><button id="new-session" class="icon-button" title="Start new scene">＋</button></div><div id="session-list" class="session-list"></div></div>
+      <div class="rail-section character-section"><div class="section-head"><span>CHARACTERS</span><button id="new-character" class="icon-button" title="Create character">＋</button></div><div id="character-list"></div></div>
+      <div class="rail-bottom"><div id="connection" class="connection"><i></i><span>Checking model server…</span></div><div class="rail-hint">Private, local sessions · export your backups</div></div>
+    </aside>
+    <main class="conversation">
+      <div class="conversation-head"><div><div class="eyebrow">CURRENT SCENE</div><h1 id="scene-title">The Harbor Bookshop</h1><div id="scene-meta" class="muted"></div></div><div class="head-actions"><button id="reading-toggle" class="subtle-button" aria-pressed="false" title="Switch between Character Chat and Story Reading views">◫ Story view</button><button id="open-inspector" class="subtle-button">Scene notes</button><button id="export-data" class="subtle-button">Export backup</button><button id="import-data" class="subtle-button">Import backup</button><input id="import-data-file" type="file" accept="application/json,.json" hidden /></div></div>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <div class="composer-area"><div id="lore-active" class="lore-active"></div><div class="composer"><textarea id="message-input" rows="3" placeholder="Your character's dialogue or actions… (Enter to send, Shift+Enter for newline)"></textarea><div class="composer-footer"><div class="muted">You control your character. The world responds.</div><div class="composer-actions"><button id="continue" class="subtle-button" title="Continue the scene without a new player action">✧ Continue</button><button id="regenerate" class="subtle-button" title="Generate another character reply without losing the existing one">↺ Retry</button><button id="stop" class="subtle-button hidden">Stop</button><button id="send" class="primary-button">Send ↗</button></div></div></div><div id="error" role="alert" class="error hidden"></div></div>
+    </main>
+    <aside class="inspector" id="inspector"><div class="stage"><canvas id="scene-canvas" aria-label="Animated WebGL atmosphere preview"></canvas><div class="stage-label">WEBGL · ATMOSPHERE PREVIEW</div><div class="stage-caption"><div class="stage-avatar" id="stage-avatar">M</div><div><strong id="stage-name">Mara Vale</strong><small>ACTIVE CHARACTER</small></div></div></div><div class="tabs" role="tablist"><button data-tab="character" class="active" role="tab">Character</button><button data-tab="lore" role="tab">Lore</button><button data-tab="memory" role="tab">Story</button><button data-tab="setup" role="tab">Setup</button></div><div id="inspector-content" class="inspector-body"></div></aside>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
