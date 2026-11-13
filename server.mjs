@@ -82,6 +82,24 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           throw error;
         }
       }
+      if (req.method === 'GET' && path === '/api/worlds') {
+        return json(res,200,store.worlds.list());
+      }
+      if (req.method === 'POST' && path === '/api/worlds') {
+        const data=await readJson(req,5000);
+        try { return json(res,201,store.worlds.createWorld(data)); }
+        catch(err) { if(err instanceof TypeError) return json(res,400,{error:err.message}); throw err; }
+      }
+      if (req.method === 'POST' && path === '/api/timelines') {
+        const data=await readJson(req,3000);
+        try { return json(res,201,store.worlds.createTimeline(data)); }
+        catch(err) { return json(res,400,{error:err.message}); }
+      }
+      if (req.method === 'GET' && path === '/api/timelines/actors') {
+        const timelineId=requestUrl.searchParams.get('timelineId');
+        if(!timelineId || timelineId.length>120) return json(res,400,{error:'Valid timelineId required'});
+        return json(res,200,{actors:store.worlds.actors(timelineId)});
+      }
       if (req.method === 'GET' && path === '/api/state') {
         return json(res, 200, store.load());
       }
