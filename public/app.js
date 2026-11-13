@@ -10,6 +10,8 @@ const text = (s) => String(s ?? '');
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch { state = makeInitialState(); }
 let currentTab = 'character';
+let worldLibrary = null;
+let loadingWorlds = false;
 let builderCharacterId = null;
 let builderTab = 'identity';
 let aiDraftTarget = null;
@@ -281,10 +283,22 @@ function attachFields(callback) {
     save(); renderLists(); renderHeader();
   }));
 }
+async function refreshWorldLibrary() {
+  if (loadingWorlds) return;
+  loadingWorlds = true;
+  try {
+    const response=await fetch('/api/worlds');
+    if(!response.ok)throw Error(`World Library unavailable (${response.status})`);
+    worldLibrary=await response.json();
+    if(currentTab==='worlds')renderInspector();
+  } catch(err) { showError(err.message); }
+  finally { loadingWorlds=false; }
+}
+
 function renderInspector() {
   const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
   document.querySelectorAll('[data-tab]').forEach(btn => { btn.classList.toggle('active', btn.dataset.tab === currentTab); btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab)); });
-  if ((!s || !c) && !['library','setup'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
+  if ((!s || !c) && !['library','setup','worlds'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
   if (currentTab === 'character') {
     host.innerHTML = `<h2 class="panel-title">${escapeHtml(c.name)}</h2>
       <div class="character-overview" id="character-overview"></div>
@@ -298,6 +312,51 @@ function renderInspector() {
     $('export-character').onclick = () => download(`${safeName(c.name)}.json`, JSON.stringify({character:c},null,2));
     $('import-character').onclick = () => $('character-upload').click();
     $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } e.target.value=''; };
+  } else if (currentTab === 'worlds') {
+    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Canon worlds are independent of roleplay scenes. Each playthrough has its own timeline; changing one does not rewrite another. This first release provides world containers and scene assignment. Location and relationship editors come next.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><p class="footer-note">A legacy scene is automatically placed in its own imported timeline. Moving a scene changes its timeline association, not its historical messages. Back up your stories before experimenting with new worlds.</p>`;
+    const report = $('world-library-list');
+    if (!worldLibrary) {
+      report.append(el('p','Loading your local worlds...','help'));
+      if (!loadingWorlds) refreshWorldLibrary();
+      return;
+    }
+    const worldSelect=$('world-select'), timelineSelect=$('timeline-select');
+    for(const world of worldLibrary.worlds){
+      worldSelect.add(new Option(world.name,world.id));
+      const card=el('div','','lore-card');
+      const title=el('strong',world.name);const desc=el('p',world.description||'Blank canon world','help');
+      card.append(title,desc);
+      for(const timeline of worldLibrary.timelines.filter(t=>t.worldId===world.id)) {
+        const label=el('p',`${timeline.name}${timeline.id===s?.timelineId?' · current scene':''}`,'help');
+        card.append(label);timelineSelect.add(new Option(`${world.name} — ${timeline.name}`,timeline.id));
+      }
+      report.append(card);
+    }
+    if(!worldLibrary.worlds.length)report.append(el('p','Create your first world to begin.','empty-note'));
+    if(s?.timelineId && worldLibrary.timelines.some(t=>t.id===s.timelineId)) timelineSelect.value=s.timelineId;
+    $('world-create').onclick=async()=>{
+      try{
+        if(!serverStorage)throw Error('The SQLite server must be connected to create worlds.');
+        const res=await fetch('/api/worlds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('world-new-name').value,description:$('world-new-description').value})});
+        const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create world');
+        showError();await refreshWorldLibrary();$('world-select').value=data.id;
+      }catch(error){showError(error.message);}
+    };
+    $('timeline-create').onclick=async()=>{
+      try{
+        if(!serverStorage)throw Error('The SQLite server must be connected to create timelines.');
+        const res=await fetch('/api/timelines',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:$('world-select').value,name:$('timeline-new-name').value})});
+        const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create timeline');
+        showError();await refreshWorldLibrary();$('timeline-select').value=data.id;
+      }catch(error){showError(error.message);}
+    };
+    $('timeline-assign').disabled=!s;
+    $('timeline-assign').onclick=()=>{
+      if(!s||running)return;
+      const value=$('timeline-select').value;
+      if(!worldLibrary.timelines.some(t=>t.id===value))return showError('Select a valid timeline first.');
+      s.timelineId=value;save();renderInspector();showError();
+    };
   } else if (currentTab === 'cast') {
     host.innerHTML = `<h2 class="panel-title">Scene cast</h2><p class="help">Each actor has a separate prompt, personal knowledge and dialogue attribution. @Mention a character in your message to address them in Natural mode.</p><div id="cast-choices"></div><div class="group"><label class="field-label" for="speaker-mode">Speaker selection</label><select id="speaker-mode"><option value="natural">Natural · address or rotate</option><option value="round-robin">Round-robin</option><option value="manual">Manual</option></select></div><div class="group"><label class="field-label" for="cast-speaker">Next actor</label><select id="cast-speaker"></select></div><p class="help">Manual overrides allow you to pick the next actor. Existing messages retain their original speakers, even if a character is archived.</p>`;
     const choices=$('cast-choices');

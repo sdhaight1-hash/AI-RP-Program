@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v0.4.0.** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v0.5.0 (world foundation).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -43,6 +43,16 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v0.5: Canon World Library and timeline migration (first foundation milestone)
+
+- The **Worlds** tab now creates reusable canon-world containers and separately named playthrough timelines. Assign an existing scene to a timeline in the same panel. World data and actor controllers live in normalized SQLite tables; existing chat and model behavior stays unchanged.
+- Older scenes receive **one stable imported timeline each** on startup instead of being merged into one fictional reality. Existing titles, dialogue, portraits, psychology and knowledge records remain intact.
+- A one-time backup is written to `.data/studio.sqlite.before-world-v1.bak` before opening an existing database with the new schema. `schema_migrations` tracks schema v1; startup and repeated migration preserve existing timeline IDs.
+- Player actors and NPC actors have distinct controller identities. The new authority validator rejects role impersonation in structured operations; a future proposal/commit pipeline will enforce this on all world-mutating AI actions.
+- New API endpoints: `GET/POST /api/worlds`, `POST /api/timelines`, and `GET /api/timelines/actors?timelineId=...`. Returned world records never include model-generated changes unless you explicitly created/assigned them.
+- **Not yet implemented:** full world editor, world-scoped characters/lore, locations, clock, relationship graph, autonomous NPC lives, communication channels, canon revision publishing, or server-side event commit transactions. Those remain separate milestones in `docs/architecture-character-fidelity-world-harness.md`.
+- This milestone retains the original JSON snapshot chat state for backward compatibility; newly introduced world/timeline identity is stored in SQLite tables and referenced from sessions.
 
 ## v0.4: Multi-character worlds and harness groundwork
 
