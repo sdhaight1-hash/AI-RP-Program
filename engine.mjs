@@ -1,6 +1,51 @@
 // Pure roleplay prompt and persistence helpers; no browser dependencies.
 export const STORAGE_KEY = 'ai-rp-studio:v1';
 export const DEFAULT_SETTINGS = Object.freeze({ model: '', temperature: 0.95, max_tokens: 450, readingMode: false });
+export const DEFAULT_EMOTION = Object.freeze({ valence: 0, arousal: 0.25, trust: 0 });
+
+// Explicit, story-level appraisal beats. Never guess a player's intentions by
+// scanning their message for emotional keywords. These are simulation controls.
+export const EMOTION_BEATS = Object.freeze({
+  warmth: { label: 'Warmth', change: [0.23, 0.05, 0.18] },
+  friction: { label: 'Friction', change: [-0.19, 0.16, -0.14] },
+  danger: { label: 'Danger', change: [-0.26, 0.28, 0] },
+  reassure: { label: 'Reassurance', change: [0.18, -0.17, 0.12] },
+  quiet: { label: 'Quiet passage', change: [0, -0.20, 0] },
+});
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+export function normalizeEmotion(value) {
+  const numeric = (key, low, high, fallback) =>
+    typeof value?.[key] === 'number' && Number.isFinite(value[key]) ? clamp(value[key], low, high) : fallback;
+  return {
+    valence: numeric('valence', -1, 1, 0),
+    arousal: numeric('arousal', 0, 1, 0.25),
+    trust: numeric('trust', -1, 1, 0),
+  };
+}
+export function applyEmotionBeat(current, kind) {
+  const beat = EMOTION_BEATS[kind];
+  if (!beat) throw new Error(`Unknown emotional event: ${kind}`);
+  const before = normalizeEmotion(current);
+  return normalizeEmotion({
+    valence: before.valence + beat.change[0],
+    arousal: before.arousal + beat.change[1],
+    trust: before.trust + beat.change[2],
+  });
+}
+export function settleEmotion(current) {
+  const e = normalizeEmotion(current);
+  // Feelings settle over narrative turns, but relationships do not reset.
+  return normalizeEmotion({ valence: e.valence * 0.94, arousal: 0.25 + (e.arousal - 0.25) * 0.86, trust: e.trust });
+}
+export function describeEmotion(value) {
+  const e = normalizeEmotion(value);
+  const mood = e.valence < -0.35 ? 'unsettled and distressed' : e.valence > 0.35 ? 'pleasantly disposed' : 'emotionally mixed';
+  const energy = e.arousal > 0.65 ? 'highly alert' : e.arousal > 0.35 ? 'attentive' : 'relatively calm';
+  const connection = e.trust < -0.35 ? 'guarded toward the player' : e.trust > 0.35 ? 'open and trusting toward the player' : 'cautious about the player';
+  return `${mood}; ${energy}; ${connection}`;
+}
+
 
 export function createCharacter(name = 'New character') {
   return {
@@ -13,7 +58,7 @@ export function createSession(character) {
   return {
     id: crypto.randomUUID(), characterId: character.id, title: `With ${character.name}`,
     messages: character.greeting ? [{ id: crypto.randomUUID(), role: 'assistant', content: character.greeting }] : [],
-    summary: '', authorNote: '', updatedAt: Date.now(),
+    summary: '', authorNote: '', emotion: { ...DEFAULT_EMOTION }, emotionEvents: [], updatedAt: Date.now(),
   };
 }
 
@@ -40,6 +85,8 @@ export function normalizeState(value) {
   const characters = value.characters.filter(c => c && typeof c.id === 'string' && typeof c.name === 'string');
   const sessions = value.sessions.filter(s => s && typeof s.id === 'string' && typeof s.characterId === 'string' && Array.isArray(s.messages))
     .map(s => ({ ...s, authorNote: typeof s.authorNote === 'string' ? s.authorNote : '',
+      emotion: normalizeEmotion(s.emotion),
+      emotionEvents: Array.isArray(s.emotionEvents) ? s.emotionEvents.filter(e => e && typeof e.kind === 'string' && EMOTION_BEATS[e.kind]).slice(-20).map(e => ({ id: typeof e.id === 'string' ? e.id : crypto.randomUUID(), kind: e.kind, before: normalizeEmotion(e.before), at: Number.isFinite(e.at) ? e.at : Date.now() })) : [],
       messages: s.messages.filter(m => ['user', 'assistant'].includes(m?.role) && typeof m?.content === 'string')
         .map(m => ({ ...m, id: typeof m.id === 'string' ? m.id : crypto.randomUUID(),
           pinned: Boolean(m.pinned),
@@ -63,7 +110,7 @@ export function getActiveLore(entries, messages, maxEntries = 4) {
     .slice(0, maxEntries);
 }
 
-export function buildMessages({ character, persona, summary = '', authorNote = '', lore = [], history = [] }) {
+export function buildMessages({ character, persona, summary = '', authorNote = '', emotion, lore = [], history = [] }) {
   if (!character) throw new Error('Select a character first');
   const selectedLore = getActiveLore(lore, history);
   const part = (label, text, cap = 1600) => `${label}:\n${String(text || 'Not specified').slice(0, cap)}`;
@@ -79,6 +126,7 @@ export function buildMessages({ character, persona, summary = '', authorNote = '
     part('Scene and premise', character.scenario),
     part('Player name', persona.name, 120),
     part('Player persona', persona.description),
+    `Simulated character emotion right now: ${describeEmotion(emotion)}. This is an internal state for character portrayal, not proof of the player's intent. Reflect it subtly in dialogue and body language without overriding the character's agency, motives, or history.`,
     summary ? part('Canon summary of events so far', summary, 2500) : '',
     history.some(m => m.pinned) ? `Pinned moments (established in this scene):\n${history.filter(m => m.pinned).slice(-5).map(m => `- ${m.role === 'user' ? 'Player' : character.name}: ${String(m.content).slice(0, 650)}`).join('\n')}` : '',
     selectedLore.length ? `Relevant world lore (not necessarily known to the character):\n${selectedLore.map(e => `- ${String(e.content).slice(0, 750)}`).join('\n')}` : '',

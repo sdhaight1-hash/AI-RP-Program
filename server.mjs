@@ -2,6 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { StudioStore } from './storage.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -17,18 +18,18 @@ const json = (res, status, data) => {
   res.end(JSON.stringify(data));
 };
 
-async function readJson(req) {
+async function readJson(req, limit = 750_000) {
   let raw = '';
   for await (const chunk of req) {
     raw += chunk.toString();
-    if (raw.length > 750_000) throw new Error('Request too large');
+    if (raw.length > limit) throw new Error('Request too large');
   }
   try { return JSON.parse(raw); } catch { throw new Error('Invalid JSON'); }
 }
 
-export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch } = {}) {
+export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new StudioStore(join(root, '.data', 'studio.sqlite')) } = {}) {
   // The server binds localhost by default; this additional check rejects cross-site writes.
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const path = (req.url || '/').split('?')[0];
     const origin = req.headers.origin;
     if (origin) {
@@ -40,6 +41,21 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch } =
       } catch { return json(res, 403, { error: 'Invalid origin' }); }
     }
     try {
+      if (req.method === 'GET' && path === '/api/state') {
+        return json(res, 200, store.load());
+      }
+      if (req.method === 'PUT' && path === '/api/state') {
+        const payload = await readJson(req, 4_500_000);
+        if (!payload || !Number.isSafeInteger(payload.revision) || payload.revision < 0 ||
+          !payload.state || !Array.isArray(payload.state.characters) || !Array.isArray(payload.state.sessions) ||
+          !payload.state.characters.length ||
+          !payload.state.characters.every(c => c && typeof c.id === 'string' && typeof c.name === 'string') ||
+          !payload.state.sessions.every(s => s && typeof s.id === 'string' && Array.isArray(s.messages))) {
+          return json(res, 400, { error: 'Invalid story document or revision' });
+        }
+        const result = store.save(payload.state, payload.revision);
+        return result ? json(res, 200, result) : json(res, 409, { error: 'Story was changed in another tab; export local changes before reloading.' });
+      }
       if (req.method === 'GET' && path === '/api/models') {
         const response = await fetchImpl(`${lmUrl}/models`, { signal: AbortSignal.timeout(3500) });
         if (!response.ok) throw new Error(`Model server returned ${response.status}`);
@@ -86,10 +102,12 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch } =
       }
       return json(res, 404, { error: 'Not found' });
     } catch (err) {
-      if (!res.headersSent) json(res, err.message === 'Invalid JSON' || err.message === 'Request too large' ? 400 : 500, { error: err.message });
+      if (!res.headersSent) json(res, err.message === 'Invalid JSON' || err.message === 'Request too large' || err instanceof RangeError ? 400 : 500, { error: err.message });
       else res.destroy(err);
     }
   });
+  server.on('close', () => store.close());
+  return server;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

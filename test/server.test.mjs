@@ -53,3 +53,29 @@ test('invalid requests and cross-origin writes are blocked before inference', as
     assert.equal(crossOrigin.status,403);
   });
 });
+
+test('server reads/writes SQLite story state, handles stale revisions and rejects bad data', async () => {
+  const { StudioStore } = await import('../storage.mjs');
+  const { makeInitialState } = await import('../engine.mjs');
+  const store = new StudioStore(':memory:');
+  const server = createApp({ store, fetchImpl: async () => { throw new Error('model server should not be used') } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const empty = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(empty.revision, 0);
+    assert.equal(empty.state, null);
+    const value = makeInitialState();
+    value.sessions[0].summary = 'A note remembered across page reloads.';
+    const save = () => fetch(`${base}/api/state`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({revision:0,state:value}) });
+    const stored = await save();
+    assert.equal(stored.status, 200);
+    assert.equal((await stored.json()).revision, 1);
+    const conflict = await save();
+    assert.equal(conflict.status, 409);
+    const loaded = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(loaded.state.sessions[0].summary, value.sessions[0].summary);
+    const invalid = await fetch(`${base}/api/state`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:'{"revision":1,"state":{"characters":[],"sessions":[]}}' });
+    assert.equal(invalid.status, 400);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
