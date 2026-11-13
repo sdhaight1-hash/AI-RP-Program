@@ -1,6 +1,7 @@
 import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, buildMessages, getActiveLore, importCharacter, THEMES, CHARACTER_FIELDS, parseCharacterDraft, EMOTION_BEATS, DEFAULT_EMOTION, applyEmotionBeat, settleEmotion, describeEmotion } from '/engine.mjs';
 import { initAtmosphere } from '/scene.js';
 import { chooseSpeaker, createActorContext, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
+import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -311,13 +312,41 @@ function renderInspector() {
     $('cast-speaker').value=s.speakerId || s.castIds[0];
     $('cast-speaker').onchange=e=>{s.speakerId=e.target.value;s.speakerMode='manual';save();renderHeader();renderInspector();};
   } else if (currentTab === 'scene') {
-    host.innerHTML=`<h2 class="panel-title">Scene direction</h2><p class="help">These details describe the shared, witnessed scene. Secret plot notes belong in private lore, not here.</p>${field('location','Location',s.location)}${field('worldTime','Fictional time',s.worldTime)}${field('atmosphere','Environment and atmosphere',s.atmosphere,{multiline:true,rows:3})}${field('publicSummary','What every present character knows',s.publicSummary,{multiline:true,rows:4})}${field('direction','Direction: tempo, focus and tone',s.direction,{multiline:true,rows:4})}<h3 class="field-label">Record a witnessed event</h3><select id="event-kind"><option>observation</option><option>action</option><option>revelation</option><option>relationship</option><option>world-change</option></select><textarea id="event-description" rows="3" placeholder="What objectively happened? No automatic emotional inference."></textarea><button id="event-record" class="subtle-button">Record for current cast</button><div id="scene-events"></div>`;
+    host.innerHTML=`<h2 class="panel-title">Scene direction</h2><p class="help">These details describe the shared, witnessed scene. Secret plot notes belong in private lore, not here.</p>${field('location','Location',s.location)}${field('worldTime','Fictional time',s.worldTime)}${field('atmosphere','Environment and atmosphere',s.atmosphere,{multiline:true,rows:3})}${field('publicSummary','What every present character knows',s.publicSummary,{multiline:true,rows:4})}${field('direction','Direction: tempo, focus and tone',s.direction,{multiline:true,rows:4})}<h3 class="field-label">Narrative director</h3><div class="group"><label class="field-label" for="director-mode">Direction mode</label><select id="director-mode"><option value="sandbox">Sandbox · Emergent</option><option value="collaborative">Collaborative · Balanced</option><option value="directed">Directed · Story beats</option></select></div><div id="director-controls"></div><h3 class="field-label">Record and appraise a witnessed event</h3><select id="event-kind"><option>observation</option><option>action</option><option>revelation</option><option>relationship</option><option>world-change</option></select><textarea id="event-description" rows="3" placeholder="What objectively happened? No automatic emotional inference."></textarea><div id="appraisal-controls"></div><button id="event-record" class="subtle-button">Commit witnessed event + appraisal</button><div id="scene-events"></div>`;
     attachFields((key,val)=>{s[key]=val;});
-    $('event-record').onclick=()=>{try{const event=createSceneEvent({kind:$('event-kind').value,description:$('event-description').value,witnessIds:s.castIds});s.sceneEvents.push(event);save();renderInspector();}catch(err){showError(err.message);}};
+    s.director ||= {mode:'collaborative',pace:.5,tension:.5,initiative:.5,narration:.5};
+    $('director-mode').value=s.director.mode;
+    $('director-mode').onchange=e=>{s.director.mode=e.target.value;save();};
+    for(const [key,label] of [['pace','Pacing'],['tension','Tension'],['initiative','NPC initiative'],['narration','Narration density']]){
+      const row=el('label','','psy-slider-label');row.append(el('span',label));const control=document.createElement('input');control.type='range';control.min='0';control.max='1';control.step='.05';control.value=s.director[key]??.5;const value=el('strong',Number(control.value).toFixed(2));control.oninput=()=>{s.director[key]=Number(control.value);value.textContent=Number(control.value).toFixed(2);save();};row.append(control,value);$('director-controls').append(row);
+    }
+    const appraisalOptions=[['desirability','Impact · bad to good',-1,1,0],['significance','Personal significance',0,1,.65],['surprise','Unexpectedness',0,1,.5],['control','Perceived control',0,1,.5]];
+    for(const [key,label,min,max,value] of appraisalOptions){const row=el('label','','psy-slider-label');row.append(el('span',label));const slider=document.createElement('input');slider.type='range';slider.id='appraise-'+key;slider.min=min;slider.max=max;slider.step='.05';slider.value=value;const shown=el('strong',Number(slider.value).toFixed(2));slider.oninput=()=>shown.textContent=Number(slider.value).toFixed(2);row.append(slider,shown);$('appraisal-controls').append(row);}
+    const attribution=el('label','','psy-slider-label');attribution.append(el('span','Perceived responsibility'));
+    const blame=document.createElement('select');blame.id='appraise-responsible';blame.add(new Option('Unknown / natural event',''));blame.add(new Option('Player','player'));for(const ch of state.characters.filter(c=>s.castIds.includes(c.id)))blame.add(new Option(ch.name,ch.id));attribution.append(blame);$('appraisal-controls').append(attribution);
+    const future=el('label','','cast-choice');const futureCheck=document.createElement('input');futureCheck.type='checkbox';futureCheck.id='appraise-future';future.append(futureCheck,el('span','Anticipated future outcome'));$('appraisal-controls').append(future);
+    const resolved=el('label','','cast-choice');const resolvedCheck=document.createElement('input');resolvedCheck.type='checkbox';resolvedCheck.id='appraise-resolved';resolved.append(resolvedCheck,el('span','Resolves a previous threat'));$('appraisal-controls').append(resolved);
+    $('event-record').onclick=()=>{
+      if(running)return;try{
+        const event=createSceneEvent({kind:$('event-kind').value,description:$('event-description').value,witnessIds:s.castIds});
+        const appraisal=normalizeAppraisal(Object.fromEntries(appraisalOptions.map(([key])=>[key,Number($('appraise-'+key).value)])));
+        appraisal.actorResponsible=blame.value||null;appraisal.future=futureCheck.checked;appraisal.threatResolved=resolvedCheck.checked;
+        event.appraisal=appraisal;
+        event.beforePsychologyByActor={};s.psychologyByActor ||= {};
+        for(const actorId of event.witnessIds){
+          const person=state.characters.find(ch=>ch.id===actorId);if(!person)continue;
+          const before=normalizeMind(s.psychologyByActor[actorId]||createMind());
+          event.beforePsychologyByActor[actorId]=before;
+          s.psychologyByActor[actorId]=appraiseConfirmedEvent({mind:before,disposition:person.disposition,event,appraisal,actorId});
+        }
+        s.sceneEvents.push(event);save();renderInspector();
+      }catch(err){showError(err.message);}
+    };
     const events=$('scene-events');
     for(const event of [...s.sceneEvents].reverse().slice(0,12)) {
       const row=el('div','','event-row');row.append(el('strong',event.kind),el('p',event.description));
-      const undo=el('button','Remove','mini-action');undo.onclick=()=>{s.sceneEvents=s.sceneEvents.filter(e=>e.id!==event.id);save();renderInspector();};row.append(undo);events.append(row);
+      const undo=el('button','Undo last event','mini-action');undo.disabled=event.id!==s.sceneEvents.at(-1)?.id;
+      undo.onclick=()=>{if(event.id!==s.sceneEvents.at(-1)?.id)return;for(const [actorId,before] of Object.entries(event.beforePsychologyByActor||{}))s.psychologyByActor[actorId]=before;s.sceneEvents.pop();save();renderInspector();};row.append(undo);events.append(row);
     }
   } else if (currentTab === 'gallery') {
     host.innerHTML='<h2 class="panel-title">Visual generation</h2><p class="help">Optional ComfyUI integration. Import a trusted API-format workflow containing __RP_PROMPT__ in a text input. Images remain local and require your approval before becoming portraits.</p><p id="comfy-status" class="help">Checking ComfyUI…</p><div class="group"><label class="field-label" for="comfy-template">Workflow template</label><select id="comfy-template"><option value="">Loading…</option></select></div><label class="field-label" for="comfy-import-id">Import API-format workflow</label><input id="comfy-import-id" placeholder="portrait-photoreal"/><input id="comfy-file" type="file" accept=".json,application/json"/><button id="comfy-import" class="subtle-button">Import reviewed workflow</button><div class="group"><label class="field-label" for="comfy-prompt">Visual prompt</label><textarea rows="4" id="comfy-prompt" placeholder="A cinematic portrait of…"></textarea></div><div class="group"><label class="field-label" for="comfy-negative">Negative prompt (optional)</label><textarea rows="2" id="comfy-negative" placeholder="Blurry, distorted…"></textarea></div><button id="comfy-generate" class="primary-button">✦ Generate with ComfyUI</button><p class="help">Image generation may compete for GPU memory with KoboldCpp or LM Studio. Submit jobs when text generation is idle.</p><p id="comfy-job-status" role="status" class="help"></p><button id="comfy-refresh" class="subtle-button">Refresh job</button><div id="comfy-results" class="comfy-results"></div>';
@@ -384,30 +413,13 @@ function renderInspector() {
     $('delete-session').textContent='Move scene to Trash';
     $('delete-session').onclick = () => { if (!confirm('Move this scene to Trash? You can restore it from Library.')) return; archiveSession(state,s.id); save(); render(); };
   } else if (currentTab === 'emotion') {
-    const e = s.emotion || DEFAULT_EMOTION;
-    host.innerHTML = `<h2 class="panel-title">Inner weather</h2>
-      <p class="help">A fictional character's simulated feelings, separate from dialogue. Mark story events explicitly; no keyword-based emotional judgments.</p>
-      <div class="mood-summary">${escapeHtml(describeEmotion(e))}</div>
-      ${[['valence','Valence','Distressed','Pleasant',-1,1],['arousal','Arousal','Calm','Activated',0,1],['trust','Trust','Guarded','Open',-1,1]].map(([key,name,low,high,min,max]) => `<div class="emotion-track"><div class="emotion-track-label"><span>${name}</span><strong>${e[key].toFixed(2)}</strong></div><div class="emotion-meter"><div style="width:${((e[key]-min)/(max-min)*100).toFixed(1)}%"></div></div><div class="emotion-track-ends"><span>${low}</span><span>${high}</span></div></div>`).join('')}
-      <h3 class="field-label emotion-subhead">Record a story beat</h3><div class="beat-grid">${Object.entries(EMOTION_BEATS).map(([key,beat]) => `<button class="subtle-button beat-button" data-beat="${key}">${escapeHtml(beat.label)}</button>`).join('')}</div>
-      <p class="help">Emotions settle gently after successful replies. Trust changes only through recorded events. A retry does not change emotional state.</p>
-      <div class="inline-actions"><button class="subtle-button" id="undo-beat">Undo beat</button><button class="subtle-button" id="reset-emotion">Reset state</button></div>
-      <h3 class="field-label emotion-subhead">Recent beats</h3><div id="emotion-log"></div>`;
-    host.querySelectorAll('[data-beat]').forEach(btn => btn.onclick=()=>{
-      if(running)return;
-      const before={...s.emotion};
-      s.emotion=applyEmotionBeat(before,btn.dataset.beat);
-      s.emotionEvents=[...(s.emotionEvents||[]),{id:crypto.randomUUID(),kind:btn.dataset.beat,before,at:Date.now()}].slice(-20);
-      save();renderInspector();
-    });
-    $('undo-beat').disabled=!s.emotionEvents?.length || running;
-    $('undo-beat').onclick=()=>{if(running||!s.emotionEvents?.length)return;const prior=s.emotionEvents.pop();s.emotion=prior.before;save();renderInspector();};
-    $('reset-emotion').onclick=()=>{if(running)return;s.emotion={...DEFAULT_EMOTION};s.emotionEvents=[];save();renderInspector();};
-    const beats=$('emotion-log');
-    if(!s.emotionEvents?.length) beats.append(el('p','No emotional events recorded.','empty-note'));
-    for(const entry of [...(s.emotionEvents||[])].reverse().slice(0,8)) {
-      beats.append(el('div',`${EMOTION_BEATS[entry.kind]?.label || entry.kind} · ${new Date(entry.at).toLocaleString()}`,'emotion-log-entry'));
-    }
+    s.psychologyByActor ||= {};
+    const e=normalizeMind(s.psychologyByActor[c.id]||createMind());
+    const emotionRows=EMOTION_NAMES.map(key=>`<div class="psy-meter"><div><span>${escapeHtml(key)}</span><strong>${e.emotions[key].toFixed(2)}</strong></div><progress max="1" value="${e.emotions[key]}"></progress></div>`).join('');
+    const relationships=Object.entries(e.relationships).map(([id,values])=>`<div class="relationship-panel"><strong>${escapeHtml(id==='player'?'Player':state.characters.find(x=>x.id===id)?.name||id)}</strong><p>Trust ${values.trust.toFixed(2)} · Affection ${values.affection.toFixed(2)} · Respect ${values.respect.toFixed(2)} · Tension ${values.tension.toFixed(2)}</p></div>`).join('');
+    host.innerHTML=`<h2 class="panel-title">Character psychology</h2><p class="help">A deterministic fictional appraisal system, not a diagnosis. The same event can affect characters differently according to their dispositions. Use Scene to commit events and assign perceived meaning.</p><div class="mood-summary">${escapeHtml(describeMind(e,c.name))}</div><div class="context-stats"><div><strong>${e.mood.valence.toFixed(2)}</strong><span>Mood</span></div><div><strong>${e.mood.arousal.toFixed(2)}</strong><span>Arousal</span></div><div><strong>${e.reasons.length}</strong><span>Appraisals</span></div></div>${emotionRows}<h3 class="field-label">Relationships</h3>${relationships||'<p class="help">No recorded social appraisals yet.</p>'}<h3 class="field-label">Last interpreted events</h3><div id="psy-reasons"></div><h3 class="field-label">Advance fictional time</h3><p class="help">Hours reduce momentary feelings; relationships and remembered causes persist.</p><div class="inline-actions"><input id="advance-hours" type="number" min="0.1" max="168" step="0.5" value="1"/><button id="advance-time" class="subtle-button">Advance hours</button></div>`;
+    const reasons=$('psy-reasons');for(const reason of [...e.reasons].reverse().slice(0,8))reasons.append(el('p',`${reason.primary} · ${reason.summary}`,'help'));
+    $('advance-time').onclick=()=>{if(running)return;const hours=Number($('advance-hours').value);if(!Number.isFinite(hours)||hours<=0||hours>168)return showError('Choose between 0 and 168 hours.');for(const id of s.castIds)s.psychologyByActor[id]=advanceMindTime(s.psychologyByActor[id]||createMind(),hours);s.timeHoursElapsed=(s.timeHoursElapsed||0)+hours;save();renderInspector();};
   } else if (currentTab === 'context') {
     const actor=sceneActor(s); if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore a cast member or add an active character in Cast.</p>';return;} const prompt=createActorContext({session:s,characters:state.characters,actorId:actor.id,persona:state.persona,lore:state.lore,buildMessages});
     const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n');
@@ -506,6 +518,15 @@ function renderBuilder() {
       if (c.id === activeCharacter()?.id) renderHeader();
     });
     group.append(caption, input, el('p', help, 'help')); host.append(group);
+  }
+  if(builderTab==='mind'){
+    const pane=el('section','','psychology-controls');pane.append(el('h3','Psychological dispositions','builder-subtitle'),el('p','Stable traits influence how the character appraises the same witnessed event. They do not force specific decisions.','help'));
+    c.disposition ||= {...DEFAULT_DISPOSITION};
+    for(const [key,defaultValue] of Object.entries(DEFAULT_DISPOSITION)){
+      const label=el('label','','psy-slider-label');label.append(el('span',key.replace(/([A-Z])/g,' $1')));
+      const val=el('strong',Number(c.disposition[key]??defaultValue).toFixed(2));const input=document.createElement('input');input.type='range';input.min='0';input.max='1';input.step='.05';input.value=c.disposition[key]??defaultValue;
+      input.oninput=()=>{c.disposition[key]=Number(input.value);val.textContent=Number(input.value).toFixed(2);save();};label.append(input,val);pane.append(label);
+    }host.append(pane);
   }
 }
 async function uploadPortrait(file) {

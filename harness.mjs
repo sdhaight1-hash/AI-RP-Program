@@ -1,3 +1,4 @@
+import { describeMind } from './psychology.mjs';
 // Deterministic orchestration primitives. No LLM output can commit world events here.
 const id = () => crypto.randomUUID();
 const MODES = new Set(['manual', 'natural', 'round-robin']);
@@ -107,14 +108,19 @@ export function createActorContext({ session, characters, actorId, persona, lore
   const candidateLore = lore.filter(entry => canKnowLore(entry, actorId, session.id));
   const castNames = (session.castIds || []).filter(cid => cid !== actorId).map(cid => characters.find(c => c.id === cid)?.name).filter(Boolean);
   const seenEvents = actorVisibleEvents(session, actorId);
-  const sceneNotes = [`Location: ${session.location || 'Unspecified'}`, `Time: ${session.worldTime || 'Unspecified'}`,
+  const director=session.director || {mode:'collaborative'};
+  const directorNotes=director.mode==='sandbox'?'Sandbox: avoid forcing planned plot turns or conveniently timed interruptions.':director.mode==='directed'?'Directed: favor established scene goals and authored beats when plausible; never force player decisions.':'Collaborative: offer plausible opportunities and balanced pacing without railroading.';
+  const sceneNotes = [`Location: ${session.location || 'Unspecified'}`,  `Time: ${session.worldTime || 'Unspecified'}`,
     session.atmosphere && `Atmosphere: ${session.atmosphere}`, castNames.length && `Other present characters: ${castNames.join(', ')}`,
+    directorNotes,
+    `Scene controls (0-1): pacing ${Number(director.pace??.5).toFixed(2)}, tension ${Number(director.tension??.5).toFixed(2)}, initiative ${Number(director.initiative??.5).toFixed(2)}, narration ${Number(director.narration??.5).toFixed(2)}. Treat as tendencies, not quotas.`,
     session.direction && `Scene direction (style and pacing, never overriding agency): ${session.direction}`,
     seenEvents.length && `Events this character actually witnessed:\n${seenEvents.map(e => `- ${e.description}`).join('\n')}`].filter(Boolean).join('\n');
   const summary = (session.castIds || []).length > 1 ? session.publicSummary : (session.summary || '');
   const assembled = buildMessages({ character: actor, persona, summary, authorNote: session.authorNote,
     emotion: session.emotionByActor?.[actorId] || session.emotion,
-    lore: candidateLore, history, sceneNotes });
+    lore: candidateLore, history, sceneNotes,
+    psychologyNotes: session.psychologyByActor?.[actorId] ? describeMind(session.psychologyByActor[actorId],actor.name) : '' });
   assembled.actorId = actorId;
   return assembled;
 }

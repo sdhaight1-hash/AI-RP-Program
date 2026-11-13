@@ -136,3 +136,16 @@
 .comfy-result .subtle-button{width:100%;font-size:11px}
 #comfy-file{width:100%;font-size:11px;margin:9px 0;color:var(--text-dim)}
 #comfy-generate{margin:12px 0 8px;width:100%}
+
+/* Appraisal-based character psychology and lightweight narrative director */
+.psychology-controls{margin:22px 0;padding:15px;border:1px solid var(--border);background:var(--composer);border-radius:12px}
+.psy-slider-label{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:11px 0;color:var(--text-dim);font-size:11px}
+.psy-slider-label span{flex:1;min-width:100px;text-transform:capitalize}
+.psy-slider-label input[type=range]{flex:2;min-width:90px;accent-color:var(--accent)}
+.psy-slider-label strong{min-width:32px;text-align:right;color:var(--accent-text);font-variant-numeric:tabular-nums}
+.psy-slider-label select{flex:2;max-width:100%;width:160px}
+.psy-meter{margin:12px 0}.psy-meter>div{display:flex;justify-content:space-between;text-transform:capitalize;font-size:11px;color:var(--text-dim)}
+.psy-meter progress{width:100%;height:11px;accent-color:var(--accent);border-radius:6px}
+.relationship-panel{padding:10px 12px;border:1px solid var(--border);background:var(--composer);border-radius:9px;margin:9px 0}
+.relationship-panel strong{font-size:12px}.relationship-panel p{font-size:11px;color:var(--muted);margin-bottom:0;line-height:1.6}
+#advance-hours{min-width:70px;width:90px}
