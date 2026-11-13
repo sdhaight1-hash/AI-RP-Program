@@ -79,3 +79,40 @@ test('server reads/writes SQLite story state, handles stale revisions and reject
     assert.equal(invalid.status, 400);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
+
+test('terminal quit and exit commands shut down the server cleanly', async (t) => {
+  const { spawn } = await import('node:child_process');
+  const { dirname, join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  for (const command of ['quit', ' ExIt ']) {
+    await t.test(command.trim(), { timeout: 8000 }, async () => {
+      const child = spawn(process.execPath, ['server.mjs'], {
+        cwd: root, env: { ...process.env, PORT: '0' }, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let output = '';
+      let errors = '';
+      try {
+        const result = await new Promise((resolve, reject) => {
+          child.stdout.setEncoding('utf8');
+          child.stderr.setEncoding('utf8');
+          child.stderr.on('data', chunk => { errors += chunk; });
+          child.stdout.on('data', chunk => {
+            output += chunk;
+            if (output.includes('Type quit or exit') && !child.stdin.destroyed) {
+              child.stdin.end(`${command}\n`);
+            }
+          });
+          child.on('error', reject);
+          child.on('close', (code, signal) => resolve({ code, signal }));
+        });
+        assert.equal(result.code, 0, `Failed to close: ${errors}`);
+        assert.equal(result.signal, null);
+        assert.match(output, /Stopping AI RP Studio\.\.\./);
+        assert.match(output, /AI RP Studio stopped\./);
+      } finally {
+        if (child.exitCode === null) child.kill();
+      }
+    });
+  }
+});
