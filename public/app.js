@@ -17,6 +17,7 @@ const activeSession = () => state.sessions.find(s => s.id === state.activeSessio
 const activeCharacter = () => state.characters.find(c => c.id === activeSession()?.characterId) || state.characters[0];
 // Keep the browser copy as an emergency backup; SQLite is the primary save.
 // Serialize writes to avoid stale-response races while the user types.
+const PENDING_BACKUP_KEY = `${STORAGE_KEY}:pending`;
 let revision = 0;
 let serverStorage = false;
 let writeInFlight = false;
@@ -28,11 +29,12 @@ const queueSave = (snapshot) => {
   if (serverStorage) writeTimer = setTimeout(flushState, 220);
 };
 const save = () => {
+  const snapshot = JSON.stringify(state);
   try {
-    const snapshot = JSON.stringify(state);
     localStorage.setItem(STORAGE_KEY, snapshot);
-    queueSave(snapshot);
-  } catch { showError('Local storage is full. Export a backup before continuing.'); }
+    localStorage.setItem(PENDING_BACKUP_KEY, JSON.stringify({ revision }));
+  } catch { showError('Browser backup unavailable; SQLite saving will still be attempted.'); }
+  queueSave(snapshot);
 };
 async function flushState() {
   clearTimeout(writeTimer);
@@ -46,6 +48,10 @@ async function flushState() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `SQLite save failed (${response.status})`);
     revision = result.revision;
+    try {
+      if (pendingSnapshot === null) localStorage.removeItem(PENDING_BACKUP_KEY);
+      else localStorage.setItem(PENDING_BACKUP_KEY, JSON.stringify({ revision }));
+    } catch { /* SQLite is authoritative once the write completes */ }
   } catch (error) {
     serverStorage = false; // Never silently overwrite an unknown server revision.
     showError(`${error.message} Browser backup remains available. Export before closing.`);
@@ -62,8 +68,31 @@ async function bootstrapStorage() {
     revision = result.revision;
     serverStorage = true;
     if (result.state) {
-      state = normalizeState(result.state);
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* emergency backup optional */ }
+      const persisted = normalizeState(result.state);
+      let unsaved = null, pendingMeta = null;
+      try {
+        pendingMeta = JSON.parse(localStorage.getItem(PENDING_BACKUP_KEY));
+        if (pendingMeta && localStorage.getItem(STORAGE_KEY)) unsaved = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY)));
+      } catch { /* Invalid browser backup cannot override SQLite */ }
+      if (unsaved && JSON.stringify(unsaved) !== JSON.stringify(persisted)) {
+        state = unsaved;
+        if (pendingMeta?.revision === revision) {
+          // Restore the last edits if the browser closed during a debounce.
+          queueSave(JSON.stringify(state));
+          await flushState();
+        } else {
+          // A different tab advanced the database: keep the local version visible
+          // for export rather than silently choosing and deleting one branch.
+          serverStorage = false;
+          showError('Unmerged browser edits and a newer SQLite story were found. Export this browser copy before reloading.');
+        }
+      } else {
+        state = persisted;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          localStorage.removeItem(PENDING_BACKUP_KEY);
+        } catch { /* SQLite is authoritative */ }
+      }
     } else {
       // One-time migration from the v0.1 browser storage when SQLite is empty.
       queueSave(JSON.stringify(state));
@@ -280,7 +309,7 @@ async function refreshModels() {
     if (models.length && !models.some(x=>x.id===state.settings.model)) {state.settings.model=models[0].id;save();}
     status.className='connection online'; label.textContent=models.length? `${models.length} local model${models.length!==1?'s':''} available`:'Connected · no loaded models';
     if (currentTab==='setup') renderInspector();
-    showError();
+    if (serverStorage) showError();
   } catch(err) { models=[]; status.className='connection offline';label.textContent='Model server offline'; if(currentTab==='setup')renderInspector(); }
 }
 function parseSSE(buffer, onFrame) {
