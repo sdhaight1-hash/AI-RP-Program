@@ -49,3 +49,27 @@ test('world HTTP metadata remains consistent with persisted scene binding',async
   const actors=await(await fetch(base+`/api/timelines/actors?timelineId=${timeline.id}`)).json();
   assert.equal(actors.actors.some(a=>a.controller==='npc'&&a.characterId===story.characters[0].id),true);
 }));
+
+test('atlas, relationships and time endpoints validate and persist structured canon',async()=>runServer(async base=>{
+  const world=await(await post(base,'/api/worlds',{name:'Harbor town'})).json();
+  const timeline=await(await post(base,'/api/timelines',{worldId:world.id,name:'Slice of life'})).json();
+  const place=await post(base,'/api/worlds/locations',{worldId:world.id,name:'The café',kind:'building'});
+  assert.equal(place.status,201);
+  const location=await place.json();
+  const a=await(await post(base,'/api/worlds/entities',{worldId:world.id,name:'Mara',kind:'character'})).json();
+  const b=await(await post(base,'/api/worlds/entities',{worldId:world.id,name:'Elise',kind:'character'})).json();
+  const rel=await post(base,'/api/worlds/relationships',{worldId:world.id,fromId:a.id,toId:b.id,kind:'friend'});
+  assert.equal(rel.status,201);
+  const clock=await post(base,'/api/timelines/clock',{timelineId:timeline.id,instant:'2002-06-02T04:00:00Z',timeZone:'America/Los_Angeles'});
+  assert.equal(clock.status,200);
+  const library=await(await fetch(base+'/api/worlds')).json();
+  assert.equal(library.locations.some(x=>x.id===location.id),true);
+  assert.equal(library.relationships.length,1);
+  assert.equal(library.clocks.find(x=>x.timelineId===timeline.id).timeZone,'America/Los_Angeles');
+  const foreign=await(await post(base,'/api/worlds',{name:'Other world'})).json();
+  const bad=await post(base,'/api/worlds/locations',{worldId:foreign.id,name:'Not here',parentId:location.id});
+  assert.equal(bad.status,400);
+  const player=await(await fetch(base+`/api/timelines/actors?timelineId=${timeline.id}`)).json();
+  const moved=await post(base,'/api/timelines/positions',{timelineId:timeline.id,actorId:player.actors[0].actorId,locationId:location.id});
+  assert.equal(moved.status,200);
+}));

@@ -12,6 +12,7 @@ try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } c
 let currentTab = 'character';
 let worldLibrary = null;
 let loadingWorlds = false;
+let selectedWorldId = null;
 let builderCharacterId = null;
 let builderTab = 'identity';
 let aiDraftTarget = null;
@@ -163,6 +164,7 @@ async function bootstrapStorage() {
   }
   render();
   refreshModels();
+  refreshWorldLibrary();
 }
 const showError = (message = '') => { $('error').textContent = message; $('error').classList.toggle('hidden', !message); };
 
@@ -259,10 +261,17 @@ function renderMessages() {
   container.scrollTop = container.scrollHeight;
 }
 
+function timelineClockLabel(session) {
+  const clock=worldLibrary?.clocks?.find(x=>x.timelineId===session?.timelineId && x.isExplicit);
+  if(!clock)return null;
+  try {return new Intl.DateTimeFormat(undefined,{timeZone:clock.timeZone,weekday:'short',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}).format(new Date(clock.instantMs));}
+  catch{return null;}
+}
 function renderHeader() {
   const s = activeSession(); const c = activeCharacter();
   $('scene-title').textContent = s?.title || 'New story';
-  $('scene-meta').textContent = s ? [(s.location||c?.scenario||'Location unspecified'),s.worldTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
+  const displayTime=timelineClockLabel(s) || s?.worldTime;
+  $('scene-meta').textContent = s ? [(s.location||c?.scenario||'Location unspecified'),displayTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
   $('stage-name').textContent = c?.name || 'Unknown';
   $('stage-avatar').replaceChildren(portraitNode(c?.name, c, 'avatar-internal'));
   const stageImage = $('stage-portrait');
@@ -290,15 +299,85 @@ async function refreshWorldLibrary() {
     const response=await fetch('/api/worlds');
     if(!response.ok)throw Error(`World Library unavailable (${response.status})`);
     worldLibrary=await response.json();
-    if(currentTab==='worlds')renderInspector();
+    if(!worldLibrary.worlds.some(w=>w.id===selectedWorldId)) {
+      const active=worldLibrary.timelines.find(t=>t.id===activeSession()?.timelineId);
+      selectedWorldId=active?.worldId || worldLibrary.worlds[0]?.id || null;
+    }
+    if(['worlds','atlas','relations'].includes(currentTab))renderInspector();
+    renderHeader();
   } catch(err) { showError(err.message); }
   finally { loadingWorlds=false; }
+}
+
+const selectedWorld = () => worldLibrary?.worlds.find(w=>w.id===selectedWorldId) || worldLibrary?.worlds[0] || null;
+function addWorldChooser(selectId) {
+  const select=$(selectId);
+  for(const world of worldLibrary?.worlds || []) select.add(new Option(world.name,world.id));
+  if(selectedWorld())select.value=selectedWorld().id;
+  select.onchange=()=>{selectedWorldId=select.value;renderInspector();};
+}
+const postWorld = async (endpoint,data)=>{
+  if(!serverStorage)throw Error('Connect the SQLite server before modifying world canon.');
+  const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  const value=await response.json();if(!response.ok)throw Error(value.error||`World service returned ${response.status}`);
+  await refreshWorldLibrary();return value;
+};
+function renderAtlasPanel(host,session) {
+  host.innerHTML=`<h2 class="panel-title">World Atlas</h2><p class="help">Build nested real-world or invented places, from regions to apartments and rooms. Places belong to their canon world. Directed travel paths and detailed maps will expand this system.</p><div class="group"><label class="field-label" for="atlas-world">Selected canon world</label><select id="atlas-world"></select></div><div id="atlas-places"></div><div class="group"><label class="field-label" for="atlas-name">New location</label><input id="atlas-name" maxlength="120" placeholder="e.g. Mara's Apartment"/><select id="atlas-kind"><option value="region">Region</option><option value="town">Town</option><option value="neighborhood">Neighborhood</option><option value="building">Building</option><option value="room">Room</option><option value="outdoor">Outdoor area</option><option value="other">Other</option></select><label class="field-label" for="atlas-parent">Inside</label><select id="atlas-parent"></select><textarea id="atlas-description" rows="3" maxlength="4000" placeholder="Description, atmosphere, daily life..."></textarea><button class="primary-button" id="atlas-create">Create place</button></div>`;
+  if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
+  addWorldChooser('atlas-world');
+  const world=selectedWorld();if(!world){$('atlas-create').disabled=true;return;}
+  const locations=worldLibrary.locations?.filter(l=>l.worldId===world.id)||[];
+  const parent=$('atlas-parent');parent.add(new Option('Top-level place',''));
+  for(const loc of locations)parent.add(new Option(loc.name,loc.id));
+  const container=$('atlas-places');
+  if(!locations.length)container.append(el('p','No locations yet. Start with a town or region.','empty-note'));
+  for(const loc of locations){
+    const card=el('div','','lore-card');const parentName=locations.find(x=>x.id===loc.parentId)?.name;
+    card.append(el('strong',loc.name),el('p',`${loc.kind}${parentName?' · inside '+parentName:''}${loc.description?' · '+loc.description:''}`,'help'));
+    const use=el('button','Use as scene location','subtle-button');use.disabled=!session;
+    use.onclick=()=>{
+      const activeTimeline=worldLibrary.timelines.find(t=>t.id===session?.timelineId);
+      if(!session||activeTimeline?.worldId!==world.id)return showError('Place the active scene in a timeline for this world first.');
+      session.location=loc.name;session.locationId=loc.id;save();renderHeader();renderInspector();showError();
+    };
+    card.append(use);container.append(card);
+  }
+  $('atlas-create').onclick=async()=>{
+    try{await postWorld('/api/worlds/locations',{worldId:world.id,name:$('atlas-name').value,kind:$('atlas-kind').value,parentId:$('atlas-parent').value||null,description:$('atlas-description').value});showError();}
+    catch(err){showError(err.message);}
+  };
+}
+function renderRelationsPanel(host) {
+  host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Characters and organizations can be linked in a directional social graph. A relationship entered here is part of authored canon; changing feelings within a playthrough will be a separate system.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="object">Object</option><option value="concept">Concept</option></select><button id="relations-add-entity" class="subtle-button">Add to world</button></div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="3" maxlength="2000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
+  if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
+  addWorldChooser('relations-world');
+  const world=selectedWorld();if(!world){$('relations-add-entity').disabled=true;$('relations-add').disabled=true;return;}
+  const entities=worldLibrary.entities?.filter(e=>e.worldId===world.id)||[];
+  const byId=new Map(entities.map(e=>[e.id,e]));
+  const list=$('relations-list');
+  for(const entity of entities){list.append(el('p',`${entity.name} · ${entity.kind}`,'help'));}
+  if(!entities.length)list.append(el('p','Add a couple of characters before connecting them.','empty-note'));
+  for(const edge of worldLibrary.relationships?.filter(r=>r.worldId===world.id)||[]){
+    const row=el('div','','lore-card');row.append(el('strong',`${byId.get(edge.fromId)?.name||'?'} → ${byId.get(edge.toId)?.name||'?'} · ${edge.kind}`));
+    if(edge.notes)row.append(el('p',edge.notes,'help'));list.append(row);
+  }
+  for(const entity of entities){$('relations-from').add(new Option(entity.name,entity.id));$('relations-to').add(new Option(entity.name,entity.id));}
+  $('relations-add-entity').onclick=async()=>{
+    try{await postWorld('/api/worlds/entities',{worldId:world.id,name:$('relations-entity-name').value,kind:$('relations-entity-kind').value});showError();}
+    catch(err){showError(err.message);}
+  };
+  $('relations-add').disabled=entities.length<2;
+  $('relations-add').onclick=async()=>{
+    try{await postWorld('/api/worlds/relationships',{worldId:world.id,fromId:$('relations-from').value,toId:$('relations-to').value,kind:$('relations-type').value,notes:$('relations-notes').value});showError();}
+    catch(err){showError(err.message);}
+  };
 }
 
 function renderInspector() {
   const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
   document.querySelectorAll('[data-tab]').forEach(btn => { btn.classList.toggle('active', btn.dataset.tab === currentTab); btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab)); });
-  if ((!s || !c) && !['library','setup','worlds'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
+  if ((!s || !c) && !['library','setup','worlds','atlas','relations'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
   if (currentTab === 'character') {
     host.innerHTML = `<h2 class="panel-title">${escapeHtml(c.name)}</h2>
       <div class="character-overview" id="character-overview"></div>
@@ -313,7 +392,7 @@ function renderInspector() {
     $('import-character').onclick = () => $('character-upload').click();
     $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } e.target.value=''; };
   } else if (currentTab === 'worlds') {
-    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Canon worlds are independent of roleplay scenes. Each playthrough has its own timeline; changing one does not rewrite another. This first release provides world containers and scene assignment. Location and relationship editors come next.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><p class="footer-note">A legacy scene is automatically placed in its own imported timeline. Moving a scene changes its timeline association, not its historical messages. Back up your stories before experimenting with new worlds.</p>`;
+    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Canon worlds are independent of roleplay scenes. Each playthrough has its own timeline; changing one does not rewrite another. This first release provides world containers and scene assignment. Location and relationship editors come next.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><p class="footer-note">A legacy scene is automatically placed in its own imported timeline. Moving a scene changes its timeline association, not its historical messages. Back up your stories before experimenting with new worlds.</p>`;
     const report = $('world-library-list');
     if (!worldLibrary) {
       report.append(el('p','Loading your local worlds...','help'));
@@ -333,13 +412,33 @@ function renderInspector() {
       report.append(card);
     }
     if(!worldLibrary.worlds.length)report.append(el('p','Create your first world to begin.','empty-note'));
+    if(selectedWorld())worldSelect.value=selectedWorld().id;
+    worldSelect.onchange=()=>{selectedWorldId=worldSelect.value;};
     if(s?.timelineId && worldLibrary.timelines.some(t=>t.id===s.timelineId)) timelineSelect.value=s.timelineId;
+    const fillClock=()=>{
+      const clock=worldLibrary.clocks?.find(c=>c.timelineId===timelineSelect.value);
+      if(!clock)return;
+      $('timeline-clock-utc').value=new Date(clock.instantMs).toISOString().slice(0,16);
+      $('timeline-clock-zone').value=clock.timeZone;
+    };
+    timelineSelect.onchange=fillClock;
+    if(timelineSelect.value)fillClock();
+    $('timeline-clock-save').disabled=!timelineSelect.value;
+    $('timeline-clock-save').onclick=async()=>{
+      try{
+        const raw=$('timeline-clock-utc').value;
+        if(!raw)throw Error('Choose a fictional UTC date and time.');
+        const instant=new Date(`${raw}:00Z`).toISOString();
+        await postWorld('/api/timelines/clock',{timelineId:timelineSelect.value,instant,timeZone:$('timeline-clock-zone').value});
+        showError();renderHeader();
+      }catch(err){showError(err.message);}
+    };
     $('world-create').onclick=async()=>{
       try{
         if(!serverStorage)throw Error('The SQLite server must be connected to create worlds.');
         const res=await fetch('/api/worlds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('world-new-name').value,description:$('world-new-description').value})});
         const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create world');
-        showError();await refreshWorldLibrary();$('world-select').value=data.id;
+        selectedWorldId=data.id;showError();await refreshWorldLibrary();$('world-select').value=data.id;
       }catch(error){showError(error.message);}
     };
     $('timeline-create').onclick=async()=>{
@@ -357,6 +456,10 @@ function renderInspector() {
       if(!worldLibrary.timelines.some(t=>t.id===value))return showError('Select a valid timeline first.');
       s.timelineId=value;save();renderInspector();showError();
     };
+  } else if (currentTab === 'atlas') {
+    renderAtlasPanel(host,s);
+  } else if (currentTab === 'relations') {
+    renderRelationsPanel(host);
   } else if (currentTab === 'cast') {
     host.innerHTML = `<h2 class="panel-title">Scene cast</h2><p class="help">Each actor has a separate prompt, personal knowledge and dialogue attribution. @Mention a character in your message to address them in Natural mode.</p><div id="cast-choices"></div><div class="group"><label class="field-label" for="speaker-mode">Speaker selection</label><select id="speaker-mode"><option value="natural">Natural · address or rotate</option><option value="round-robin">Round-robin</option><option value="manual">Manual</option></select></div><div class="group"><label class="field-label" for="cast-speaker">Next actor</label><select id="cast-speaker"></select></div><p class="help">Manual overrides allow you to pick the next actor. Existing messages retain their original speakers, even if a character is archived.</p>`;
     const choices=$('cast-choices');
@@ -480,7 +583,7 @@ function renderInspector() {
     const reasons=$('psy-reasons');for(const reason of [...e.reasons].reverse().slice(0,8))reasons.append(el('p',`${reason.primary} · ${reason.summary}`,'help'));
     $('advance-time').onclick=()=>{if(running)return;const hours=Number($('advance-hours').value);if(!Number.isFinite(hours)||hours<=0||hours>168)return showError('Choose between 0 and 168 hours.');for(const id of s.castIds)s.psychologyByActor[id]=advanceMindTime(s.psychologyByActor[id]||createMind(),hours);s.timeHoursElapsed=(s.timeHoursElapsed||0)+hours;save();renderInspector();};
   } else if (currentTab === 'context') {
-    const actor=sceneActor(s); if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore a cast member or add an active character in Cast.</p>';return;} const prompt=createActorContext({session:s,characters:state.characters,actorId:actor.id,persona:state.persona,lore:state.lore,buildMessages});
+    const actor=sceneActor(s); if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore a cast member or add an active character in Cast.</p>';return;} const prompt=createActorContext({session:{...s,worldTime:timelineClockLabel(s)||s.worldTime},characters:state.characters,actorId:actor.id,persona:state.persona,lore:state.lore,buildMessages});
     const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n');
     const charCount=prompt.messages.reduce((n,m)=>n+m.content.length,0);
     host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">This is the actual normal-reply prompt assembled for the local model. Continue adds an extra instruction. Sizes are rough character-based estimates, not tokenizer counts.</p>
@@ -746,7 +849,7 @@ async function generate(mode = 'normal') {
     }
     const hits=new Set(retrieved.map(x=>x.id));
     const scopedLore=[...retrieved.map(x=>({...x,alwaysActive:true})),...state.lore.filter(x=>!hits.has(x.id))];
-    const prompt=createActorContext({session:{...session,messages:history},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages});
+    const prompt=createActorContext({session:{...session,messages:history,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages});
     if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
     $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
     const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});

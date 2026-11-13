@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v0.5.0 (world foundation).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v0.6.0 (world atlas and social graph foundations).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -44,6 +44,16 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
 
+## v0.6: World Atlas, relationships, and fictional clock (second foundation milestone)
+
+- **Atlas**: Build an authored world hierarchy of regions, towns, neighborhoods, buildings and rooms. A location can be nested under a parent from the same world. The backend also supports typed connections with travel minutes; travel/pathfinding simulation is not yet implemented.
+- **Relations**: Create world entities (characters, organizations, factions, objects, concepts) and **directed** relationships with notes. Connections remain world-scoped. These are canon-world relationships, not the timeline-specific emotional/relationship model yet; automatic NPC appraisal is a later milestone.
+- **Fictional time**: Independently set a timeline's ISO 8601 instant and IANA time zone from the Worlds tab. The active world's date/time appears dynamically in the scene header and context. **Legacy free-text scene dates remain unchanged until you explicitly set the timeline clock**; new clocks start in an unconfirmed state.
+- **Actor locations**: SQLite supports independent per-timeline actor location positions, rejects cross-world locations, and verifies that actors belong to the timeline. UI management of every character's position is a subsequent feature.
+- **Database upgrade**: Adds SQLite tables for locations, connections, entities, directed relationships, timeline clocks, and positions. An existing database gets a one-time backup at `.data/studio.sqlite.before-world-v2.bak` before this migration.
+- **HTTP and test coverage**: Local endpoints for adding locations, connecting places, creating entities/relationships, setting timeline clocks and actor positions. Existing 41 tests plus five new geography and world-API scenarios pass (46 tests total). UI was verified in an offline browser harness, not a live GGUF run.
+- **Not yet implemented**: An interactive visual graph editor, nested map drawing, per-channel phone/text/in-person perception, NPC schedules, transactional story-event commits, or real-time clock ticking. These remain separately testable milestones in `docs/architecture-character-fidelity-world-harness.md`.
+
 ## v0.5: Canon World Library and timeline migration (first foundation milestone)
 
 - The **Worlds** tab now creates reusable canon-world containers and separately named playthrough timelines. Assign an existing scene to a timeline in the same panel. World data and actor controllers live in normalized SQLite tables; existing chat and model behavior stays unchanged.
@@ -51,7 +61,7 @@ Select the model in **Setup**. The model must be loaded in the inference applica
 - A one-time backup is written to `.data/studio.sqlite.before-world-v1.bak` before opening an existing database with the new schema. `schema_migrations` tracks schema v1; startup and repeated migration preserve existing timeline IDs.
 - Player actors and NPC actors have distinct controller identities. The new authority validator rejects role impersonation in structured operations; a future proposal/commit pipeline will enforce this on all world-mutating AI actions.
 - New API endpoints: `GET/POST /api/worlds`, `POST /api/timelines`, and `GET /api/timelines/actors?timelineId=...`. Returned world records never include model-generated changes unless you explicitly created/assigned them.
-- **Not yet implemented:** full world editor, world-scoped characters/lore, locations, clock, relationship graph, autonomous NPC lives, communication channels, canon revision publishing, or server-side event commit transactions. Those remain separate milestones in `docs/architecture-character-fidelity-world-harness.md`.
+- **Not yet implemented at v0.5:** complete world editor, world-scoped characters/lore, locations, clock, relationship graph, autonomous NPC lives, communication channels, canon revision publishing, or server-side event commit transactions. Those remain separate milestones in `docs/architecture-character-fidelity-world-harness.md`.
 - This milestone retains the original JSON snapshot chat state for backward compatibility; newly introduced world/timeline identity is stored in SQLite tables and referenced from sessions.
 
 ## v0.4: Multi-character worlds and harness groundwork
@@ -105,7 +115,7 @@ Includes prompt/backup tests, character import, multi-cast privacy and turn sele
 - SQLite state is currently a single atomic JSON snapshot plus a real FTS5 lore index, not a normalized world/entity/event schema. Split out durable indexed records when simulation needs them.
 - Add tokenizer-accurate prompt budgeting, explicit source tracing, controlled summary generation, and evidence-linked auto-memory proposals.
 - Extend the manual emotion simulation into character-specific appraisal driven by verified events, bounded traits, individual beliefs, and separate relationships. Do **not** infer player intent through keyword sentiment.
-- Implement deterministic world time, typed location/relationship tables, multi-NPC offscreen goals, verified event proposals and acceptance.
+- Build on the new authored world clock and location/relationship tables with multi-NPC offscreen goals, scene perception and verified event proposal/commit operations.
 - Add full Tavern Card V2 and lorebook import/export compatibility, with validation. Add optional local embeddings and sqlite-vec after scoping tests and memory quality evaluation.
 - Improve scene presentation with optional character artwork and 3D world viewer only when it serves the roleplay.
 - Avoid coupling the application to any one model family, prompt format, or inference backend.

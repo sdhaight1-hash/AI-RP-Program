@@ -15,6 +15,8 @@ export class StudioStore {
       // Keep one pre-upgrade backup of the original single-document database.
       if (existsSync(filename) && !existsSync(`${filename}.before-world-v1.bak`))
         copyFileSync(filename, `${filename}.before-world-v1.bak`);
+      if (existsSync(filename) && !existsSync(`${filename}.before-world-v2.bak`))
+        copyFileSync(filename, `${filename}.before-world-v2.bak`);
     }
     this.db = new DatabaseSync(filename);
     this.db.exec(`CREATE TABLE IF NOT EXISTS studio_state (
