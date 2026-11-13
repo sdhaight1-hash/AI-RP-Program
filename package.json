@@ -1,6 +1,6 @@
 {
   "name": "ai-rp-program",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "Local-first character and storytelling app for KoboldCpp and LM Studio",
@@ -8,5 +8,7 @@
     "start": "node server.mjs",
     "test": "node --test"
   },
-  "engines": { "node": ">=22.13" }
+  "engines": {
+    "node": ">=22.13"
+  }
 }
