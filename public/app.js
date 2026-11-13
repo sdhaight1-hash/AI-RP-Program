@@ -204,7 +204,9 @@ function renderLists() {
     button.append(badge, info);
     button.title = `Start a scene with ${c.name}`;
     button.addEventListener('click', () => { if (running) return; startSession(c); });
-    const row = el('div','','character-row'); row.append(button, edit);
+    const archive=el('button','×','character-edit'); archive.type='button'; archive.title=`Move ${c.name} to Trash`;
+    archive.onclick=()=>{if(running || !confirm(`Move ${c.name} to Trash? Existing dialogue will remain attributed. Restore the character from Library.`))return;archiveCharacter(state,c.id);save();render();};
+    const row = el('div','','character-row'); row.append(button, edit, archive);
     list.append(row);
   }
 }
