@@ -16,12 +16,38 @@
       <div class="rail-bottom"><div id="connection" class="connection"><i></i><span>Checking model server…</span></div><div class="rail-hint">Private, local sessions · export your backups</div></div>
     </aside>
     <main class="conversation">
-      <div class="conversation-head"><div><div class="eyebrow">CURRENT SCENE</div><h1 id="scene-title">The Harbor Bookshop</h1><div id="scene-meta" class="muted"></div></div><div class="head-actions"><button id="reading-toggle" class="subtle-button" aria-pressed="false" title="Switch between Character Chat and Story Reading views">◫ Story view</button><button id="open-inspector" class="subtle-button">Scene notes</button><button id="export-data" class="subtle-button">Export backup</button><button id="import-data" class="subtle-button">Import backup</button><input id="import-data-file" type="file" accept="application/json,.json" hidden /></div></div>
+      <div class="conversation-head"><div><div class="eyebrow">CURRENT SCENE</div><h1 id="scene-title">The Harbor Bookshop</h1><div id="scene-meta" class="muted"></div></div><div class="head-actions"><button id="reading-toggle" class="subtle-button" aria-pressed="false" title="Switch between Character Chat and Story Reading views">◫ Story view</button><button id="open-inspector" class="subtle-button">Scene notes</button><label class="head-theme" for="quick-theme">Theme <select id="quick-theme" aria-label="Interface color scheme"></select></label><button id="open-builder" class="subtle-button">✦ Character studio</button><button id="export-data" class="subtle-button">Export backup</button><button id="import-data" class="subtle-button">Import backup</button><input id="import-data-file" type="file" accept="application/json,.json" hidden /></div></div>
       <div id="messages" class="messages" aria-live="polite"></div>
       <div class="composer-area"><div id="lore-active" class="lore-active"></div><div class="composer"><textarea id="message-input" rows="3" placeholder="Your character's dialogue or actions… (Enter to send, Shift+Enter for newline)"></textarea><div class="composer-footer"><div class="muted">You control your character. The world responds.</div><div class="composer-actions"><button id="continue" class="subtle-button" title="Continue the scene without a new player action">✧ Continue</button><button id="regenerate" class="subtle-button" title="Generate another character reply without losing the existing one">↺ Retry</button><button id="stop" class="subtle-button hidden">Stop</button><button id="send" class="primary-button">Send ↗</button></div></div></div><div id="error" role="alert" class="error hidden"></div></div>
     </main>
-    <aside class="inspector" id="inspector"><div class="stage"><canvas id="scene-canvas" aria-label="Animated WebGL atmosphere preview"></canvas><div class="stage-label">WEBGL · ATMOSPHERE PREVIEW</div><div class="stage-caption"><div class="stage-avatar" id="stage-avatar">M</div><div><strong id="stage-name">Mara Vale</strong><small>ACTIVE CHARACTER</small></div></div></div><div class="tabs" role="tablist"><button data-tab="character" class="active" role="tab">Character</button><button data-tab="lore" role="tab">Lore</button><button data-tab="memory" role="tab">Story</button><button data-tab="emotion" role="tab">Emotion</button><button data-tab="context" role="tab">Context</button><button data-tab="setup" role="tab">Setup</button></div><div id="inspector-content" class="inspector-body"></div></aside>
+    <aside class="inspector" id="inspector"><div class="stage"><canvas id="scene-canvas" aria-label="Animated WebGL atmosphere preview"></canvas><img id="stage-portrait" class="stage-portrait hidden" alt="" /><div class="stage-label">WEBGL · ATMOSPHERE PREVIEW</div><div class="stage-caption"><div class="stage-avatar" id="stage-avatar">M</div><div><strong id="stage-name">Mara Vale</strong><small>ACTIVE CHARACTER</small></div></div></div><div class="tabs" role="tablist"><button data-tab="character" class="active" role="tab">Character</button><button data-tab="cast" role="tab">Cast</button><button data-tab="scene" role="tab">Scene</button><button data-tab="lore" role="tab">Lore</button><button data-tab="memory" role="tab">Story</button><button data-tab="emotion" role="tab">Emotion</button><button data-tab="context" role="tab">Context</button><button data-tab="gallery" role="tab">Visuals</button><button data-tab="library" role="tab">Library</button><button data-tab="setup" role="tab">Setup</button></div><div id="inspector-content" class="inspector-body"></div></aside>
   </div>
+  <dialog id="character-builder" class="builder-dialog" aria-labelledby="builder-title">
+    <div class="builder-top"><div><div class="eyebrow">CHARACTER ATELIER</div><h2 id="builder-title">Shape a living character</h2><p>Build a person, not just a prompt. Every change is saved to your local story.</p></div><button id="builder-close" class="subtle-button" aria-label="Close character builder">✕ Close</button></div>
+    <div class="builder-grid">
+      <aside class="builder-sidebar">
+        <div id="builder-portrait" class="builder-portrait" aria-label="Character portrait preview"></div>
+        <div class="portrait-actions"><button class="subtle-button" id="portrait-upload-button">Upload portrait</button><button class="subtle-button" id="portrait-remove-button">Remove</button><input type="file" id="portrait-upload-file" accept="image/*" hidden /></div>
+        <p class="builder-note">Your image stays on this computer. Portraits are stored separately from story text.</p>
+        <div class="builder-nav" role="tablist" aria-label="Character builder sections">
+          <button data-builder-tab="identity" class="active">01 · Identity</button>
+          <button data-builder-tab="mind">02 · Inner life</button>
+          <button data-builder-tab="voice">03 · Voice</button>
+          <button data-builder-tab="scene">04 · First encounter</button>
+        </div>
+      </aside>
+      <section class="builder-editor"><div id="builder-fields"></div></section>
+      <aside class="builder-assist">
+        <div class="eyebrow">CREATIVE PARTNER</div><h3>AI assistance</h3>
+        <p class="builder-note">Optional suggestions from your loaded local model. Nothing is applied without your approval.</p>
+        <label class="field-label" for="builder-ai-target">What to draft</label><select id="builder-ai-target"></select>
+        <label class="field-label" for="builder-ai-guidance">Creative direction</label><textarea id="builder-ai-guidance" rows="4" maxlength="1400" placeholder="For example: a guarded historian with a sharp sense of humor, keeping a dangerous secret…"></textarea>
+        <div class="inline-actions"><button id="builder-ai-generate" class="primary-button">✦ Suggest draft</button><button id="builder-ai-stop" class="subtle-button hidden">Stop</button></div>
+        <p id="builder-ai-status" class="builder-note" role="status"></p>
+        <div id="builder-ai-preview" class="hidden"><label class="field-label" for="builder-ai-result">Review and edit before applying</label><textarea id="builder-ai-result" rows="12" spellcheck="false"></textarea><button id="builder-ai-apply" class="primary-button">Apply reviewed draft</button></div>
+      </aside>
+    </div>
+  </dialog>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

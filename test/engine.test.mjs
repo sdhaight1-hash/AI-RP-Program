@@ -99,3 +99,49 @@ test('emotion survives migration and appears in the actor prompt with its limits
   assert.match(prompt.messages[0].content, /Simulated character emotion/);
   assert.match(prompt.messages[0].content, /not proof of the player's intent/);
 });
+
+import { THEMES, parseCharacterDraft, PORTRAIT_PATH } from '../engine.mjs';
+
+test('theme preferences migrate safely with ten named palettes and a customizable accent', () => {
+  assert.equal(THEMES.length, 10);
+  const state = makeInitialState();
+  assert.equal(state.settings.theme, 'nocturne');
+  state.settings.theme = 'forest';
+  state.settings.customAccent = '#Aa2299';
+  const result = normalizeState(state);
+  assert.equal(result.settings.theme, 'forest');
+  assert.equal(result.settings.customAccent, '#Aa2299');
+  state.settings.theme = '<script>'; state.settings.customAccent = 'url(javascript:evil)';
+  const invalid = normalizeState(state);
+  assert.equal(invalid.settings.theme,'nocturne');
+  assert.equal(invalid.settings.customAccent, '');
+});
+
+test('character builder fields persist through JSON migration and affect actor identity', () => {
+  const state = makeInitialState(); const c = state.characters[0];
+  Object.assign(c, { tagline:'The vanished cartographer', motivations:'Recover a hidden chart', fears:'Being forgotten',
+    boundaries:'Will never betray a friend', speechStyle:'Slow clipped sentences', exampleDialogue:'"Leave the map."',
+    tags:['Mystery','Noir'], alternateGreetings:['Come inside.', 'It is late.'],
+    portrait:'/portraits/9ad7faaf-3264-4232-88c3-927865ec430c.webp', });
+  const cloned = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(cloned.characters[0].tags,['Mystery','Noir']);
+  assert.deepEqual(cloned.characters[0].alternateGreetings,['Come inside.','It is late.']);
+  assert.equal(cloned.characters[0].portrait,c.portrait);
+  const prompt = buildMessages({character:cloned.characters[0], persona:cloned.persona});
+  assert.match(prompt.messages[0].content,/hidden chart/);
+  assert.match(prompt.messages[0].content,/Slow clipped sentences/);
+  assert.match(prompt.messages[0].content,/Will never betray/);
+  assert.doesNotMatch(prompt.messages[0].content,/9ad7faaf/);
+  c.portrait = 'https://example.com/tracking.jpg';
+  assert.equal(normalizeState(state).characters[0].portrait,'');
+  assert.ok(PORTRAIT_PATH.test('/portraits/9ad7faaf-3264-4232-88c3-927865ec430c.webp'));
+});
+
+test('AI profile suggestion is strictly an inert, reviewed patch', () => {
+  const value = parseCharacterDraft('```json\n{"name":"Eve","personality":"Reserved","tags":["Magic",3],"portrait":"https://unsafe","id":"override"}\n```');
+  assert.deepEqual(value,{name:'Eve',personality:'Reserved',tags:['Magic']});
+  assert.throws(()=>parseCharacterDraft('Keep writing...'),/valid character JSON/);
+  assert.throws(()=>parseCharacterDraft('{"id":"unsafe"}'),/recognized character fields/);
+  const baseline = makeInitialState().characters[0];
+  assert.equal(baseline.name,'Mara Vale'); // parsing did not mutate anything
+});

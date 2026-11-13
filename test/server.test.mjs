@@ -116,3 +116,86 @@ test('terminal quit and exit commands shut down the server cleanly', async (t) =
     });
   }
 });
+
+test('portrait upload stores local validated bytes and serves only whitelisted image paths', async () => {
+  const { StudioStore } = await import('../storage.mjs');
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(),'ai-rp-portrait-'));
+  const server = createApp({ store: new StudioStore(':memory:'), portraitDir:join(root,'portraits'), fetchImpl: async()=>{throw new Error('not used');} });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const invalidType = await fetch(`${base}/api/portraits`, {method:'POST',headers:{'Content-Type':'image/png'},body:new Uint8Array([1,2,3])});
+    assert.equal(invalidType.status,415);
+    const invalidMagic = await fetch(`${base}/api/portraits`, {method:'POST',headers:{'Content-Type':'image/jpeg'},body:new Uint8Array([1,2,3,4])});
+    assert.equal(invalidMagic.status,400);
+    const jpeg = Uint8Array.from([0xff,0xd8,0xff,0xe0,12,8,8,8,0xff,0xd9]);
+    const uploaded = await fetch(`${base}/api/portraits`, {method:'POST',headers:{'Content-Type':'image/jpeg'},body:jpeg});
+    assert.equal(uploaded.status,201);
+    const body = await uploaded.json();
+    assert.match(body.path,/^\/portraits\/[0-9a-f-]{36}\.jpg$/);
+    const loaded = await fetch(base+body.path);
+    assert.equal(loaded.status,200);
+    assert.equal(loaded.headers.get('content-type'),'image/jpeg');
+    assert.deepEqual(new Uint8Array(await loaded.arrayBuffer()),jpeg);
+    const missing = await fetch(`${base}/portraits/11111111-2222-3333-4444-555555555555.jpg`);
+    assert.equal(missing.status,404);
+    const large = await fetch(`${base}/api/portraits`,{method:'POST',headers:{'Content-Type':'image/jpeg'},body:Buffer.alloc(1_500_100,0xff)});
+    assert.equal(large.status,400);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(root,{recursive:true,force:true});
+  }
+});
+
+test('harness exposes scoped FTS and optional Comfy workflow jobs without remote URLs', async () => {
+  const { StudioStore } = await import('../storage.mjs');
+  const { makeInitialState, createCharacter } = await import('../engine.mjs');
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const dir=await mkdtemp(join(tmpdir(),'rp-api-'));
+  const job='cd1363ba-0c80-4ea4-b490-3b71ef24dd2b';
+  const store=new StudioStore(':memory:');
+  const state=makeInitialState(), mara=state.characters[0], guest=createCharacter('Guest');
+  state.characters.push(guest);state.sessions[0].castIds=[mara.id,guest.id];
+  state.lore=[{id:'shared',title:'Harbor',content:'A foghorn sounds near the harbor.',keywords:['foghorn'],visibility:'public'},
+    {id:'secret',title:'Harbor',content:'The hidden smuggler tunnel is below the harbor.',keywords:['foghorn'],visibility:'private',knownBy:[mara.id]}];
+  store.save(state,0);
+  const comfyFetch=async (url,opts={})=>{
+    if(url.endsWith('/system_stats'))return Response.json({devices:[{name:'RTX'}]});
+    if(url.endsWith('/prompt'))return Response.json({prompt_id:job});
+    if(url.endsWith('/history/'+job))return Response.json({[job]:{outputs:{'4':{images:[{type:'output',filename:'Scene_0001.png',subfolder:''}]}}}});
+    if(url.includes('/view?'))return new Response(new Uint8Array([137,80,78,71]),{headers:{'Content-Type':'image/png'}});
+    throw new Error('unexpected ComfyUI route '+url);
+  };
+  const server=createApp({store,comfyFetchImpl:comfyFetch,comfyTemplateDir:dir,fetchImpl:async()=>{throw new Error('Should not infer here')}});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  try{
+    const query=async (actorId)=>{
+      const response=await fetch(base+'/api/search/lore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'harbor',actorId,sessionId:state.sessions[0].id})});
+      return response.json();
+    };
+    assert.deepEqual((await query(guest.id)).entries.map(e=>e.id),['shared']);
+    assert.deepEqual(new Set((await query(mara.id)).entries.map(e=>e.id)),new Set(['shared','secret']));
+    const bad=await fetch(base+'/api/search/lore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'harbor',actorId:'not-in-scene',sessionId:state.sessions[0].id})});
+    assert.equal(bad.status,400);
+    const template={ '1':{class_type:'CLIPTextEncode',inputs:{text:'__RP_PROMPT__'}}};
+    const imported=await fetch(base+'/api/comfy/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'portrait',workflow:template})});
+    assert.equal(imported.status,201);
+    const templates=(await (await fetch(base+'/api/comfy/templates')).json()).templates;
+    assert.deepEqual(templates,[{id:'portrait'}]);
+    const jobResponse=await fetch(base+'/api/comfy/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({templateId:'portrait',prompt:'rainy bookshop'})});
+    assert.equal(jobResponse.status,202);
+    assert.equal((await jobResponse.json()).jobId,job);
+    const hist=(await (await fetch(base+'/api/comfy/history?job='+job)).json());
+    assert.equal(hist.images[0].filename,'Scene_0001.png');
+    const image=await fetch(base+'/api/comfy/image?'+new URLSearchParams({job,filename:'Scene_0001.png'}));
+    assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),'image/png');
+  }finally{
+    await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});
+  }
+});

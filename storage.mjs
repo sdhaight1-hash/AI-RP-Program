@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { normalizeState } from './engine.mjs';
+import { canKnowLore } from './harness.mjs';
 
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite')) {
@@ -14,7 +15,10 @@ export class StudioStore {
       revision INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       document TEXT NOT NULL
-    )`);
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS lore_fts USING fts5(id UNINDEXED, title, body, keywords, tokenize='unicode61')`);
+    // Existing SQLite snapshots from earlier versions acquire a search index on first load.
+    this.rebuildLoreIndex(this.load().state?.lore || []);
   }
 
   load() {
@@ -23,20 +27,48 @@ export class StudioStore {
       { revision: 0, updatedAt: null, state: null };
   }
 
+  rebuildLoreIndex(entries) {
+    this.db.prepare('DELETE FROM lore_fts').run();
+    const insert = this.db.prepare('INSERT INTO lore_fts (id,title,body,keywords) VALUES (?,?,?,?)');
+    for (const item of entries) {
+      insert.run(item.id, String(item.title || '').slice(0, 500), String(item.content || '').slice(0, 12000),
+        (item.keywords || []).join(' ').slice(0, 1000));
+    }
+  }
+
+  searchLore(query, { actorId, sessionId = null, limit = 6 } = {}) {
+    if (typeof actorId !== 'string' || !actorId) throw new TypeError('An acting character is required');
+    const tokens = String(query || '').match(/[\p{L}\p{N}]+/gu)?.slice(0, 8) || [];
+    if (!tokens.length) return [];
+    const expression = tokens.map(x => `"${x.replaceAll('"','')}"`).join(' OR ');
+    // Retrieval uses FTS candidates; access-control is checked against canonical lore.
+    const candidates = this.db.prepare('SELECT id, bm25(lore_fts) AS rank FROM lore_fts WHERE lore_fts MATCH ? ORDER BY rank LIMIT 100').all(expression);
+    const { state } = this.load();
+    const source = new Map((state?.lore || []).map(x => [x.id,x]));
+    return candidates.map(hit => source.get(hit.id))
+      .filter(entry => entry && canKnowLore(entry, actorId, sessionId))
+      .slice(0, Math.min(20,Math.max(1,Math.round(limit))));
+  }
+
   save(state, expectedRevision) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new TypeError('Invalid revision');
     const validated = normalizeState(state);
     const payload = JSON.stringify(validated);
     if (Buffer.byteLength(payload, 'utf8') > 4_000_000) throw new RangeError('Story data exceeds the 4 MB save limit; export and archive older stories.');
     const updatedAt = Date.now();
-    if (expectedRevision === 0) {
-      const result = this.db.prepare('INSERT OR IGNORE INTO studio_state (id, revision, updated_at, document) VALUES (1, 1, ?, ?)').run(updatedAt, payload);
-      if (result.changes) return { revision: 1, updatedAt };
-    } else {
-      const result = this.db.prepare('UPDATE studio_state SET revision = revision + 1, updated_at = ?, document = ? WHERE id = 1 AND revision = ?').run(updatedAt, payload, expectedRevision);
-      if (result.changes) return { revision: expectedRevision + 1, updatedAt };
-    }
-    return null; // Concurrent tab or stale revision. Never overwrite newer data.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      let result;
+      if (expectedRevision === 0) {
+        result = this.db.prepare('INSERT OR IGNORE INTO studio_state (id, revision, updated_at, document) VALUES (1, 1, ?, ?)').run(updatedAt, payload);
+      } else {
+        result = this.db.prepare('UPDATE studio_state SET revision = revision + 1, updated_at = ?, document = ? WHERE id = 1 AND revision = ?').run(updatedAt, payload, expectedRevision);
+      }
+      if (!result.changes) { this.db.exec('ROLLBACK'); return null; }
+      this.rebuildLoreIndex(validated.lore);
+      this.db.exec('COMMIT');
+      return { revision: expectedRevision + 1, updatedAt };
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
 
   close() { this.db.close(); }
