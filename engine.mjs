@@ -15,7 +15,7 @@ export const THEMES = Object.freeze([
   { id: 'parchment', name: 'Parchment', accent: '#795b9f' },
 ]);
 export const DEFAULT_SETTINGS = Object.freeze({ model: '', temperature: 0.95, max_tokens: 450, readingMode: false, theme: 'nocturne', customAccent: '' });
-export const CHARACTER_FIELDS = Object.freeze(['name','tagline','description','personality','backstory','motivations','fears','boundaries','speechStyle','scenario','greeting','exampleDialogue']);
+export const CHARACTER_FIELDS = Object.freeze(['name','handle','tagline','description','personality','backstory','motivations','fears','boundaries','speechStyle','scenario','greeting','exampleDialogue']);
 export const PORTRAIT_PATH = /^\/portraits\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:webp|jpg)$/i;
 
 export const DEFAULT_EMOTION = Object.freeze({ valence: 0, arousal: 0.25, trust: 0 });
@@ -66,7 +66,7 @@ export function describeEmotion(value) {
 
 export function createCharacter(name = 'New character') {
   return {
-    id: crypto.randomUUID(), name, tagline: '', description: '', personality: '', backstory: '',
+    id: crypto.randomUUID(), name, handle: '', tagline: '', description: '', personality: '', backstory: '',
     motivations: '', fears: '', boundaries: '', speechStyle: '', exampleDialogue: '',
     tags: [], alternateGreetings: [], portrait: '',disposition:{...DEFAULT_DISPOSITION},
     scenario: '', greeting: '', color: '#a68dd6',
@@ -78,7 +78,7 @@ export function createSession(character) {
     id: crypto.randomUUID(), characterId: character.id, title: `With ${character.name}`,
     messages: character.greeting ? [{ id: crypto.randomUUID(), role: 'assistant', content: character.greeting }] : [],
     summary: '', publicSummary: '', authorNote: '', emotion: { ...DEFAULT_EMOTION }, emotionByActor: {}, emotionEvents: [],
-    castIds: [character.id], speakerId: character.id, speakerMode: 'natural', location: '', worldTime: '', atmosphere: '', direction: '', sceneEvents: [],
+    castIds: [character.id], speakerId: character.id, speakerMode: 'natural', channelId: 'in_person', location: '', worldTime: '', atmosphere: '', direction: '', sceneEvents: [],
     psychologyByActor:{[character.id]:createMind()},director:{mode:'collaborative',pace:.5,tension:.5,initiative:.5,narration:.5},timeHoursElapsed:0, updatedAt: Date.now(),
   };
 }
@@ -123,6 +123,8 @@ export function normalizeState(value) {
       messages: s.messages.filter(m => ['user', 'assistant'].includes(m?.role) && typeof m?.content === 'string')
         .map(m => ({ ...m, id: typeof m.id === 'string' ? m.id : crypto.randomUUID(),
           pinned: Boolean(m.pinned),
+          channelId: ['in_person','phone_call','text_message'].includes(m.channelId) ? m.channelId : 'in_person',
+          sentAt: Number.isFinite(m.sentAt) ? m.sentAt : undefined,
           speakerId: m.role === 'assistant' ? (typeof m.speakerId === 'string' ? m.speakerId : s.characterId) : undefined,
           witnessIds: Array.isArray(m.witnessIds) ? [...new Set(m.witnessIds.filter(id => typeof id === 'string'))] : [s.characterId],
           variants: m.role === 'assistant' && Array.isArray(m.variants)
@@ -152,15 +154,15 @@ export function getActiveLore(entries, messages, maxEntries = 4, options = {}) {
     .slice(0, maxEntries);
 }
 
-export function buildMessages({ character, persona, summary = '', authorNote = '', emotion, lore = [], history = [], sceneNotes = '', psychologyNotes = '' }) {
+export function buildMessages({ character, persona, summary = '', authorNote = '', emotion, lore = [], history = [], sceneNotes = '', psychologyNotes = '', styleInstruction = '' }) {
   if (!character) throw new Error('Select a character first');
   const selectedLore = getActiveLore(lore, history);
   const part = (label, text, cap = 1600) => `${label}:\n${String(text || 'Not specified').slice(0, cap)}`;
   const system = [
     'You are portraying one fictional character in an ongoing literary roleplay. You are not an assistant.',
-    'Remain in character. Write dialogue and grounded action in natural prose. React to the player without controlling their actions, thoughts, speech, or feelings.',
+    styleInstruction || 'Remain in character. Write dialogue and grounded action in natural prose. React to the player without controlling their actions, thoughts, speech, or feelings.',
     'Respect established events and character knowledge. The character is not omniscient. No meta commentary, explanations of instructions, or forced plot resolutions.',
-    'Avoid repetitive phrases. Match the pacing and length of the player, normally 1-4 paragraphs. Leave room for the player to respond.',
+    styleInstruction ? 'Follow the active interaction channel. Avoid formulaic replies; make each message sound like this particular person. Never write player-character dialogue or actions.' : 'Avoid repetitive phrases. Match the pacing and length of the player, normally 1-4 paragraphs. Leave room for the player to respond.',
     part('Character name', character.name, 120),
     character.tagline ? part('Character tagline', character.tagline, 180) : '',
     part('Appearance and identity', character.description),
