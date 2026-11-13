@@ -1,4 +1,4 @@
-import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, buildMessages, getActiveLore, importCharacter } from '/engine.mjs';
+import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, buildMessages, getActiveLore, importCharacter, EMOTION_BEATS, DEFAULT_EMOTION, applyEmotionBeat, settleEmotion, describeEmotion } from '/engine.mjs';
 import { initAtmosphere } from '/scene.js';
 
 const $ = (id) => document.getElementById(id);
@@ -15,7 +15,95 @@ let backend = 'the local model server';
 const atmosphere = initAtmosphere($('scene-canvas'));
 const activeSession = () => state.sessions.find(s => s.id === state.activeSessionId) || null;
 const activeCharacter = () => state.characters.find(c => c.id === activeSession()?.characterId) || state.characters[0];
-const save = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { showError('Browser storage is full. Export a backup before continuing.'); } };
+// Keep the browser copy as an emergency backup; SQLite is the primary save.
+// Serialize writes to avoid stale-response races while the user types.
+const PENDING_BACKUP_KEY = `${STORAGE_KEY}:pending`;
+let revision = 0;
+let serverStorage = false;
+let writeInFlight = false;
+let pendingSnapshot = null;
+let writeTimer = null;
+const queueSave = (snapshot) => {
+  pendingSnapshot = snapshot;
+  clearTimeout(writeTimer);
+  if (serverStorage) writeTimer = setTimeout(flushState, 220);
+};
+const save = () => {
+  const snapshot = JSON.stringify(state);
+  try {
+    localStorage.setItem(STORAGE_KEY, snapshot);
+    localStorage.setItem(PENDING_BACKUP_KEY, JSON.stringify({ revision }));
+  } catch { showError('Browser backup unavailable; SQLite saving will still be attempted.'); }
+  queueSave(snapshot);
+};
+async function flushState() {
+  clearTimeout(writeTimer);
+  if (!serverStorage || writeInFlight || pendingSnapshot === null) return;
+  writeInFlight = true;
+  const snapshot = pendingSnapshot;
+  pendingSnapshot = null;
+  try {
+    const response = await fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision, state: JSON.parse(snapshot) }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `SQLite save failed (${response.status})`);
+    revision = result.revision;
+    try {
+      if (pendingSnapshot === null) localStorage.removeItem(PENDING_BACKUP_KEY);
+      else localStorage.setItem(PENDING_BACKUP_KEY, JSON.stringify({ revision }));
+    } catch { /* SQLite is authoritative once the write completes */ }
+  } catch (error) {
+    serverStorage = false; // Never silently overwrite an unknown server revision.
+    showError(`${error.message} Browser backup remains available. Export before closing.`);
+  } finally {
+    writeInFlight = false;
+    if (pendingSnapshot !== null && serverStorage) writeTimer = setTimeout(flushState, 120);
+  }
+}
+async function bootstrapStorage() {
+  try {
+    const response = await fetch('/api/state');
+    if (!response.ok) throw new Error(`Story database returned ${response.status}`);
+    const result = await response.json();
+    revision = result.revision;
+    serverStorage = true;
+    if (result.state) {
+      const persisted = normalizeState(result.state);
+      let unsaved = null, pendingMeta = null;
+      try {
+        pendingMeta = JSON.parse(localStorage.getItem(PENDING_BACKUP_KEY));
+        if (pendingMeta && localStorage.getItem(STORAGE_KEY)) unsaved = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY)));
+      } catch { /* Invalid browser backup cannot override SQLite */ }
+      if (unsaved && JSON.stringify(unsaved) !== JSON.stringify(persisted)) {
+        state = unsaved;
+        if (pendingMeta?.revision === revision) {
+          // Restore the last edits if the browser closed during a debounce.
+          queueSave(JSON.stringify(state));
+          await flushState();
+        } else {
+          // A different tab advanced the database: keep the local version visible
+          // for export rather than silently choosing and deleting one branch.
+          serverStorage = false;
+          showError('Unmerged browser edits and a newer SQLite story were found. Export this browser copy before reloading.');
+        }
+      } else {
+        state = persisted;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          localStorage.removeItem(PENDING_BACKUP_KEY);
+        } catch { /* SQLite is authoritative */ }
+      }
+    } else {
+      // One-time migration from the v0.1 browser storage when SQLite is empty.
+      queueSave(JSON.stringify(state));
+      await flushState();
+    }
+  } catch (error) {
+    showError(`SQLite unavailable (${error.message}). Working from browser backup only.`);
+  }
+  render();
+  refreshModels();
+}
 const showError = (message = '') => { $('error').textContent = message; $('error').classList.toggle('hidden', !message); };
 
 function startSession(char = activeCharacter()) {
@@ -144,7 +232,7 @@ function renderInspector() {
     }
     if (!state.lore.length) list.append(el('p','No lore entries yet. Add one when the world needs a fact to remember.','empty-note'));
   } else if (currentTab === 'memory') {
-    host.innerHTML = `<h2 class="panel-title">Story direction</h2><p class="help">A NovelAI-inspired separation: permanent canon versus immediate creative guidance.</p>${field('title','Scene title',s?.title||'')}${field('summary','Scene memory · established canon',s?.summary||'',{multiline:true,rows:7,help:'Persistent facts, relationships, secrets revealed and important past events.'})}${field('authorNote','Author’s Note · tone and direction',s?.authorNote||'',{multiline:true,rows:5,help:'Temporary guidance for the next replies. It should steer storytelling, not invent established facts.'})}<h3 class="field-label">Pinned moments</h3><div id="pinned-moments"></div><div class="inline-actions"><button class="subtle-button" id="delete-session">Delete this scene</button></div><p class="footer-note">Pin up to five messages directly in the conversation. This browser stores your local sessions; export backups regularly.</p>`;
+    host.innerHTML = `<h2 class="panel-title">Story direction</h2><p class="help">A NovelAI-inspired separation: permanent canon versus immediate creative guidance.</p>${field('title','Scene title',s?.title||'')}${field('summary','Scene memory · established canon',s?.summary||'',{multiline:true,rows:7,help:'Persistent facts, relationships, secrets revealed and important past events.'})}${field('authorNote','Author’s Note · tone and direction',s?.authorNote||'',{multiline:true,rows:5,help:'Temporary guidance for the next replies. It should steer storytelling, not invent established facts.'})}<h3 class="field-label">Pinned moments</h3><div id="pinned-moments"></div><div class="inline-actions"><button class="subtle-button" id="delete-session">Delete this scene</button></div><p class="footer-note">Pin up to five messages directly in the conversation. Scenes are saved to local SQLite, with a browser backup. Export occasionally for portability.</p>`;
     const pins = s.messages.filter(m => m.pinned);
     const pinHost = $('pinned-moments');
     if (!pins.length) pinHost.append(el('p','No pinned moments yet. Use ◇ Pin under a message to preserve a significant interaction.','empty-note'));
@@ -156,6 +244,40 @@ function renderInspector() {
     }
     attachFields((key,val) => { s[key] = val; });
     $('delete-session').onclick = () => { if (!confirm('Delete this scene and its messages? This cannot be undone.')) return; state.sessions = state.sessions.filter(x=>x.id!==s.id); if (!state.sessions.length) state.sessions.push(createSession(activeCharacter())); state.activeSessionId = state.sessions[0].id; save(); render(); };
+  } else if (currentTab === 'emotion') {
+    const e = s.emotion || DEFAULT_EMOTION;
+    host.innerHTML = `<h2 class="panel-title">Inner weather</h2>
+      <p class="help">A fictional character's simulated feelings, separate from dialogue. Mark story events explicitly; no keyword-based emotional judgments.</p>
+      <div class="mood-summary">${escapeHtml(describeEmotion(e))}</div>
+      ${[['valence','Valence','Distressed','Pleasant',-1,1],['arousal','Arousal','Calm','Activated',0,1],['trust','Trust','Guarded','Open',-1,1]].map(([key,name,low,high,min,max]) => `<div class="emotion-track"><div class="emotion-track-label"><span>${name}</span><strong>${e[key].toFixed(2)}</strong></div><div class="emotion-meter"><div style="width:${((e[key]-min)/(max-min)*100).toFixed(1)}%"></div></div><div class="emotion-track-ends"><span>${low}</span><span>${high}</span></div></div>`).join('')}
+      <h3 class="field-label emotion-subhead">Record a story beat</h3><div class="beat-grid">${Object.entries(EMOTION_BEATS).map(([key,beat]) => `<button class="subtle-button beat-button" data-beat="${key}">${escapeHtml(beat.label)}</button>`).join('')}</div>
+      <p class="help">Emotions settle gently after successful replies. Trust changes only through recorded events. A retry does not change emotional state.</p>
+      <div class="inline-actions"><button class="subtle-button" id="undo-beat">Undo beat</button><button class="subtle-button" id="reset-emotion">Reset state</button></div>
+      <h3 class="field-label emotion-subhead">Recent beats</h3><div id="emotion-log"></div>`;
+    host.querySelectorAll('[data-beat]').forEach(btn => btn.onclick=()=>{
+      if(running)return;
+      const before={...s.emotion};
+      s.emotion=applyEmotionBeat(before,btn.dataset.beat);
+      s.emotionEvents=[...(s.emotionEvents||[]),{id:crypto.randomUUID(),kind:btn.dataset.beat,before,at:Date.now()}].slice(-20);
+      save();renderInspector();
+    });
+    $('undo-beat').disabled=!s.emotionEvents?.length || running;
+    $('undo-beat').onclick=()=>{if(running||!s.emotionEvents?.length)return;const prior=s.emotionEvents.pop();s.emotion=prior.before;save();renderInspector();};
+    $('reset-emotion').onclick=()=>{if(running)return;s.emotion={...DEFAULT_EMOTION};s.emotionEvents=[];save();renderInspector();};
+    const beats=$('emotion-log');
+    if(!s.emotionEvents?.length) beats.append(el('p','No emotional events recorded.','empty-note'));
+    for(const entry of [...(s.emotionEvents||[])].reverse().slice(0,8)) {
+      beats.append(el('div',`${EMOTION_BEATS[entry.kind]?.label || entry.kind} · ${new Date(entry.at).toLocaleString()}`,'emotion-log-entry'));
+    }
+  } else if (currentTab === 'context') {
+    const prompt=buildMessages({character:c,persona:state.persona,summary:s.summary,authorNote:s.authorNote,emotion:s.emotion,lore:state.lore,history:s.messages});
+    const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n');
+    const charCount=prompt.messages.reduce((n,m)=>n+m.content.length,0);
+    host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">This is the actual normal-reply prompt assembled for the local model. Continue adds an extra instruction. Sizes are rough character-based estimates, not tokenizer counts.</p>
+      <div class="context-stats"><div><strong>${prompt.messages.length}</strong><span>Messages</span></div><div><strong>~${Math.ceil(charCount/4).toLocaleString()}</strong><span>Estimated tokens</span></div><div><strong>${prompt.activatedLore.length}</strong><span>Active lore</span></div></div>
+      <div class="inline-actions"><button id="copy-context" class="subtle-button">Copy prompt</button></div><pre class="context-text" id="context-text"></pre>`;
+    $('context-text').textContent=allText;
+    $('copy-context').onclick=async()=>{try{await navigator.clipboard.writeText(allText);$('copy-context').textContent='Copied';}catch{showError('Clipboard unavailable; select the preview text to copy it.');}};
   } else if (currentTab === 'setup') {
     host.innerHTML = `<h2 class="panel-title">Studio settings</h2><p class="help">This studio talks only to your local inference server. Start LM Studio or KoboldCpp first, then refresh the model list.</p><div class="group"><label class="field-label" for="model-select">Loaded model</label><select id="model-select"><option value="">Select a model</option>${models.map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===state.settings.model?'selected':''}>${escapeHtml(m.id)}</option>`).join('')}</select></div><button class="subtle-button" id="refresh-models">↻ Find local models</button><p id="backend-address" class="help">Backend: ${escapeHtml(backend)}</p>${field('temperature','Temperature',state.settings.temperature,{type:'number'})}${field('max_tokens','Max output tokens',state.settings.max_tokens,{type:'number'})}<h2 class="panel-title">Player persona</h2>${field('personaName','Your character name',state.persona.name)}${field('personaDescription','Your character',state.persona.description,{multiline:true,rows:5})}<p class="footer-note">Default server: KoboldCpp at 127.0.0.1:5001/v1. To use LM Studio instead, set INFERENCE_URL to http://127.0.0.1:1234/v1 before launching. Keep both servers on localhost.</p>`;
     $('model-select').onchange = e => { state.settings.model = e.target.value; save(); };
@@ -187,7 +309,7 @@ async function refreshModels() {
     if (models.length && !models.some(x=>x.id===state.settings.model)) {state.settings.model=models[0].id;save();}
     status.className='connection online'; label.textContent=models.length? `${models.length} local model${models.length!==1?'s':''} available`:'Connected · no loaded models';
     if (currentTab==='setup') renderInspector();
-    showError();
+    if (serverStorage) showError();
   } catch(err) { models=[]; status.className='connection offline';label.textContent='Model server offline'; if(currentTab==='setup')renderInspector(); }
 }
 function parseSSE(buffer, onFrame) {
@@ -213,7 +335,7 @@ async function generate(mode = 'normal') {
   $('stop').classList.remove('hidden');showError();
   let assistantText=''; let errorMessage=''; let assistant=null; let succeeded=false;
   try {
-    const prompt=buildMessages({character,persona:state.persona,summary:session.summary,authorNote:session.authorNote,lore:state.lore,history});
+    const prompt=buildMessages({character,persona:state.persona,summary:session.summary,authorNote:session.authorNote,emotion:session.emotion,lore:state.lore,history});
     if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
     $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
     const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
@@ -250,6 +372,7 @@ async function generate(mode = 'normal') {
       assistant.variantIndex=assistant.variants.indexOf(assistantText);
       if (assistant.variantIndex < 0) assistant.variantIndex=assistant.variants.length-1;
     }
+    if(succeeded && !retry) session.emotion=settleEmotion(session.emotion);
     running=false;controller=null;$('send').disabled=false;$('regenerate').disabled=false;$('continue').disabled=false;
     $('stop').classList.add('hidden');session.updatedAt=Date.now();save();renderLists();renderMessages();renderHeader();
   }
@@ -275,4 +398,5 @@ $('import-data').onclick=()=>$('import-data-file').click();
 $('import-data-file').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const candidate=JSON.parse(await file.text());if(!candidate||!Array.isArray(candidate.characters)||!Array.isArray(candidate.sessions))throw new Error('Not a valid studio backup');if(!confirm('Replace your current local stories with this backup? Export first if needed.'))return;state=normalizeState(candidate);save();render();showError();}catch(err){showError(err.message);}e.target.value='';};
 document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>{currentTab=tab.dataset.tab;renderInspector();}));
 window.addEventListener('beforeunload',()=>{controller?.abort();atmosphere('stop');});
-render();refreshModels();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden' && pendingSnapshot) flushState();});
+bootstrapStorage();

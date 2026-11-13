@@ -24,3 +24,19 @@
 @media(max-width:900px){#open-inspector{display:inline-block}.inspector.inspector-open{display:flex;position:fixed;right:0;top:0;bottom:0;width:min(375px,96vw);z-index:20;box-shadow:-25px 0 60px #000b}}
 @media(max-width:630px){.conversation-head{align-items:flex-start;flex-wrap:wrap}.head-actions{flex-direction:row;flex-wrap:wrap}.head-actions .subtle-button{padding:6px 8px}.composer-actions{flex-wrap:wrap;justify-content:flex-end}.reading-mode .message-text,.reading-mode .message.user .message-text{font-size:16px}}
 @media(prefers-reduced-motion:reduce){.message-actions{transition:none}.messages{scroll-behavior:auto}}
+
+/* Quiet, introspective emotion and prompt-inspection controls. */
+.tabs{flex:0 0 auto;scrollbar-width:thin;scrollbar-color:#554662 transparent}
+.tabs button{flex:0 0 auto;padding:14px 10px 12px;font-size:10px}
+.mood-summary{font:italic 15px/1.6 Georgia,serif;color:#decce8;padding:14px 16px;background:#27202f;border:1px solid #463751;border-radius:12px;margin:13px 0 22px}
+.emotion-track{margin:19px 0}.emotion-track-label,.emotion-track-ends{display:flex;justify-content:space-between;align-items:center}
+.emotion-track-label{color:#cbbbd4;font-size:12px;margin-bottom:10px}.emotion-track-label strong{font-size:11px;font-variant-numeric:tabular-nums;color:#ad94c5}
+.emotion-track-ends{font-size:10px;color:#8a8192;margin-top:6px}.emotion-meter{height:7px;background:#30283a;border-radius:99px;overflow:hidden}
+.emotion-meter div{height:100%;border-radius:99px;background:linear-gradient(90deg,#796b9e,#c19dce);transition:width .2s}
+.emotion-subhead{margin:27px 0 12px}.beat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.beat-button{text-align:left;padding:11px 12px}
+.emotion-log-entry{font-size:11px;color:#9b90a6;border-bottom:1px solid #302b38;padding:8px 0}
+.context-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:15px 0}
+.context-stats div{background:#231f2c;border:1px solid #383042;border-radius:9px;padding:10px 6px;text-align:center}
+.context-stats strong,.context-stats span{display:block}.context-stats strong{font-size:17px;color:#e7d5f0;font-weight:500}
+.context-stats span{font-size:9px;color:#9889a9;margin-top:4px}
+.context-text{background:#14121c;border:1px solid #3b3149;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;padding:13px;margin:14px 0;color:#c7becd;font:11px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;max-height:56vh;overflow:auto}
