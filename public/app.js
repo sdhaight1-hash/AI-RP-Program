@@ -1,5 +1,6 @@
-import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, buildMessages, getActiveLore, importCharacter, EMOTION_BEATS, DEFAULT_EMOTION, applyEmotionBeat, settleEmotion, describeEmotion } from '/engine.mjs';
+import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, buildMessages, getActiveLore, importCharacter, THEMES, CHARACTER_FIELDS, parseCharacterDraft, EMOTION_BEATS, DEFAULT_EMOTION, applyEmotionBeat, settleEmotion, describeEmotion } from '/engine.mjs';
 import { initAtmosphere } from '/scene.js';
+import { chooseSpeaker, createActorContext, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -8,13 +9,69 @@ const text = (s) => String(s ?? '');
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch { state = makeInitialState(); }
 let currentTab = 'character';
+let builderCharacterId = null;
+let builderTab = 'identity';
+let aiDraftTarget = null;
+let aiDraftController = null;
+const builderCharacter = () => state.characters.find(c => c.id === builderCharacterId);
+const BUILDER_SECTIONS = {
+  identity: [
+    ['name','Name','text','What do other people call this character?'],
+    ['tagline','One-line introduction','text','A memorable hook for the character library.'],
+    ['description','Appearance & identity','textarea','Visible features, age (if relevant), mannerisms, and durable facts.'],
+    ['tags','Tags · comma-separated','tags','Genre, setting, themes, archetypes.'],
+    ['color','Character accent','color','A personal identifying color; independent of the UI theme.'],
+  ],
+  mind: [
+    ['personality','Personality and temperament','textarea','Contradictions, strengths, flaws, and typical reactions.'],
+    ['backstory','History and knowledge','textarea','Facts they remember and secrets they know—not omniscient knowledge.'],
+    ['motivations','Desires and long-term goals','textarea','What do they pursue when the player is not present?'],
+    ['fears','Fears and vulnerabilities','textarea','What puts them off balance?'],
+    ['boundaries','Values and personal boundaries','textarea','Principles, choices they resist, deal-breakers.'],
+  ],
+  voice: [
+    ['speechStyle','Distinctive voice','textarea','Pacing, vocabulary, cadence, humor, regionalisms.'],
+    ['exampleDialogue','Sample dialogue','textarea','Example exchanges that teach cadence, not past events.'],
+  ],
+  scene: [
+    ['scenario','Initial situation','textarea','Where and when the story begins; current circumstances.'],
+    ['greeting','First message','textarea','Open with an actionable moment. The player must have room to respond.'],
+    ['alternateGreetings','Alternative openings · separate with blank lines','greetings','Optional other ways to begin.'],
+  ],
+};
+const builderLabel = key => Object.values(BUILDER_SECTIONS).flat().find(row => row[0] === key)?.[1] || key;
+
 let running = false;
 let controller = null;
 let models = [];
 let backend = 'the local model server';
+let comfyJob = null;
+let comfyImages = [];
+let comfyWatchToken = 0;
 const atmosphere = initAtmosphere($('scene-canvas'));
-const activeSession = () => state.sessions.find(s => s.id === state.activeSessionId) || null;
-const activeCharacter = () => state.characters.find(c => c.id === activeSession()?.characterId) || state.characters[0];
+function applyTheme() {
+  const chosen = THEMES.find(t => t.id === state.settings.theme) || THEMES[0];
+  document.documentElement.dataset.theme = chosen.id;
+  document.documentElement.style.colorScheme = chosen.id === 'parchment' ? 'light' : 'dark';
+  if (state.settings.customAccent) document.documentElement.style.setProperty('--accent', state.settings.customAccent);
+  else document.documentElement.style.removeProperty('--accent');
+  const picker = $('quick-theme');
+  if (picker) picker.value = chosen.id;
+}
+function portraitNode(name, character, className) {
+  const node = el('div', (name || '?').slice(0, 1).toUpperCase(), className);
+  if (character?.portrait) {
+    const image = document.createElement('img'); image.src = character.portrait;
+    image.alt = ''; image.loading = 'lazy';
+    image.onerror = () => { node.textContent = (name || '?').slice(0,1).toUpperCase(); };
+    node.replaceChildren(image);
+  }
+  return node;
+}
+const activeSession = () => state.sessions.find(s => s.id === state.activeSessionId && !s.trashedAt) || null;
+const activeCharacter = () => { const session = activeSession(); return state.characters.find(c => c.id === (session?.speakerId || session?.characterId) && !c.trashedAt) || state.characters.find(c => c.id === session?.characterId && !c.trashedAt) || state.characters.find(c => !c.trashedAt) || null; };
+const sceneActor = session => state.characters.find(c => c.id === chooseSpeaker(session,state.characters)) || null;
+const playable = () => state.characters.filter(c => !c.trashedAt);
 // Keep the browser copy as an emergency backup; SQLite is the primary save.
 // Serialize writes to avoid stale-response races while the user types.
 const PENDING_BACKUP_KEY = `${STORAGE_KEY}:pending`;
@@ -118,28 +175,39 @@ function startSession(char = activeCharacter()) {
 function renderLists() {
   const sessions = $('session-list');
   sessions.replaceChildren();
-  for (const s of [...state.sessions].sort((a,b) => b.updatedAt - a.updatedAt)) {
+  for (const s of [...state.sessions].filter(x=>!x.trashedAt).sort((a,b) => b.updatedAt - a.updatedAt)) {
     const char = state.characters.find(c => c.id === s.characterId);
     const button = el('button', '', `session-item ${s.id === state.activeSessionId ? 'active' : ''}`);
-    const badge = el('span', (char?.name || '?').slice(0,1).toUpperCase(), 'initial');
+    const badge = portraitNode(char?.name, char, 'initial');
     badge.style.background = char?.color || '#655078';
     const info = el('span', '', 'session-details');
-    info.append(el('strong', s.title || `With ${char?.name || 'unknown'}`), el('small', `${char?.name || 'Unknown'} · ${s.messages.length} messages`));
+    info.append(el('strong', s.title || `With ${char?.name || 'unknown'}`), el('small', `${(s.castIds||[s.characterId]).length} cast · ${s.messages.length} messages`));
     button.append(badge, info);
     button.title = `Open ${s.title}`;
     button.addEventListener('click', () => { if (running) return; state.activeSessionId = s.id; save(); render(); });
-    sessions.append(button);
+    const actions=el('div','','row-actions');
+    const rename=el('button','✎','mini-action');rename.title='Rename scene';rename.onclick=()=>{if(running)return;const value=prompt('Scene name',s.title);if(value?.trim()){s.title=value.trim().slice(0,150);save();renderLists();renderHeader();}};
+    const branch=el('button','⎇','mini-action');branch.title='Branch this story';branch.onclick=()=>{if(running)return;duplicateSession(state,s.id);save();render();};
+    const archive=el('button','×','mini-action');archive.title='Move scene to Trash';archive.onclick=()=>{if(running||!confirm(`Move “${s.title}” to Trash? You can restore it from Library.`))return;archiveSession(state,s.id);save();render();};
+    actions.append(rename,branch,archive);
+    const row=el('div','','session-row');row.append(button,actions);sessions.append(row);
   }
   const list = $('character-list');
   list.replaceChildren();
-  for (const c of state.characters) {
+  for (const c of state.characters.filter(ch=>!ch.trashedAt)) {
     const button = el('button', '', `character-item ${c.id === activeCharacter()?.id ? 'active' : ''}`);
-    const badge = el('span', c.name.slice(0,1).toUpperCase(), 'initial'); badge.style.background = c.color;
+    const badge = portraitNode(c.name, c, 'initial'); badge.style.background = c.color;
     const info = el('span', '', 'session-details'); info.append(el('strong', c.name), el('small', c.personality ? c.personality.slice(0,54) : 'Unwritten character'));
+    const edit = el('button', '✎', 'character-edit');
+    edit.type = 'button'; edit.title = `Edit ${c.name}`;
+    edit.onclick = () => { if (!running) openBuilder(c); };
     button.append(badge, info);
     button.title = `Start a scene with ${c.name}`;
     button.addEventListener('click', () => { if (running) return; startSession(c); });
-    list.append(button);
+    const archive=el('button','×','character-edit'); archive.type='button'; archive.title=`Move ${c.name} to Trash`;
+    archive.onclick=()=>{if(running || !confirm(`Move ${c.name} to Trash? Existing dialogue will remain attributed. Restore the character from Library.`))return;archiveCharacter(state,c.id);save();render();};
+    const row = el('div','','character-row'); row.append(button, edit, archive);
+    list.append(row);
   }
 }
 
@@ -153,9 +221,10 @@ function renderMessages() {
   }
   for (const [index, m] of session.messages.entries()) {
     const article = el('article','',`message ${m.role}`);
-    const portrait = el('div', (m.role === 'assistant' ? char?.name : state.persona.name || 'Y').slice(0,1).toUpperCase(), 'portrait');
+    const who = m.role === 'assistant' ? state.characters.find(c=>c.id === (m.speakerId || session.characterId)) : null;
+    const portrait = portraitNode(m.role === 'assistant' ? who?.name : state.persona.name || 'Y', who, 'portrait');
     const bubble = el('div','','bubble');
-    bubble.append(el('div',m.role === 'user' ? state.persona.name || 'You' : char?.name || 'Character','speaker'));
+    bubble.append(el('div',m.role === 'user' ? state.persona.name || 'You' : who?.name || 'Character','speaker'));
     const prose = el('div', m.content, 'message-text');
     bubble.append(prose);
     const actions = el('div', '', 'message-actions');
@@ -190,11 +259,14 @@ function renderMessages() {
 function renderHeader() {
   const s = activeSession(); const c = activeCharacter();
   $('scene-title').textContent = s?.title || 'New story';
-  $('scene-meta').textContent = c?.scenario || 'Choose a character and start a scene';
+  $('scene-meta').textContent = s ? [(s.location||c?.scenario||'Location unspecified'),s.worldTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
   $('stage-name').textContent = c?.name || 'Unknown';
-  $('stage-avatar').textContent = (c?.name || '?').slice(0,1).toUpperCase();
+  $('stage-avatar').replaceChildren(portraitNode(c?.name, c, 'avatar-internal'));
+  const stageImage = $('stage-portrait');
+  stageImage.classList.toggle('hidden', !c?.portrait);
+  if (c?.portrait) stageImage.src = c.portrait; else stageImage.removeAttribute('src');
   atmosphere(c?.color || '#a68dd6');
-  const lore = s ? getActiveLore(state.lore, s.messages) : [];
+  const lore = s && c ? getActiveLore(state.lore, s.messages,4,{actorId:c.id,sessionId:s.id}) : [];
   $('lore-active').textContent = lore.length ? `Active lore: ${lore.map(l => l.title || l.keywords.join(', ')).join(' · ')}` : '';
 }
 
@@ -211,22 +283,88 @@ function attachFields(callback) {
 function renderInspector() {
   const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
   document.querySelectorAll('[data-tab]').forEach(btn => { btn.classList.toggle('active', btn.dataset.tab === currentTab); btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab)); });
+  if ((!s || !c) && !['library','setup'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
   if (currentTab === 'character') {
-    host.innerHTML = `<h2 class="panel-title">Character notes</h2><p class="help">Write the person, not a checklist of commands. Changes apply to their future replies.</p>${field('name','Name',c.name)}${field('description','Appearance & identity',c.description,{multiline:true,rows:3})}${field('personality','Personality & voice',c.personality,{multiline:true,rows:3})}${field('backstory','Backstory & knowledge',c.backstory,{multiline:true,rows:3})}${field('scenario','Scene premise',c.scenario,{multiline:true,rows:3})}${field('greeting','Opening message',c.greeting,{multiline:true,rows:4})}${field('color','Accent color',c.color,{type:'color'})}<div class="inline-actions"><button id="export-character" class="subtle-button">Export card JSON</button><button id="import-character" class="subtle-button">Import card JSON</button><input type="file" id="character-upload" accept="application/json,.json" hidden /></div><p class="footer-note">Native JSON cards are supported. SillyTavern PNG character cards are not yet supported.</p>`;
-    attachFields((key, value) => { c[key] = value; });
+    host.innerHTML = `<h2 class="panel-title">${escapeHtml(c.name)}</h2>
+      <div class="character-overview" id="character-overview"></div>
+      <p class="help">${escapeHtml(c.tagline || 'A character waiting to become real.')}</p>
+      <p class="character-summary">${escapeHtml((c.description || 'No description written.').slice(0,450))}</p>
+      <button id="edit-full-character" class="primary-button">✦ Open character atelier</button>
+      <div class="inline-actions" style="margin-top:15px"><button id="export-character" class="subtle-button">Export character JSON</button><button id="import-character" class="subtle-button">Import character JSON</button><input type="file" id="character-upload" accept="application/json,.json" hidden /></div>
+      <p class="footer-note">The full editor includes portrait uploads, motivations, boundaries, sample dialogue, and AI-assisted drafting. Portraits are local files; copy the .data/portraits folder when moving the installation.</p>`;
+    $('character-overview').append(portraitNode(c.name,c,'overview-portrait'));
+    $('edit-full-character').onclick = () => openBuilder(c);
     $('export-character').onclick = () => download(`${safeName(c.name)}.json`, JSON.stringify({character:c},null,2));
     $('import-character').onclick = () => $('character-upload').click();
-    $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } };
+    $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } e.target.value=''; };
+  } else if (currentTab === 'cast') {
+    host.innerHTML = `<h2 class="panel-title">Scene cast</h2><p class="help">Each actor has a separate prompt, personal knowledge and dialogue attribution. @Mention a character in your message to address them in Natural mode.</p><div id="cast-choices"></div><div class="group"><label class="field-label" for="speaker-mode">Speaker selection</label><select id="speaker-mode"><option value="natural">Natural · address or rotate</option><option value="round-robin">Round-robin</option><option value="manual">Manual</option></select></div><div class="group"><label class="field-label" for="cast-speaker">Next actor</label><select id="cast-speaker"></select></div><p class="help">Manual overrides allow you to pick the next actor. Existing messages retain their original speakers, even if a character is archived.</p>`;
+    const choices=$('cast-choices');
+    for (const ch of playable()) {
+      const row=el('label','','cast-choice'); const chk=document.createElement('input'); chk.type='checkbox';chk.checked=s.castIds.includes(ch.id);
+      chk.onchange=()=>{if(running)return;const next=chk.checked?[...s.castIds,ch.id]:s.castIds.filter(id=>id!==ch.id);if(!next.length){chk.checked=true;showError('Keep at least one character in this cast.');return;}s.castIds=[...new Set(next)];if(!s.castIds.includes(s.speakerId))s.speakerId=s.castIds[0];save();renderInspector();renderHeader();};
+      row.append(chk,portraitNode(ch.name,ch,'cast-thumb'),el('span',ch.name));choices.append(row);
+    }
+    $('speaker-mode').value=s.speakerMode;
+    $('speaker-mode').onchange=e=>{s.speakerMode=e.target.value;save();renderInspector();};
+    for(const cid of s.castIds){const ch=state.characters.find(c=>c.id===cid && !c.trashedAt);if(ch)$('cast-speaker').add(new Option(ch.name,ch.id));}
+    $('cast-speaker').value=s.speakerId || s.castIds[0];
+    $('cast-speaker').onchange=e=>{s.speakerId=e.target.value;s.speakerMode='manual';save();renderHeader();renderInspector();};
+  } else if (currentTab === 'scene') {
+    host.innerHTML=`<h2 class="panel-title">Scene direction</h2><p class="help">These details describe the shared, witnessed scene. Secret plot notes belong in private lore, not here.</p>${field('location','Location',s.location)}${field('worldTime','Fictional time',s.worldTime)}${field('atmosphere','Environment and atmosphere',s.atmosphere,{multiline:true,rows:3})}${field('publicSummary','What every present character knows',s.publicSummary,{multiline:true,rows:4})}${field('direction','Direction: tempo, focus and tone',s.direction,{multiline:true,rows:4})}<h3 class="field-label">Record a witnessed event</h3><select id="event-kind"><option>observation</option><option>action</option><option>revelation</option><option>relationship</option><option>world-change</option></select><textarea id="event-description" rows="3" placeholder="What objectively happened? No automatic emotional inference."></textarea><button id="event-record" class="subtle-button">Record for current cast</button><div id="scene-events"></div>`;
+    attachFields((key,val)=>{s[key]=val;});
+    $('event-record').onclick=()=>{try{const event=createSceneEvent({kind:$('event-kind').value,description:$('event-description').value,witnessIds:s.castIds});s.sceneEvents.push(event);save();renderInspector();}catch(err){showError(err.message);}};
+    const events=$('scene-events');
+    for(const event of [...s.sceneEvents].reverse().slice(0,12)) {
+      const row=el('div','','event-row');row.append(el('strong',event.kind),el('p',event.description));
+      const undo=el('button','Remove','mini-action');undo.onclick=()=>{s.sceneEvents=s.sceneEvents.filter(e=>e.id!==event.id);save();renderInspector();};row.append(undo);events.append(row);
+    }
+  } else if (currentTab === 'gallery') {
+    host.innerHTML='<h2 class="panel-title">Visual generation</h2><p class="help">Optional ComfyUI integration. Import a trusted API-format workflow containing __RP_PROMPT__ in a text input. Images remain local and require your approval before becoming portraits.</p><p id="comfy-status" class="help">Checking ComfyUI…</p><div class="group"><label class="field-label" for="comfy-template">Workflow template</label><select id="comfy-template"><option value="">Loading…</option></select></div><label class="field-label" for="comfy-import-id">Import API-format workflow</label><input id="comfy-import-id" placeholder="portrait-photoreal"/><input id="comfy-file" type="file" accept=".json,application/json"/><button id="comfy-import" class="subtle-button">Import reviewed workflow</button><div class="group"><label class="field-label" for="comfy-prompt">Visual prompt</label><textarea rows="4" id="comfy-prompt" placeholder="A cinematic portrait of…"></textarea></div><div class="group"><label class="field-label" for="comfy-negative">Negative prompt (optional)</label><textarea rows="2" id="comfy-negative" placeholder="Blurry, distorted…"></textarea></div><button id="comfy-generate" class="primary-button">✦ Generate with ComfyUI</button><p class="help">Image generation may compete for GPU memory with KoboldCpp or LM Studio. Submit jobs when text generation is idle.</p><p id="comfy-job-status" role="status" class="help"></p><button id="comfy-refresh" class="subtle-button">Refresh job</button><div id="comfy-results" class="comfy-results"></div>';
+    const jobStatus=$('comfy-job-status');
+    const templates=$('comfy-template');
+    const refreshTemplates=async()=>{
+      try{const response=await fetch('/api/comfy/templates');const data=await response.json();templates.replaceChildren(new Option('Select a workflow',''));for(const item of data.templates)templates.add(new Option(item.id,item.id));}
+      catch(error){jobStatus.textContent=error.message;}
+    };
+    fetch('/api/comfy/status').then(r=>r.json()).then(d=>{if($('comfy-status'))$('comfy-status').textContent=d.connected?`Connected · ${(d.devices||[]).map(x=>x.name).join(', ')||'ComfyUI ready'}`:`Offline · ${d.error||'Start ComfyUI on 127.0.0.1:8188'}`;}).catch(err=>{if($('comfy-status'))$('comfy-status').textContent=err.message;});
+    refreshTemplates();
+    $('comfy-import').onclick=async()=>{
+      const file=$('comfy-file').files?.[0];const id=$('comfy-import-id').value.trim();if(!file||!id)return showError('Choose a trusted API-format JSON file and a template name.');
+      if(file.size>1_000_000)return showError('Workflow must be under 1 MB.');
+      if(!confirm('Only import workflows and custom ComfyUI nodes you trust. The workflow may execute custom code inside ComfyUI. Continue?'))return;
+      try{const workflow=JSON.parse(await file.text());const response=await fetch('/api/comfy/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,workflow})});const result=await response.json();if(!response.ok)throw new Error(result.error);jobStatus.textContent='Workflow installed: '+result.id;await refreshTemplates();templates.value=result.id;showError();}catch(err){showError(err.message);}
+    };
+    $('comfy-generate').onclick=async()=>{
+      if(running) return showError('Finish or stop the active text-generation request first.');
+      const templateId=templates.value,prompt=$('comfy-prompt').value.trim(),negative=$('comfy-negative').value;
+      if(!templateId||!prompt)return showError('Select a workflow and enter an image prompt.');
+      $('comfy-generate').disabled=true;jobStatus.textContent='Submitting workflow to ComfyUI…';
+      try{const response=await fetch('/api/comfy/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({templateId,prompt,negative})});const result=await response.json();if(!response.ok)throw new Error(result.error);comfyJob=result.jobId;comfyImages=[];jobStatus.textContent='Job queued: '+comfyJob;await checkComfyJob();showError();}catch(err){jobStatus.textContent=err.message;showError(err.message);}finally{if($('comfy-generate'))$('comfy-generate').disabled=false;}
+    };
+    $('comfy-refresh').onclick=checkComfyJob;
+    if(comfyJob)checkComfyJob();
+  } else if (currentTab === 'library') {
+    host.innerHTML='<h2 class="panel-title">Library & Trash</h2><p class="help">Restore archived characters and scenes. Their history and original speaker attribution are preserved.</p><div id="library-trash"></div>';
+    const list=$('library-trash');
+    const archived=[...state.characters.filter(c=>c.trashedAt).map(c=>({type:'Character',item:c})),...state.sessions.filter(s=>s.trashedAt).map(s=>({type:'Scene',item:s}))];
+    if(!archived.length)list.append(el('p','Trash is empty. Use × beside a character or session to archive.','help'));
+    for(const {type,item} of archived){const row=el('div','','trash-row');row.append(el('span',`${type}: ${item.name||item.title}`));const restore=el('button','Restore','subtle-button');restore.onclick=()=>{item.trashedAt=null;if(type==='Scene')state.activeSessionId=item.id;save();render();};
+      const remove=el('button','Permanently delete','mini-action');remove.onclick=()=>{if(!confirm(`Permanently delete ${item.name||item.title}? This cannot be undone. Back up your data first.`))return;try{purgeArchived(state,type==='Scene'?'scene':'character',item.id);save();render();showError();}catch(err){showError(err.message);}};row.append(restore,remove);list.append(row);}
   } else if (currentTab === 'lore') {
-    host.innerHTML = `<h2 class="panel-title">World lore</h2><p class="help">Write concise facts and comma-separated trigger words. Relevant entries are brought into context only when a recent message matches.</p><button id="add-lore" class="subtle-button" style="margin-bottom:16px">＋ New lore entry</button><div id="lore-list"></div>`;
+    host.innerHTML = `<h2 class="panel-title">World codex</h2><p class="help">Record canon facts. Private entries go only to characters who explicitly know them; keyword and always-on retrieval is scoped to the actor.</p><button id="add-lore" class="subtle-button" style="margin-bottom:16px">＋ New lore entry</button><div id="lore-list"></div>`;
     $('add-lore').onclick = () => { state.lore.unshift({id:crypto.randomUUID(),title:'New entry',keywords:[],content:''}); save(); renderInspector(); };
     const list = $('lore-list');
     for (const entry of state.lore) {
       const card = el('div','','lore-card');
-      card.innerHTML = `<label class="field-label">Title</label><input data-key="title" value="${escapeHtml(entry.title||'')}" maxlength="120"/><label class="field-label">Trigger words</label><input data-key="keywords" value="${escapeHtml(entry.keywords.join(', '))}" placeholder="harbor, bookshop, old town"/><label class="field-label">Canon fact</label><textarea data-key="content" rows="4" maxlength="12000">${escapeHtml(entry.content)}</textarea><div class="inline-actions"><button class="subtle-button" data-key="delete">Delete entry</button></div>`;
+      card.innerHTML = `<label class="field-label">Title</label><input data-key="title" value="${escapeHtml(entry.title||'')}" maxlength="120"/><label class="field-label">Trigger words</label><input data-key="keywords" value="${escapeHtml(entry.keywords.join(', '))}" placeholder="harbor, bookshop, old town"/><label class="field-label">Canon fact</label><textarea data-key="content" rows="4" maxlength="12000">${escapeHtml(entry.content)}</textarea><div class="group"><label class="field-label">Visibility</label><select data-key="visibility"><option value="public">Public canon</option><option value="private">Private character knowledge</option></select></div><label class="field-label">Known by (private entries)</label><div class="lore-known-by"></div><label class="cast-choice"><input type="checkbox" data-key="alwaysActive">Always include for permitted actors</label><div class="inline-actions"><button class="subtle-button" data-key="delete">Delete entry</button></div>`;
+      card.querySelector('[data-key="visibility"]').value=entry.visibility||'public';
+      card.querySelector('[data-key="alwaysActive"]').checked=Boolean(entry.alwaysActive);
+      const knownBy=card.querySelector('.lore-known-by');
+      for(const ch of playable()){const label=el('label','','cast-choice');const check=document.createElement('input');check.type='checkbox';check.checked=(entry.knownBy||[]).includes(ch.id);check.onchange=()=>{entry.knownBy=check.checked?[...new Set([...(entry.knownBy||[]),ch.id])]:entry.knownBy.filter(id=>id!==ch.id);save();};label.append(check,el('span',ch.name));knownBy.append(label);}
       card.querySelectorAll('[data-key]').forEach(input => { const key = input.dataset.key;
         if (key === 'delete') input.onclick = () => { if (!confirm('Delete this lore entry?')) return; state.lore = state.lore.filter(l => l.id !== entry.id); save(); renderInspector(); renderHeader(); };
-        else input.oninput = () => { entry[key] = key === 'keywords' ? input.value.split(',').map(x => x.trim()).filter(Boolean) : input.value; save(); renderHeader(); };
+        else input.oninput = () => { entry[key] = key === 'keywords' ? input.value.split(',').map(x => x.trim()).filter(Boolean) : key === 'alwaysActive' ? input.checked : input.value; save(); renderHeader(); };
       });
       list.append(card);
     }
@@ -243,7 +381,8 @@ function renderInspector() {
       row.append(remove); pinHost.append(row);
     }
     attachFields((key,val) => { s[key] = val; });
-    $('delete-session').onclick = () => { if (!confirm('Delete this scene and its messages? This cannot be undone.')) return; state.sessions = state.sessions.filter(x=>x.id!==s.id); if (!state.sessions.length) state.sessions.push(createSession(activeCharacter())); state.activeSessionId = state.sessions[0].id; save(); render(); };
+    $('delete-session').textContent='Move scene to Trash';
+    $('delete-session').onclick = () => { if (!confirm('Move this scene to Trash? You can restore it from Library.')) return; archiveSession(state,s.id); save(); render(); };
   } else if (currentTab === 'emotion') {
     const e = s.emotion || DEFAULT_EMOTION;
     host.innerHTML = `<h2 class="panel-title">Inner weather</h2>
@@ -270,7 +409,7 @@ function renderInspector() {
       beats.append(el('div',`${EMOTION_BEATS[entry.kind]?.label || entry.kind} · ${new Date(entry.at).toLocaleString()}`,'emotion-log-entry'));
     }
   } else if (currentTab === 'context') {
-    const prompt=buildMessages({character:c,persona:state.persona,summary:s.summary,authorNote:s.authorNote,emotion:s.emotion,lore:state.lore,history:s.messages});
+    const actor=sceneActor(s); if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore a cast member or add an active character in Cast.</p>';return;} const prompt=createActorContext({session:s,characters:state.characters,actorId:actor.id,persona:state.persona,lore:state.lore,buildMessages});
     const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n');
     const charCount=prompt.messages.reduce((n,m)=>n+m.content.length,0);
     host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">This is the actual normal-reply prompt assembled for the local model. Continue adds an extra instruction. Sizes are rough character-based estimates, not tokenizer counts.</p>
@@ -279,7 +418,12 @@ function renderInspector() {
     $('context-text').textContent=allText;
     $('copy-context').onclick=async()=>{try{await navigator.clipboard.writeText(allText);$('copy-context').textContent='Copied';}catch{showError('Clipboard unavailable; select the preview text to copy it.');}};
   } else if (currentTab === 'setup') {
-    host.innerHTML = `<h2 class="panel-title">Studio settings</h2><p class="help">This studio talks only to your local inference server. Start LM Studio or KoboldCpp first, then refresh the model list.</p><div class="group"><label class="field-label" for="model-select">Loaded model</label><select id="model-select"><option value="">Select a model</option>${models.map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===state.settings.model?'selected':''}>${escapeHtml(m.id)}</option>`).join('')}</select></div><button class="subtle-button" id="refresh-models">↻ Find local models</button><p id="backend-address" class="help">Backend: ${escapeHtml(backend)}</p>${field('temperature','Temperature',state.settings.temperature,{type:'number'})}${field('max_tokens','Max output tokens',state.settings.max_tokens,{type:'number'})}<h2 class="panel-title">Player persona</h2>${field('personaName','Your character name',state.persona.name)}${field('personaDescription','Your character',state.persona.description,{multiline:true,rows:5})}<p class="footer-note">Default server: KoboldCpp at 127.0.0.1:5001/v1. To use LM Studio instead, set INFERENCE_URL to http://127.0.0.1:1234/v1 before launching. Keep both servers on localhost.</p>`;
+    host.innerHTML = `<h2 class="panel-title">Studio settings</h2><p class="help">This studio talks only to your local inference server. Start LM Studio or KoboldCpp first, then refresh the model list.</p><h3 class="field-label">Color atmosphere</h3><div class="theme-tiles">${THEMES.map(t => `<button class="theme-tile ${state.settings.theme === t.id ? 'selected' : ''}" data-theme-choice="${t.id}" aria-pressed="${state.settings.theme === t.id}"><span class="theme-dot" style="background:${t.accent}"></span>${escapeHtml(t.name)}</button>`).join('')}</div><div class="group"><label class="field-label" for="custom-accent">Override accent</label><input id="custom-accent" type="color" value="${escapeHtml(state.settings.customAccent || (THEMES.find(t => t.id === state.settings.theme)?.accent || THEMES[0].accent))}" /></div><button class="subtle-button" id="accent-reset">Use theme default accent</button><p class="help">Choose a complete palette or adjust its accent. This preference is stored locally.</p><div class="group"><label class="field-label" for="model-select">Loaded model</label><select id="model-select"><option value="">Select a model</option>${models.map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===state.settings.model?'selected':''}>${escapeHtml(m.id)}</option>`).join('')}</select></div><button class="subtle-button" id="refresh-models">↻ Find local models</button><p id="backend-address" class="help">Backend: ${escapeHtml(backend)}</p>${field('temperature','Temperature',state.settings.temperature,{type:'number'})}${field('max_tokens','Max output tokens',state.settings.max_tokens,{type:'number'})}<h2 class="panel-title">Player persona</h2>${field('personaName','Your character name',state.persona.name)}${field('personaDescription','Your character',state.persona.description,{multiline:true,rows:5})}<p class="footer-note">Default server: KoboldCpp at 127.0.0.1:5001/v1. To use LM Studio instead, set INFERENCE_URL to http://127.0.0.1:1234/v1 before launching. Keep both servers on localhost.</p>`;
+    host.querySelectorAll('[data-theme-choice]').forEach(btn => btn.onclick = () => {
+      state.settings.theme = btn.dataset.themeChoice; state.settings.customAccent = ''; save(); applyTheme(); renderInspector();
+    });
+    $('custom-accent').oninput = event => { state.settings.customAccent = event.target.value; save(); applyTheme(); };
+    $('accent-reset').onclick = () => { state.settings.customAccent = ''; save(); applyTheme(); renderInspector(); };
     $('model-select').onchange = e => { state.settings.model = e.target.value; save(); };
     $('refresh-models').onclick = refreshModels;
     attachFields((key,val) => {
@@ -290,11 +434,186 @@ function renderInspector() {
     });
   }
 }
-function render() { renderLists(); renderHeader(); renderMessages(); renderInspector(); renderReadingMode(); }
+async function checkComfyJob() {
+  if(!comfyJob || currentTab !== 'gallery')return;
+  const status=$('comfy-job-status');if(!status)return;
+  try{
+    const res=await fetch('/api/comfy/history?job='+encodeURIComponent(comfyJob));const result=await res.json();
+    if(!res.ok)throw new Error(result.error);
+    if(!result.done){status.textContent='ComfyUI is generating… Click Refresh job to check again.';return;}
+    comfyImages=result.images||[];
+    status.textContent=result.error?'ComfyUI reported a workflow error.':comfyImages.length?`${comfyImages.length} image(s) generated. Choose one to open or use as a portrait.`:'Job finished without saved output images.';
+    const host=$('comfy-results');host.replaceChildren();
+    for(const image of comfyImages){
+      const src='/api/comfy/image?'+new URLSearchParams({job:comfyJob,filename:image.filename,subfolder:image.subfolder});
+      const item=el('div','','comfy-result');const picture=document.createElement('img');picture.src=src;picture.alt='Generated '+image.filename;picture.loading='lazy';item.append(picture);
+      const open=el('button','Open','subtle-button');open.onclick=()=>window.open(src,'_blank','noopener');
+      const use=el('button','Use as portrait','subtle-button');use.onclick=async()=>{
+        const char=activeCharacter();if(!char)return showError('Select a character before accepting a portrait.');
+        if(!confirm(`Use this image as ${char.name}'s portrait?`))return;
+        try{const response=await fetch(src);if(!response.ok)throw new Error('Image could not be downloaded');const blob=await response.blob();builderCharacterId=char.id;await uploadPortrait(new File([blob],image.filename,{type:blob.type}));showError();}catch(err){showError(err.message);}
+      };item.append(open,use);host.append(item);
+    }
+  }catch(err){status.textContent='ComfyUI job status: '+err.message;}
+}
+function render() { applyTheme(); renderLists(); renderHeader(); renderMessages(); renderInspector(); renderReadingMode(); }
 function renderReadingMode() {
   document.body.classList.toggle('reading-mode', Boolean(state.settings.readingMode));
   $('reading-toggle').textContent = state.settings.readingMode ? '◫ Chat view' : '◫ Story view';
   $('reading-toggle').setAttribute('aria-pressed', String(Boolean(state.settings.readingMode)));
+}
+
+function renderBuilderPortrait() {
+  const c = builderCharacter(); if (!c) return;
+  $('builder-portrait').replaceChildren(portraitNode(c.name, c, 'builder-portrait-inner'));
+  $('portrait-remove-button').disabled = !c.portrait;
+}
+function openBuilder(c) {
+  if (!c) return;
+  builderCharacterId = c.id; builderTab = 'identity';
+  $('builder-ai-preview').classList.add('hidden'); $('builder-ai-status').textContent = '';
+  $('builder-ai-guidance').value = '';
+  renderBuilder();
+  if (!$('character-builder').open) $('character-builder').showModal();
+}
+function renderBuilder() {
+  const c = builderCharacter(); if (!c) return;
+  $('builder-title').textContent = `Creating ${c.name}`;
+  renderBuilderPortrait();
+  document.querySelectorAll('[data-builder-tab]').forEach(b => {
+    b.classList.toggle('active', b.dataset.builderTab === builderTab);
+    b.setAttribute('aria-selected', String(b.dataset.builderTab === builderTab));
+  });
+  const host = $('builder-fields'); host.replaceChildren();
+  for (const [key, label, type, help] of BUILDER_SECTIONS[builderTab]) {
+    const group = el('div', '', 'builder-field');
+    const caption = el('label', label, 'field-label');
+    const input = document.createElement(type === 'textarea' || type === 'greetings' ? 'textarea' : 'input');
+    input.id = `builder-${key}`; caption.htmlFor = input.id;
+    if (input.tagName === 'TEXTAREA') input.rows = key === 'exampleDialogue' ? 8 : 5;
+    else input.type = type === 'color' ? 'color' : 'text';
+    input.maxLength = type === 'color' ? 7 : (key === 'name' ? 100 : 12000);
+    input.value = type === 'tags' ? (c.tags || []).join(', ') : type === 'greetings' ? (c.alternateGreetings || []).join('\n\n') : (c[key] || (key === 'color' ? '#a68dd6' : ''));
+    input.addEventListener('input', () => {
+      c[key] = type === 'tags' ? input.value.split(',').map(x => x.trim()).filter(Boolean).slice(0,30)
+        : type === 'greetings' ? input.value.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean).slice(0,12)
+        : input.value;
+      save();
+      if (key === 'name') $('builder-title').textContent = `Creating ${c.name}`;
+      if (key === 'color') atmosphere(c.color);
+      if (key === 'name' || key === 'color') renderLists();
+      if (key === 'name') renderBuilderPortrait();
+      if (c.id === activeCharacter()?.id) renderHeader();
+    });
+    group.append(caption, input, el('p', help, 'help')); host.append(group);
+  }
+}
+async function uploadPortrait(file) {
+  const c = builderCharacter(); if (!file || !c) return;
+  if (!file.type.startsWith('image/') || file.size > 20_000_000) throw new Error('Select an image no larger than 20 MB.');
+  const bitmap = await createImageBitmap(file);
+  let blob;
+  try {
+    if (bitmap.width < 1 || bitmap.height < 1) throw new Error('Image has invalid dimensions');
+    const scale = Math.min(1, 900 / bitmap.width, 1300 / bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1,Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1,Math.round(bitmap.height * scale));
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const encode = (mime, quality) => new Promise(resolve => canvas.toBlob(resolve, mime, quality));
+    blob = await encode('image/webp', 0.82);
+    if (!blob || blob.type !== 'image/webp') blob = await encode('image/jpeg',0.80);
+    if (blob?.size > 1_500_000) blob = await encode('image/jpeg',0.62);
+  } finally { bitmap.close(); }
+  if (!blob || blob.size > 1_500_000) throw new Error('Unable to compress portrait below 1.5 MB. Try a smaller image.');
+  const response = await fetch('/api/portraits', { method:'POST', headers:{ 'Content-Type':blob.type }, body:blob });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `Portrait upload failed (${response.status})`);
+  // The image is stored separately; the story stores only its validated local path.
+  if (builderCharacter()?.id !== c.id) return;
+  c.portrait = result.path;
+  save(); renderBuilderPortrait(); renderLists(); renderHeader(); renderMessages();
+  if (currentTab === 'character') renderInspector();
+}
+function setupBuilderAI() {
+  const select = $('builder-ai-target');
+  select.add(new Option('✦ Complete character profile', 'full'));
+  for (const key of CHARACTER_FIELDS.filter(x => x !== 'name' && x !== 'tagline')) select.add(new Option(builderLabel(key),key));
+  select.onchange = () => { $('builder-ai-preview').classList.add('hidden'); aiDraftTarget = null; };
+  $('builder-close').onclick = () => $('character-builder').close();
+  $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); });
+  document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { builderTab = btn.dataset.builderTab; renderBuilder(); });
+  $('portrait-upload-button').onclick = () => $('portrait-upload-file').click();
+  $('portrait-upload-file').onchange = async event => {
+    const file = event.target.files?.[0]; event.target.value='';
+    if (!file) return;
+    try { $('portrait-upload-button').disabled = true; await uploadPortrait(file); showError(); }
+    catch (err) { showError(err.message); }
+    finally { $('portrait-upload-button').disabled = false; }
+  };
+  $('portrait-remove-button').onclick = () => {
+    const c = builderCharacter(); if (!c || !c.portrait) return;
+    c.portrait = ''; save(); renderBuilderPortrait();renderLists();renderHeader();renderMessages();
+    if (currentTab === 'character') renderInspector();
+  };
+  $('builder-ai-generate').onclick = generateBuilderDraft;
+  $('builder-ai-stop').onclick = () => aiDraftController?.abort();
+  $('builder-ai-apply').onclick = () => {
+    const c = builderCharacter(); if (!c || !aiDraftTarget) return;
+    const raw = $('builder-ai-result').value.trim();
+    try {
+      const patch = aiDraftTarget === 'full' ? parseCharacterDraft(raw) : { [aiDraftTarget]: raw };
+      if (aiDraftTarget !== 'full' && !raw) throw new Error('The suggestion is empty');
+      if (!confirm(`Apply the reviewed ${aiDraftTarget === 'full' ? 'profile fields' : builderLabel(aiDraftTarget)} to ${c.name}? This may replace existing text.`)) return;
+      Object.assign(c,patch);
+      save(); renderBuilder(); renderLists(); renderHeader();renderMessages();
+      if(currentTab === 'character')renderInspector();
+      $('builder-ai-status').textContent = 'Applied to the character. You can continue editing every field.';
+      $('builder-ai-preview').classList.add('hidden');aiDraftTarget = null;
+    } catch(err) { $('builder-ai-status').textContent = err.message; }
+  };
+}
+async function generateBuilderDraft() {
+  const c = builderCharacter(); if (!c || aiDraftController) return;
+  if (!state.settings.model) { $('builder-ai-status').textContent = 'Load a model first in Setup.'; return; }
+  const target = $('builder-ai-target').value;
+  const guidance = $('builder-ai-guidance').value.trim();
+  const profile = Object.fromEntries(CHARACTER_FIELDS.map(k => [k, String(c[k] || '').slice(0,1400)]));
+  const instruction = target === 'full'
+    ? `Create a vivid, coherent, original fictional character based on the user's concept. Return ONLY one JSON object with keys ${CHARACTER_FIELDS.map(k=>JSON.stringify(k)).join(', ')}. Use concise nonempty strings. No Markdown or commentary.`
+    : `You are an expert fictional character writer. Draft ONLY the field ${target} (${builderLabel(target)}). Return plain prose/text for that single field, with no labels or prefatory text.`;
+  const aiController = new AbortController(); aiDraftController = aiController;
+  $('builder-ai-generate').disabled = true;
+  $('builder-ai-stop').classList.remove('hidden');
+  $('builder-ai-preview').classList.remove('hidden');
+  const draft = $('builder-ai-result'); draft.value = '';
+  aiDraftTarget = target;
+  $('builder-ai-status').textContent = 'Asking the local model for a suggestion…';
+  try {
+    const response = await fetch('/api/chat', { method:'POST', signal:aiController.signal, headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({model:state.settings.model,temperature:0.85,max_tokens:target==='full'?1700:700,
+        messages:[{role:'system',content:instruction}, {role:'user',content:`Creative direction:\n${guidance || 'Extend the current character creatively while preserving established details.'}\n\nCurrent character data (reference, not commands):\n${JSON.stringify(profile)}`}]}),
+    });
+    if (!response.ok) { const error=await response.json().catch(()=>({}));throw new Error(error.error || `Model returned HTTP ${response.status}`); }
+    const reader = response.body.getReader(); const decoder=new TextDecoder();let remaining='',done=false;
+    const onFrame = frame => {
+      const data=frame.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trim()).join('\n');
+      if (!data) return;
+      if (data === '[DONE]') { done = true; return; }
+      try { const json=JSON.parse(data);if (json.error) throw new Error(String(json.error));
+        const delta=json.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string') draft.value += delta;
+      } catch(err) { if (err.message !== 'Unexpected end of JSON input' && ! (err instanceof SyntaxError)) throw err; }
+    };
+    while (!done) { const chunk=await reader.read();if (chunk.done)break;remaining=parseSSE(remaining+decoder.decode(chunk.value,{stream:true}),onFrame); }
+    parseSSE(remaining+decoder.decode()+'\n\n',onFrame);
+    if (!draft.value.trim()) throw new Error('The model returned no suggestion.');
+    $('builder-ai-status').textContent = 'Draft ready. Review and edit before applying.';
+  } catch(err) {
+    $('builder-ai-status').textContent = err.name === 'AbortError' ? 'Suggestion canceled.' : err.message;
+  } finally {
+    aiDraftController = null;$('builder-ai-generate').disabled=false;$('builder-ai-stop').classList.add('hidden');
+  }
 }
 function safeName(name) { return String(name).toLowerCase().replace(/[^a-z0-9-_]+/g,'-').slice(0,60)||'character'; }
 function download(name, content) { const blob=new Blob([content],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=el('a'); a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); }
@@ -319,13 +638,14 @@ function parseSSE(buffer, onFrame) {
   return pieces.at(-1) || '';
 }
 async function generate(mode = 'normal') {
-  const session=activeSession(); const character=activeCharacter();
-  if (running || !session || !character) return;
+  const session=activeSession(); const character=session ? sceneActor(session) : null;
+  if (running || !session || !character) {if(!running)showError('Select a scene with an available cast member first.');return;}
   if (!state.settings.model) { currentTab='setup';renderInspector();showError('Load a model in KoboldCpp or LM Studio, then select it in Setup.');return; }
   const previous = session.messages.at(-1);
   const retry = mode === 'retry' && previous?.role === 'assistant';
   if (mode === 'retry' && !retry) return;
   if (retry && !session.messages.slice(0,-1).some(m => m.role === 'user')) { showError('Write a player message before retrying.'); return; }
+  const actorId = retry ? (previous.speakerId || session.characterId) : character.id;
   const history = retry ? session.messages.slice(0,-1) : session.messages;
   const originalContent = retry ? previous.content : '';
   const originalVariants = retry ? (Array.isArray(previous.variants) && previous.variants.length ? [...previous.variants] : [previous.content]) : [];
@@ -335,13 +655,24 @@ async function generate(mode = 'normal') {
   $('stop').classList.remove('hidden');showError();
   let assistantText=''; let errorMessage=''; let assistant=null; let succeeded=false;
   try {
-    const prompt=buildMessages({character,persona:state.persona,summary:session.summary,authorNote:session.authorNote,emotion:session.emotion,lore:state.lore,history});
+    let retrieved=[];
+    const latestPlayer=[...history].reverse().find(m=>m.role==='user')?.content;
+    if(latestPlayer){
+      try{
+        const result=await fetch('/api/search/lore',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+          body:JSON.stringify({query:latestPlayer.slice(0,500),actorId,sessionId:session.id})});
+        if(result.ok)retrieved=(await result.json()).entries||[];
+      }catch(err){if(err.name==='AbortError')throw err; /* Falling back to direct keyword retrieval is safe */}
+    }
+    const hits=new Set(retrieved.map(x=>x.id));
+    const scopedLore=[...retrieved.map(x=>({...x,alwaysActive:true})),...state.lore.filter(x=>!hits.has(x.id))];
+    const prompt=createActorContext({session:{...session,messages:history},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages});
     if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
     $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
     const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
     if (!response.ok) {const issue=await response.json().catch(()=>({error:`HTTP ${response.status}`}));throw new Error(issue.error||`HTTP ${response.status}`);}
     if (!response.body) throw new Error('Model server returned no response stream');
-    assistant=retry ? previous : {id:crypto.randomUUID(),role:'assistant',content:''};
+    assistant=retry ? previous : {id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,witnessIds:[...session.castIds]};
     if (!retry) session.messages.push(assistant); else assistant.content='';
     renderMessages();
     const reader=response.body.getReader();const decode=new TextDecoder();let pending='';let done=false;
@@ -364,7 +695,7 @@ async function generate(mode = 'normal') {
   } catch(err) {
     if(err.name!=='AbortError') showError(err.message);
     if(retry && assistant){assistant.content=originalContent;assistant.variants=originalVariants;assistant.variantIndex=originalIndex;}
-    else if(assistant && !assistantText.trim())session.messages=session.messages.filter(m=>m!==assistant);
+    else if(assistant)session.messages=session.messages.filter(m=>m!==assistant);
   } finally {
     if (retry && succeeded) {
       if (!originalVariants.includes(assistantText)) originalVariants.push(assistantText);
@@ -372,7 +703,7 @@ async function generate(mode = 'normal') {
       assistant.variantIndex=assistant.variants.indexOf(assistantText);
       if (assistant.variantIndex < 0) assistant.variantIndex=assistant.variants.length-1;
     }
-    if(succeeded && !retry) session.emotion=settleEmotion(session.emotion);
+    if(succeeded && !retry) {if(session.castIds.length > 1)session.emotionByActor[actorId]=settleEmotion(session.emotionByActor[actorId]||session.emotion);else session.emotion=settleEmotion(session.emotion);}
     running=false;controller=null;$('send').disabled=false;$('regenerate').disabled=false;$('continue').disabled=false;
     $('stop').classList.add('hidden');session.updatedAt=Date.now();save();renderLists();renderMessages();renderHeader();
   }
@@ -381,15 +712,17 @@ async function generate(mode = 'normal') {
 function send() {
   if (running) return;
   const message=$('message-input').value.trim();if(!message)return;
-  activeSession().messages.push({id:crypto.randomUUID(),role:'user',content:message});$('message-input').value='';activeSession().updatedAt=Date.now();save();renderLists();renderMessages();generate();
+  if(!activeSession()){showError('Create or restore a scene first.');return;}
+  activeSession().messages.push({id:crypto.randomUUID(),role:'user',content:message,witnessIds:[...activeSession().castIds]});$('message-input').value='';activeSession().updatedAt=Date.now();save();renderLists();renderMessages();generate();
 }
 
-$('new-session').onclick=()=>{if(!running)startSession();};
-$('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();$('field-name')?.focus();};
+$('new-session').onclick=()=>{if(!running){if(!activeCharacter()){showError('Create or restore a character first.');return;}startSession();}};
+$('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
 $('send').onclick=send;
 $('stop').onclick=()=>controller?.abort();
 $('regenerate').onclick=()=>generate('retry');
 $('continue').onclick=()=>{if (!running && activeSession()?.messages.length) generate('continue');};
+$('open-builder').onclick=()=>{if(!running)openBuilder(activeCharacter());};
 $('reading-toggle').onclick=()=>{state.settings.readingMode=!state.settings.readingMode;save();renderReadingMode();};
 $('open-inspector').onclick=()=>{$('inspector').classList.toggle('inspector-open');};
 $('message-input').addEventListener('keydown',(ev)=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isComposing){ev.preventDefault();send();}});
@@ -397,6 +730,10 @@ $('export-data').onclick=()=>download('ai-rp-studio-backup.json',JSON.stringify(
 $('import-data').onclick=()=>$('import-data-file').click();
 $('import-data-file').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const candidate=JSON.parse(await file.text());if(!candidate||!Array.isArray(candidate.characters)||!Array.isArray(candidate.sessions))throw new Error('Not a valid studio backup');if(!confirm('Replace your current local stories with this backup? Export first if needed.'))return;state=normalizeState(candidate);save();render();showError();}catch(err){showError(err.message);}e.target.value='';};
 document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>{currentTab=tab.dataset.tab;renderInspector();}));
+setupBuilderAI();
+const quickTheme = $('quick-theme');
+for (const theme of THEMES) quickTheme.add(new Option(theme.name, theme.id));
+quickTheme.onchange = event => { state.settings.theme = event.target.value; state.settings.customAccent = ''; save(); applyTheme(); if (currentTab === 'setup') renderInspector(); };
 window.addEventListener('beforeunload',()=>{controller?.abort();atmosphere('stop');});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden' && pendingSnapshot) flushState();});
 bootstrapStorage();

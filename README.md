@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v0.2.0.** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed local scene persistence and a first deterministic emotional-state simulation are implemented.
+**Status: prototype v0.4.0.** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -44,6 +44,20 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
 
+## v0.4: Multi-character worlds and harness groundwork
+
+- **Accessible library management**: × beside a scene or character moves it to Trash. Find archived items under **Library** to restore or permanently delete. A character still referenced by any scene cannot be permanently purged; its historical dialogue remains attributed correctly. Rename scenes using ✎, and create a story branch using ⎇.
+- **Multi-character scenes**: The **Cast** tab selects multiple present characters. Choose **Natural**, **Round-robin**, or **Manual** speaking order. In Natural mode, type `@Mara` or another character's name to explicitly address them. Each assistant message records its speaker ID and the cast who witnessed it.
+- **Scene direction and event records**: The **Scene** tab stores the shared location, fictional time, atmosphere, public story summary, narrative direction, and explicitly witnessed events. World events are not inferred automatically from arbitrary prose.
+- **Knowledge and privacy**: Lore can be public or private; private lore requires a *Known by* list. Actor-specific context excludes facts and dialogue that actor did not witness. Old single-character messages migrate with only their original speaker as a witness, preventing instant mind-reading when someone is added to the cast later.
+- **SQLite lore search**: FTS5 index rebuilt atomically with each story write, filtered by acting character and scene. Text-generation can augment keyword-triggered lore with filtered FTS hits. This is **lexical retrieval**, not vector embeddings yet.
+- **ComfyUI Visuals**: Start local ComfyUI on port 8188 and open the **Visuals** tab. Import a trusted API JSON workflow with `__RP_PROMPT__` in a text node and optional `__RP_NEGATIVE__`; choose it, enter prompt, Generate, and Refresh job. Completed images can be opened or explicitly assigned as a character portrait. Template files live in `.data/comfy-workflows/`. Only reviewed local templates are submitted; no arbitrary browser-supplied node graph is executed.
+- **Themes and portraits**: Ten color palettes and customizable accents, a full-page character atelier with AI suggestion review, and compressed local portrait uploads are included from the earlier local v0.3 prototype.
+
+**Hardware note:** An RTX 2060 may not fit both an 8B LLM and a large ComfyUI generation workflow concurrently. Start ComfyUI separately and run image jobs when text inference is idle; this version does not automatically unload model servers or arbitrate GPU memory.
+
+**Data note:** The old state stays in an atomically updated SQLite snapshot. The `lore_fts` virtual table is a derived index and can be rebuilt from stored canon. Portraits and workflow templates are files; copy the `.data/` directory when migrating computers. Never import unknown ComfyUI custom-node workflows without reviewing them.
+
 ## RP workflow
 
 1. **Characters:** Create a character, edit their identity, voice, story premise, and opening message. Import/export a simple JSON character card.
@@ -62,7 +76,7 @@ Select the model in **Setup**. The model must be loaded in the inference applica
 
 - **Local-first**: Node server only listens on `127.0.0.1`, rejects cross-origin requests, and proxies generation so the browser never talks directly to an external host.
 - **Backend independent**: currently speaks OpenAI-compatible `/v1/models` and `/v1/chat/completions` (SSE). Tested with a mock implementation of that contract; actual GGUF output must be verified against a running model on the user's machine.
-- **Prompt context is explicit**: character identity + persona + simulated emotion + established scene summary + selected pinned moments + keyword-matched lore + Author's Note + recent transcript. See the Context inspector for what is sent.
+- **Prompt context is explicit**: acting character identity + persona + individual scene emotion + appropriately scoped canon/memories + pinned moments + FTS/keyword lore + Author's Note + witnessed transcript. See the Context inspector for what is sent.
 - **Player agency**: custom prompt and UI distinguish player actions from NPC output; a model can still make mistakes.
 - **No third-party runtime dependencies**: vanilla JavaScript/CSS, browser WebGL shader, and the Node built-in HTTP/SQLite modules.
 - **WebGL is optional**: atmospheric effect fails gracefully when WebGL is unavailable.
@@ -74,15 +88,15 @@ Select the model in **Setup**. The model must be loaded in the inference applica
 npm test
 ```
 
-Includes prompt/backup tests, character import, lore activation, emotion transitions and settling, SQLite persistence/revision conflicts, API validation, streaming relay with a fake model server, and same-origin rejection. A successful test run confirms the HTTP contract and local logic, **not** that your selected GGUF generates good prose.
+Includes prompt/backup tests, character import, multi-cast privacy and turn selection, reversible archive/branch operations, lore indexing and authorization, ComfyUI workflow parsing/job outputs, emotional transitions, SQLite revision conflicts, API validation, mock streaming and same-origin rejection. A successful test run confirms the HTTP contract and local logic, **not** that your selected GGUF generates good prose.
 
 ## Known limits / next milestones
 
-- SQLite is currently a single atomic JSON document snapshot in a local database, not a fully normalized world-event schema. Add targeted SQLite indexes and tables when the simulation needs them.
+- SQLite state is currently a single atomic JSON snapshot plus a real FTS5 lore index, not a normalized world/entity/event schema. Split out durable indexed records when simulation needs them.
 - Add tokenizer-accurate prompt budgeting, explicit source tracing, controlled summary generation, and evidence-linked auto-memory proposals.
-- Extend the manual emotion simulation into an appraisal engine driven by verified world events, bounded per-character traits, and separate relationship state. Do **not** infer player intent through keyword sentiment.
-- Implement deterministic world state, world clock, locations, multi-NPC relationships and memories.
-- Add full character card V2 and lorebook import/export compatibility, with validation.
+- Extend the manual emotion simulation into character-specific appraisal driven by verified events, bounded traits, individual beliefs, and separate relationships. Do **not** infer player intent through keyword sentiment.
+- Implement deterministic world time, typed location/relationship tables, multi-NPC offscreen goals, verified event proposals and acceptance.
+- Add full Tavern Card V2 and lorebook import/export compatibility, with validation. Add optional local embeddings and sqlite-vec after scoping tests and memory quality evaluation.
 - Improve scene presentation with optional character artwork and 3D world viewer only when it serves the roleplay.
 - Avoid coupling the application to any one model family, prompt format, or inference backend.
 

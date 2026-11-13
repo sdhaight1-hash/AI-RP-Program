@@ -1,9 +1,11 @@
 import http from 'node:http';
 import { createInterface } from 'node:readline';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { StudioStore } from './storage.mjs';
+import { ComfyClient } from './comfy.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -13,12 +15,27 @@ const ALLOWED = new Map([
   ['/scene.js', ['scene.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/engine.mjs', ['../engine.mjs', 'text/javascript; charset=utf-8']],
+  ['/harness.mjs', ['../harness.mjs', 'text/javascript; charset=utf-8']],
 ]);
 const json = (res, status, data) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
 };
 
+async function readBinary(req, limit = 1_500_000) {
+  const chunks = []; let length = 0;
+  for await (const chunk of req) {
+    length += chunk.length;
+    if (length > limit) throw new RangeError('Portrait exceeds the 1.5 MB upload limit');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+function verifiedImage(bytes, type) {
+  if (type === 'image/jpeg' && bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
+  if (type === 'image/webp' && bytes.length > 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  throw new RangeError('Only valid JPEG or WebP portraits are accepted');
+}
 async function readJson(req, limit = 750_000) {
   let raw = '';
   for await (const chunk of req) {
@@ -28,10 +45,12 @@ async function readJson(req, limit = 750_000) {
   try { return JSON.parse(raw); } catch { throw new Error('Invalid JSON'); }
 }
 
-export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new StudioStore(join(root, '.data', 'studio.sqlite')) } = {}) {
+export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new StudioStore(join(root, '.data', 'studio.sqlite')), portraitDir = join(root, '.data', 'portraits'), comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows') } = {}) {
+  const comfy = new ComfyClient({url:comfyUrl,fetchImpl:comfyFetchImpl,templateDir:comfyTemplateDir});
   // The server binds localhost by default; this additional check rejects cross-site writes.
   const server = http.createServer(async (req, res) => {
-    const path = (req.url || '/').split('?')[0];
+    const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
+    const path = requestUrl.pathname;
     const origin = req.headers.origin;
     if (origin) {
       try {
@@ -42,6 +61,26 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       } catch { return json(res, 403, { error: 'Invalid origin' }); }
     }
     try {
+      if (req.method === 'POST' && path === '/api/portraits') {
+        const type = (req.headers['content-type'] || '').toLowerCase();
+        if (!['image/webp', 'image/jpeg'].includes(type)) return json(res, 415, { error: 'Portrait must be JPEG or WebP' });
+        const bytes = await readBinary(req);
+        const ext = verifiedImage(bytes, type);
+        const filename = `${randomUUID()}.${ext}`;
+        await mkdir(portraitDir, { recursive: true });
+        await writeFile(join(portraitDir, filename), bytes, { flag: 'wx' });
+        return json(res, 201, { path: `/portraits/${filename}` });
+      }
+      if (req.method === 'GET' && /^\/portraits\/[a-f0-9-]{36}\.(?:jpg|webp)$/.test(path)) {
+        try {
+          const image = await readFile(join(portraitDir, path.slice('/portraits/'.length)));
+          res.writeHead(200, { 'Content-Type': path.endsWith('.webp') ? 'image/webp' : 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400' });
+          return res.end(image);
+        } catch (error) {
+          if (error.code === 'ENOENT') return json(res, 404, { error: 'Portrait not found' });
+          throw error;
+        }
+      }
       if (req.method === 'GET' && path === '/api/state') {
         return json(res, 200, store.load());
       }
@@ -56,6 +95,39 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         }
         const result = store.save(payload.state, payload.revision);
         return result ? json(res, 200, result) : json(res, 409, { error: 'Story was changed in another tab; export local changes before reloading.' });
+      }
+      if (req.method === 'POST' && path === '/api/search/lore') {
+        const {query,actorId,sessionId}=await readJson(req,4000);
+        if(typeof query !== 'string' || query.length > 500 || typeof actorId !== 'string' || typeof sessionId !== 'string')return json(res,400,{error:'Invalid lore query'});
+        const state=store.load().state;
+        const session=state?.sessions?.find(s=>s.id===sessionId && !s.trashedAt);
+        if(!session || !(session.castIds||[session.characterId]).includes(actorId) || !state.characters.some(c=>c.id===actorId && !c.trashedAt))return json(res,400,{error:'Actor not in this scene'});
+        return json(res,200,{entries:store.searchLore(query,{actorId,sessionId,limit:6})});
+      }
+      if (req.method === 'GET' && path === '/api/comfy/status') {
+        try{return json(res,200,await comfy.status());}catch(error){return json(res,200,{connected:false,error:error.message});}
+      }
+      if (req.method === 'GET' && path === '/api/comfy/templates') return json(res,200,{templates:await comfy.templates()});
+      if (req.method === 'POST' && path === '/api/comfy/import') {
+        const payload=await readJson(req,1_100_000);
+        try{return json(res,201,await comfy.install(payload));}catch(error){return json(res,422,{error:error.message});}
+      }
+      if (req.method === 'POST' && path === '/api/comfy/generate') {
+        const payload=await readJson(req,8000);
+        if(typeof payload.templateId !== 'string' || typeof payload.prompt !== 'string' || payload.prompt.length > 4000 || typeof (payload.negative||'') !== 'string')return json(res,400,{error:'Invalid ComfyUI job'});
+        try{return json(res,202,await comfy.submit(payload));}catch(error){return json(res,422,{error:error.message});}
+      }
+      if (req.method === 'GET' && path === '/api/comfy/history') {
+        try{return json(res,200,await comfy.history(requestUrl.searchParams.get('job')));}catch(error){return json(res,404,{error:error.message});}
+      }
+      if (req.method === 'GET' && path === '/api/comfy/image') {
+        try{
+          const {bytes,type}=await comfy.image(requestUrl.searchParams.get('job'),requestUrl.searchParams.get('filename'),requestUrl.searchParams.get('subfolder')||'');
+          res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'});return res.end(bytes);
+        }catch(error){return json(res,404,{error:error.message});}
+      }
+      if (req.method === 'GET' && path === '/api/harness/status') {
+        return json(res,200,{local:true,backend:new URL(lmUrl).host,storage:'sqlite',retrieval:'SQLite FTS5',comfyUrl:new URL(comfy.url).host});
       }
       if (req.method === 'GET' && path === '/api/models') {
         const response = await fetchImpl(`${lmUrl}/models`, { signal: AbortSignal.timeout(3500) });
