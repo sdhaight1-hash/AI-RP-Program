@@ -74,6 +74,28 @@ export function inspectWorldStorage(dataDir) {
         entry.duplicateCharacterMirrors=duplicates.length;
         if(duplicates.length)report.warnings.push({scope:row.id,
           detail:duplicates.length+' characters have duplicate world identities. Review and delete redundant entities in Relations; linked relationships may be affected.'});
+        const ghostActors=new Set();
+        for(const table of ['actor_memories','actor_facts','event_proposals','timeline_events']){
+          const rows=db.prepare(`SELECT DISTINCT actor_id AS id FROM ${table}
+            WHERE timeline_id IN (SELECT id FROM timelines WHERE world_id=?)`).all(row.id);
+          for(const actor of rows)if(!knownCharacterIds.has(actor.id)&&
+            !actor.id.startsWith('player:')&&!db.prepare(`SELECT 1 FROM timeline_actors
+              WHERE actor_id=? AND controller IN ('player','system') LIMIT 1`).get(actor.id))
+              ghostActors.add(actor.id);
+        }
+        entry.orphanedActorRecords=ghostActors.size;
+        if(ghostActors.size)report.warnings.push({scope:row.id,
+          detail:ghostActors.size+' missing character identities still own derived memories or world events. Opening the world attempts scoped repair.'});
+        const validSceneIds=new Set(parsed.sessions.map(s=>s.id));
+        const lostScenes=new Set();
+        for(const table of ['actor_memories','actor_facts','event_proposals']){
+          const rows=db.prepare(`SELECT DISTINCT scene_id AS id FROM ${table}
+            WHERE timeline_id IN (SELECT id FROM timelines WHERE world_id=?)`).all(row.id);
+          for(const scene of rows)if(!validSceneIds.has(scene.id))lostScenes.add(scene.id);
+        }
+        entry.orphanedSceneSources=lostScenes.size;
+        if(lostScenes.size)report.warnings.push({scope:row.id,
+          detail:lostScenes.size+' missing scenes retain derived memory or event-source rows; open the world to reconcile them.'});
         const timelineIds=new Set(db.prepare('SELECT id FROM timelines WHERE world_id=?').all(row.id).map(x=>x.id));
         if(parsed.sessions.some(s=>s.timelineId&&!timelineIds.has(s.timelineId)))
           fail('Scene references an unknown or foreign timeline');
