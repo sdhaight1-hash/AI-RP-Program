@@ -70,7 +70,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const facts=retrieveActorFacts(store,{timelineId:scene.timelineId,actorId,query,limit:5});
   // Dense-search scores do not grant authority. Resolve every semantic ID
   // again from this actor's own timeline; ignore caller-supplied text.
-  const already=new Set([...facts.map(x=>'fact:'+x.id)]);
+  const already=new Set([...facts.map(x=>'fact:'+x.id),...recalled.map(x=>'dialogue:'+x.id)]);
   const verifiedFacts=semanticEvidence.length?new Map(
     listActorFacts(store,{timelineId:scene.timelineId,actorId})
       .filter(f=>f.status==='active'&&f.validSource).map(f=>[f.id,f])
