@@ -2331,6 +2331,7 @@ $('new-character').onclick=()=>{
   const c=createCharacter('New character');
   state.characters.push(c);
   save();
+  renderLists();
   setWorkspace('characters');
   openBuilder(c);
 };
