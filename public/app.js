@@ -9,6 +9,7 @@ import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterCh
 import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/character/world-bridge.mjs';
 import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
+import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -33,6 +34,8 @@ let aiDraftController = null;
 let worldEntryController = null;
 let worldEntryRequest = null;
 let fidelityController = null;
+let localEvalController = null;
+let localEvalReport = null;
 let fidelityDraft = null;
 let fidelitySelectedProbe = 'everyday';
 const builderCharacter = () => state.characters.find(c => c.id === builderCharacterId);
@@ -1181,6 +1184,21 @@ function renderCharacterLab(host, character) {
   run.onclick=()=>runFidelityProbe();stop.onclick=()=>fidelityController?.abort();actions.append(run,stop);
   const status=el('p',fidelityController?'Model is generating…':'Each run tests the currently saved profile. Comparisons are qualitative, not scientific personality scores.','builder-note');status.id='fidelity-status';
   host.append(label,select,prompt,objective,actions,status);
+  const assessment=el('section','','group');
+  assessment.append(el('h4','Real local-model assessment','builder-subtitle'),
+    el('p','Run seven read-only synthetic tests against your loaded chat model: three compartmentalized character fields, three voice/agency/channel probes and one character-to-world extraction. Optionally test the configured local embedding model. Timing and warnings are diagnostic, not a personality score.','help'));
+  const evalActions=el('div','','inline-actions');
+  const runEval=el('button','Run local model assessment','subtle-button');
+  const cancelEval=el('button','Cancel assessment','subtle-button');
+  runEval.disabled=Boolean(localEvalController||fidelityController||aiDraftController||worldEntryController||running);
+  cancelEval.classList.toggle('hidden',!localEvalController);
+  runEval.onclick=runLocalModelAssessment;cancelEval.onclick=()=>localEvalController?.abort();
+  evalActions.append(runEval,cancelEval);
+  assessment.append(evalActions,el('p',localEvalController?'Evaluation running…':'The assessment never changes your stories or world records.','help'));
+  const reportArea=el('div','','group');reportArea.id='local-eval-report';
+  assessment.append(reportArea);host.append(assessment);
+  if(localEvalReport)renderLocalModelReport(localEvalReport);
+
   const draft=fidelityDraft?.characterId===character.id && fidelityDraft?.probeId===current.id ? fidelityDraft : null;
   if (draft) {
     host.append(el('h4','Test reply','builder-subtitle'));
@@ -1226,6 +1244,111 @@ function renderCharacterLab(host, character) {
     past.append(record);
   }
   host.append(past);
+}
+
+function renderLocalModelReport(report) {
+  const host=$('local-eval-report');if(!host)return;host.replaceChildren();
+  const summary=report.summary;
+  host.append(el('h4',`Local assessment · ${report.model}`,'builder-subtitle'),
+    el('p',`Completed ${summary.completed} tasks · ${summary.valid} parse-valid · ${summary.heuristicWarnings} heuristic warning(s) · median latency ${summary.medianLatencyMs??'n/a'} ms.`,'help'));
+  for(const result of report.results) {
+    const item=el('div','','lore-card');
+    item.append(el('strong',`${result.id} · ${result.elapsedMs} ms · ${result.valid?'valid format':'format issue'}`));
+    if(result.type==='world')item.append(el('p',
+      `Source-backed world entries: ${result.details.eligibleCount||0}. Expected names recovered: ${(result.details.recovered||[]).join(', ')||'none'}.`,'help'));
+    for(const warning of result.warnings)item.append(el('p','Review: '+warning,'help'));
+    if(result.details.excerpt)item.append(el('p',result.details.excerpt,'help'));
+    host.append(item);
+  }
+  const sem=report.semantic;
+  host.append(el('p',sem?.status==='completed'
+    ?`Real local embeddings · indirect pendant recall: ${sem.positive.foundExpected?'found':'missed'} · unrelated cooking query: ${sem.negative.unexpectedMatches} retrieved match(es) · ${sem.positive.elapsedMs+sem.negative.elapsedMs} ms combined.`
+    :`Local embedding assessment: ${sem?.status||'not-run'}${sem?.reason||sem?.error?' · '+(sem.reason||sem.error):''}`,'help'));
+  host.append(el('p','Scores are small diagnostic checks on a synthetic character. Human review is still needed for voice, emotional realism and narrative correctness.','help'));
+  const exportReport=el('button','Export local assessment JSON','subtle-button');
+  exportReport.onclick=()=>download('ai-rp-local-model-assessment.json',JSON.stringify(report,null,2));
+  host.append(exportReport);
+}
+
+async function requestLocalModelEvaluationText(task,signal,model,worldId) {
+  const response=await fetch('/api/chat',{method:'POST',signal,
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({worldId,model,temperature:task.temperature,
+      max_tokens:task.maxTokens,messages:task.messages})
+  });
+  if(!response.ok){const reason=await response.json().catch(()=>({}));
+    throw new Error(reason.error||'Local model rejected assessment prompt');}
+  if(!response.body)throw new Error('Local model returned an empty response stream');
+  const reader=response.body.getReader(),decoder=new TextDecoder();
+  let buffer='',out='',done=false;
+  const onFrame=frame=>{
+    const data=frame.split('\n').filter(x=>x.startsWith('data:')).map(x=>x.slice(5).trim()).join('\n');
+    if(data==='[DONE]'){done=true;return;}if(!data)return;
+    const parsed=JSON.parse(data);
+    if(parsed.error)throw new Error(String(parsed.error));
+    if(typeof parsed.choices?.[0]?.delta?.content==='string')out+=parsed.choices[0].delta.content;
+  };
+  while(!done) {
+    const part=await reader.read();if(part.done)break;
+    buffer=parseSSE(buffer+decoder.decode(part.value,{stream:true}),onFrame);
+  }
+  parseSSE(buffer+decoder.decode()+'\n\n',onFrame);
+  if(!out.trim())throw new Error('Local model returned no test content');
+  return out.slice(0,12000);
+}
+
+async function runLocalModelAssessment() {
+  const character=builderCharacter();
+  if(!character||localEvalController||fidelityController||aiDraftController||worldEntryController||running)return;
+  if(!state.settings.model){showError('Load a local chat model in Setup first.');return;}
+  const controller=new AbortController();localEvalController=controller;
+  const model=state.settings.model,worldId=activeWorldId,characterId=character.id;
+  localEvalReport=null;
+  renderBuilder();
+  const status=()=>document.querySelector('#local-eval-report');
+  const startedAt=new Date().toISOString(),fixture=makeLocalModelEvaluationTasks();
+  const results=[];
+  try {
+    for(let i=0;i<fixture.tasks.length;i++) {
+      if(controller.signal.aborted)throw new DOMException('Assessment cancelled','AbortError');
+      const task=fixture.tasks[i],panel=status();
+      if(panel)panel.textContent=`Running local assessment ${i+1}/${fixture.tasks.length}: ${task.id}…`;
+      const started=performance.now();
+      try{
+        const reply=await requestLocalModelEvaluationText(task,controller.signal,model,worldId);
+        const result=inspectLocalModelResult(task,reply,fixture);
+        results.push({...result,elapsedMs:Math.round(performance.now()-started)});
+      }catch(error){
+        if(error.name==='AbortError')throw error;
+        results.push({id:task.id,type:task.type,target:task.target,valid:false,
+          elapsedMs:Math.round(performance.now()-started),
+          warnings:['Test request failed: '+error.message],details:{}});
+      }
+    }
+    if(status())status().textContent='Checking configured local embedding model with synthetic positive/negative cues…';
+    let semantic={status:'unavailable'};
+    try{
+      const response=await fetch('/api/eval/semantic-local',{method:'POST',signal:controller.signal,
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId})});
+      if(!response.ok)throw new Error('Embedding assessment HTTP '+response.status);
+      semantic=await response.json();
+    }catch(error){if(error.name==='AbortError')throw error;semantic={status:'unavailable',error:error.message};}
+    if(controller.signal.aborted)throw new DOMException('Assessment cancelled','AbortError');
+    if(builderCharacter()?.id!==characterId||activeWorldId!==worldId||state.settings.model!==model)
+      throw new Error('Assessment became stale after character, model or world switch.');
+    localEvalReport={schemaVersion:1,model,startedAt,results,semantic,
+      summary:summarizeLocalModelEvaluation(results)};
+  }catch(error) {
+    if(error.name!=='AbortError')showError(error.message);
+  }finally {
+    if(localEvalController===controller)localEvalController=null;
+    if(builderCharacter()?.id===characterId&&builderTab==='lab'){
+      renderBuilder();
+      if(!localEvalReport&&status())status().textContent=controller.signal.aborted
+        ?'Local assessment cancelled. No changes saved.'
+        :'Local assessment did not finish. No changes saved.';
+    }
+  }
 }
 
 async function runFidelityProbe() {
@@ -1331,7 +1454,7 @@ function setupBuilderAI() {
       : 'Develop four currently empty fields. Each receives its own rules and uses the established character as context.';
   };
   $('builder-close').onclick = () => $('character-builder').close();
-  $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); worldEntryController?.abort(); fidelityController?.abort(); });
+  $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); worldEntryController?.abort(); fidelityController?.abort(); localEvalController?.abort(); });
   document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { if (builderTab === 'lab' && btn.dataset.builderTab !== 'lab') fidelityController?.abort(); builderTab = btn.dataset.builderTab; renderBuilder(); });
   $('portrait-upload-button').onclick = () => $('portrait-upload-file').click();
   $('portrait-upload-file').onchange = async event => {
