@@ -92,7 +92,7 @@ let writeTimer = null;
 const queueSave = (snapshot) => {
   pendingSnapshot = snapshot;
   clearTimeout(writeTimer);
-  if (serverStorage) writeTimer = setTimeout(flushState, 220);
+  if (serverStorage && !sending) writeTimer = setTimeout(flushState, 220);
 };
 const save = () => {
   const snapshot = JSON.stringify(state);
@@ -2162,7 +2162,7 @@ async function send() {
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({worldId:worldAtSend,sceneId:sceneAtSend,revision,message})});
     const result=await response.json();
-    if(!response.ok)throw new Error(result.error||`Message append failed (${response.status})`);
+    if(!response.ok)throw Object.assign(new Error(result.error||`Message append failed (${response.status})`),{status:response.status});
     if(result.worldId!==worldAtSend||result.sceneId!==sceneAtSend||
       result.message?.id!==message.id||!Number.isSafeInteger(result.revision))
       throw new Error('Server returned a different world, scene or message');
@@ -2170,19 +2170,28 @@ async function send() {
     session.messages.push(result.message);
     session.updatedAt=Date.now();
     $('message-input').value='';
-    // The append is committed. Update only the emergency local browser copy;
-    // do not queue a redundant full-document PUT to SQLite.
+    // The append is committed. Other editor changes made while the request
+    // was in flight must still be saved; refresh their queued snapshot so it
+    // includes the newly persisted player turn rather than erasing it.
+    const snapshot=JSON.stringify(state);
+    const hasPending=pendingSnapshot!==null;
+    if(hasPending)pendingSnapshot=snapshot;
     try{
-      localStorage.setItem(backupStateKey(),JSON.stringify(state));
-      localStorage.removeItem(pendingBackupKey());
+      localStorage.setItem(backupStateKey(),snapshot);
+      if(hasPending)localStorage.setItem(pendingBackupKey(),JSON.stringify({revision}));
+      else localStorage.removeItem(pendingBackupKey());
     }catch{showError('Browser backup quota unavailable; the turn is saved in SQLite.');}
     renderLists();renderMessages();renderHeader();
   }catch(error){
-    // Keep the unsent text in the composer. Do not auto-replay unknown writes.
-    showError(error.message+' The draft remains in the composer; reload if another tab changed the story.');
+    // Keep the unsent text in the composer. Never retry an unknown write.
+    if(error.status===409)serverStorage=false;
+    showError(error.message+' The draft remains in the composer; export any local edits before reloading.');
     return;
   }finally{
     sending=false;$('send').disabled=running;$('message-input').readOnly=false;
+    if(pendingSnapshot!==null&&serverStorage&&!writeInFlight){
+      clearTimeout(writeTimer);writeTimer=setTimeout(flushState,120);
+    }
   }
   void generate();
 }
