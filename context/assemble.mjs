@@ -55,7 +55,10 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const latest=visible.history.slice(-8).map(m=>m.content).join(' ');
   // Use the latest witnessed user cue. Including the preceding user message
   // made unrelated small talk resurrect its old topic and steal token budget.
-  const directCue=visible.history.filter(m=>m.role==='user').at(-1)?.content || latest;
+  // The visibility layer decorates player speech with "Player:". That label
+  // must never become a retrieval term: every indexed player memory has it.
+  const directCue=visible.history.filter(m=>m.role==='user').at(-1)?.content
+    .replace(/^Player:\s*/u,'') || latest;
   const details=selectCharacterDetails(actor,directCue);
   // Personal recollections respond to the actual conversation cue. Names and
   // scene labels belong in lore search, not every actor's memory search query.
