@@ -309,7 +309,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         let prompt;
         try {
           prompt=buildActorContext({store,worldId:data.worldId,sceneId:data.sceneId,actorId:data.actorId,
-            mode:data.mode||'normal',contextWindow:Math.min(contextRequested,backend.contextWindow||4096),
+            mode:data.mode||'normal',contextWindow:Math.min(contextRequested,backend.contextWindow||contextRequested),
             maxOutput:responseTokens});
           prompt=await enforceTokenBudget(prompt,backend);
         } catch(error) {return json(res,422,{error:error.message});}
