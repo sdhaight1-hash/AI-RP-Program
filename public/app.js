@@ -1261,8 +1261,12 @@ function renderWorkspace(){
   const characters=state.characters.filter(c=>!c.trashedAt);
   const scenes=state.sessions.filter(s=>!s.trashedAt);
   const places=(worldLibrary?.locations||[]).filter(x=>x.worldId===activeWorldId);
-  const entities=(worldLibrary?.entities||[]).filter(x=>x.worldId===activeWorldId);
-  const relationships=(worldLibrary?.relationships||[]).filter(x=>x.worldId===activeWorldId);
+  const archivedCharacterIds=new Set(state.characters.filter(c=>c.trashedAt).map(c=>c.id));
+  const entities=(worldLibrary?.entities||[]).filter(x=>x.worldId===activeWorldId &&
+    !(x.sourceCharacterId&&archivedCharacterIds.has(x.sourceCharacterId)));
+  const activeEntityIds=new Set(entities.map(x=>x.id));
+  const relationships=(worldLibrary?.relationships||[]).filter(x=>x.worldId===activeWorldId &&
+    activeEntityIds.has(x.fromId)&&activeEntityIds.has(x.toId));
   const timelines=(worldLibrary?.timelines||[]).filter(x=>x.worldId===activeWorldId);
   const scene=activeSession(),character=activeCharacter();
   const grid=el('div','','workspace-grid');
