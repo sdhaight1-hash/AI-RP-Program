@@ -35,6 +35,12 @@ test('two browser world IDs can read, edit, and query without changing global se
   t.after(()=>new Promise(resolve=>app.close(resolve)));
   const base='http://127.0.0.1:'+app.address().port;
   const A=story('A NPC','A_WORLD_KNOWLEDGE'),B=story('B NPC','B_WORLD_KNOWLEDGE');
+  const unscoped=await fetch(base+'/api/state',{method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({revision:1,state:A.state})});
+  assert.equal(unscoped.status,400,'partitioned world saves require an explicit world ID');
+  assert.equal((await fetch(base+'/api/events/proposals?sceneId=x')).status,400,
+    'world-bound history reads require an explicit world ID');
   const initialA=await get(base,'/api/state?worldId='+a);
   const initialB=await get(base,'/api/state?worldId='+b);
   assert.equal(initialA.data.worldId,a);
