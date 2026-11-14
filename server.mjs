@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { StudioStore } from './storage.mjs';
+import { WorldPartitionStore } from './world/partition-store.mjs';
 import { ComfyClient } from './comfy.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -18,6 +19,9 @@ const ALLOWED = new Map([
   ['/harness.mjs', ['../harness.mjs', 'text/javascript; charset=utf-8']],
   ['/psychology.mjs', ['../psychology.mjs', 'text/javascript; charset=utf-8']],
   ['/fidelity.mjs', ['../fidelity.mjs', 'text/javascript; charset=utf-8']],
+  ['/character/context.mjs', ['character/context.mjs', 'text/javascript; charset=utf-8']],
+  ['/character/schema.mjs', ['../character/schema.mjs', 'text/javascript; charset=utf-8']],
+  ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/reply-review.mjs', ['../interactions/reply-review.mjs', 'text/javascript; charset=utf-8']],
 ]);
@@ -49,7 +53,7 @@ async function readJson(req, limit = 750_000) {
   try { return JSON.parse(raw); } catch { throw new Error('Invalid JSON'); }
 }
 
-export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new StudioStore(join(root, '.data', 'studio.sqlite')), portraitDir = join(root, '.data', 'portraits'), comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows') } = {}) {
+export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new WorldPartitionStore(join(root, '.data')), portraitDir = null, comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows') } = {}) {
   const comfy = new ComfyClient({url:comfyUrl,fetchImpl:comfyFetchImpl,templateDir:comfyTemplateDir});
   // The server binds localhost by default; this additional check rejects cross-site writes.
   const server = http.createServer(async (req, res) => {
@@ -71,14 +75,16 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const bytes = await readBinary(req);
         const ext = verifiedImage(bytes, type);
         const filename = `${randomUUID()}.${ext}`;
-        await mkdir(portraitDir, { recursive: true });
-        await writeFile(join(portraitDir, filename), bytes, { flag: 'wx' });
+        const assetDir = portraitDir || store.assetDir?.('portraits') || join(root,'.data','portraits');
+        await mkdir(assetDir, { recursive: true });
+        await writeFile(join(assetDir, filename), bytes, { flag: 'wx' });
         return json(res, 201, { path: `/portraits/${filename}` });
       }
       if (req.method === 'GET' && /^\/portraits\/[a-f0-9-]{36}\.(?:jpg|webp)$/.test(path)) {
         try {
-          const image = await readFile(join(portraitDir, path.slice('/portraits/'.length)));
-          res.writeHead(200, { 'Content-Type': path.endsWith('.webp') ? 'image/webp' : 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400' });
+          const assetDir = portraitDir || store.assetDir?.('portraits') || join(root,'.data','portraits');
+          const image = await readFile(join(assetDir, path.slice('/portraits/'.length)));
+          res.writeHead(200, { 'Content-Type': path.endsWith('.webp') ? 'image/webp' : 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
           return res.end(image);
         } catch (error) {
           if (error.code === 'ENOENT') return json(res, 404, { error: 'Portrait not found' });
@@ -87,6 +93,12 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'GET' && path === '/api/worlds') {
         return json(res,200,store.worlds.list());
+      }
+      if (req.method === 'POST' && path === '/api/worlds/activate') {
+        const { worldId }=await readJson(req,1500);
+        if (!store.activateWorld) return json(res,501,{error:'This storage backend does not support world switching'});
+        try {return json(res,200,store.activateWorld(worldId));}
+        catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds') {
         const data=await readJson(req,5000);
@@ -163,13 +175,19 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const payload = await readJson(req, 4_500_000);
         if (!payload || !Number.isSafeInteger(payload.revision) || payload.revision < 0 ||
           !payload.state || !Array.isArray(payload.state.characters) || !Array.isArray(payload.state.sessions) ||
-          !payload.state.characters.length ||
+          (!payload.state.characters.length && !store.activateWorld) ||
           !payload.state.characters.every(c => c && typeof c.id === 'string' && typeof c.name === 'string') ||
           !payload.state.sessions.every(s => s && typeof s.id === 'string' && Array.isArray(s.messages))) {
           return json(res, 400, { error: 'Invalid story document or revision' });
         }
-        const result = store.save(payload.state, payload.revision);
-        return result ? json(res, 200, result) : json(res, 409, { error: 'Story was changed in another tab; export local changes before reloading.' });
+        try {
+          const result = store.save(payload.state, payload.revision, { worldId: payload.worldId });
+          return result ? json(res, 200, result) : json(res, 409, { error: 'Story was changed in another tab; export local changes before reloading.' });
+        } catch(err) {
+          if (/World changed;/.test(err.message)) return json(res,409,{error:err.message});
+          if (/belongs to another world|not a location in this world|not in this world/.test(err.message))return json(res,422,{error:err.message});
+          throw err;
+        }
       }
       if (req.method === 'POST' && path === '/api/search/lore') {
         const {query,actorId,sessionId}=await readJson(req,4000);

@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v1.2.0 (non-destructive NPC reply review).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v2.0.0 (world isolation + character creation redesign).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -43,6 +43,20 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v2.0: World-first workspaces and Character Studio 2.0
+
+**Worlds are top-level isolated ecosystems.** Starting the program opens a World Library. Every new world has its own SQLite database under `.data/worlds/<world-id>/world.sqlite`, plus a separate asset directory. The small `.data/registry.sqlite` holds only world labels and the active selection. Every world has its own cast, scenes, lore, locations, relationship records, encounters and timeline history. The app shares only its software and model settings. There is no live sharing of characters across worlds.
+
+**Existing saves are preserved.** On first startup, the former `.data/studio.sqlite` is left untouched and is partitioned into independent world databases. The migration uses SQLite `VACUUM INTO` and verifies foreign-key integrity. Historical event ledgers, scene messages and portraits migrate; characters referenced by more than one world get separate per-world records. Unassigned legacy characters and global lore are placed in a distinct imported-content world instead of appearing in all worlds. **Back up the entire `.data/` folder before upgrading.** Cross-world character copy/import with explicit dependency mapping will be added in a later version.
+
+**Character Studio is world-aware.** Character definitions now separate identity, appearance, personality and behavioral patterns, personal history, and **Places & Daily Life** (linked home, workplace, frequent places, routines, environmental preferences). These are familiar places, **not the character's current location**. World links are checked at save time. Character records automatically link to authored world entities by stable character ID, not name.
+
+**Scenarios no longer belong to permanent NPC identity.** Optional encounter templates belong to the world: participant(s), premise, location, channel and opener. New scenes may begin unscripted or using a template. Existing card `scenario`, `greeting` and alternate greetings migrate into optional encounter records, rather than appearing in every future acting prompt. The old first scene and its saved transcript remain intact.
+
+**Context-aware AI Co-Author:** suggestions use the selected world's approved places, entities, direct relationships and authored lore as creative references, alongside the existing character. `Develop missing details` drafts up to four blank fields, or you can target one field. Every suggestion remains a draft until reviewed and accepted field by field. It refuses to apply a stale draft after its character or supplied world/lore context changes. NPC generation still uses witness/knowledge-filtered acting context—not the unrestricted authoring context—and resolves the NPC's own familiar places from the selected world.
+
+**Limits:** The world ecosystem is an isolation/persistence foundation, not autonomous town simulation. Movement, schedules, ongoing communication threads, and fully automatic NPC life are still future work. No live GGUF or ComfyUI behavior was evaluated in this environment; test these against your loaded models. The local data is not encrypted or an OS-level security sandbox. Legacy single-document exports remain a per-world backup, not an all-world archive.
 
 ## v1.2: Provisional NPC replies and review gate
 

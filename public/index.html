@@ -11,6 +11,7 @@
   <div class="shell">
     <aside class="rail">
       <div class="brand"><div class="brand-mark">✦</div><div><strong>AI RP <span>STUDIO</span></strong><small>LOCAL STORY ENGINE</small></div></div>
+      <div class="rail-section"><button id="world-home" class="subtle-button world-home" title="Choose a world">◉ Worlds</button><div id="world-label" class="world-label"></div></div>
       <div class="rail-section"><div class="section-head"><span>SESSIONS</span><button id="new-session" class="icon-button" title="Start new scene">＋</button></div><div id="session-list" class="session-list"></div></div>
       <div class="rail-section character-section"><div class="section-head"><span>CHARACTERS</span><button id="new-character" class="icon-button" title="Create character">＋</button></div><div id="character-list"></div></div>
       <div class="rail-bottom"><div id="connection" class="connection"><i></i><span>Checking model server…</span></div><div class="rail-hint">Private, local sessions · export your backups</div></div>
@@ -22,6 +23,13 @@
     </main>
     <aside class="inspector" id="inspector"><div class="stage"><canvas id="scene-canvas" aria-label="Animated WebGL atmosphere preview"></canvas><img id="stage-portrait" class="stage-portrait hidden" alt="" /><div class="stage-label">WEBGL · ATMOSPHERE PREVIEW</div><div class="stage-caption"><div class="stage-avatar" id="stage-avatar">M</div><div><strong id="stage-name">Mara Vale</strong><small>ACTIVE CHARACTER</small></div></div></div><div class="tabs" role="tablist"><button data-tab="character" class="active" role="tab">Character</button><button data-tab="cast" role="tab">Cast</button><button data-tab="worlds" role="tab">Worlds</button><button data-tab="atlas" role="tab">Atlas</button><button data-tab="relations" role="tab">Relations</button><button data-tab="scene" role="tab">Scene</button><button data-tab="lore" role="tab">Lore</button><button data-tab="memory" role="tab">Story</button><button data-tab="emotion" role="tab">Emotion</button><button data-tab="context" role="tab">Context</button><button data-tab="gallery" role="tab">Visuals</button><button data-tab="library" role="tab">Library</button><button data-tab="setup" role="tab">Setup</button></div><div id="inspector-content" class="inspector-body"></div></aside>
   </div>
+  <dialog id="world-launcher" class="world-launcher" aria-labelledby="world-launcher-title"><div class="world-launcher-head"><h2 id="world-launcher-title">Your Worlds</h2><button id="world-launcher-close" class="subtle-button">Close</button></div><p class="help">Each world contains an independent cast, canon, history and simulation.</p><div id="world-launcher-list" class="world-launcher-list"></div><button id="world-launcher-create" class="primary-button">Create a New World</button></dialog>
+  <dialog id="new-scene-dialog" class="new-scene-dialog" aria-labelledby="new-scene-title">
+    <h2 id="new-scene-title">Start an interaction</h2><p class="help">Choose an optional encounter template or start an unscripted conversation.</p>
+    <label class="field-label" for="new-scene-character">Character</label><select id="new-scene-character"></select>
+    <label class="field-label" for="new-scene-encounter">Encounter template</label><select id="new-scene-encounter"></select>
+    <div class="inline-actions"><button id="new-scene-confirm" class="primary-button">Start scene</button><button id="new-scene-cancel" class="subtle-button">Cancel</button></div>
+  </dialog>
   <dialog id="character-builder" class="builder-dialog" aria-labelledby="builder-title">
     <div class="builder-top"><div><div class="eyebrow">CHARACTER ATELIER</div><h2 id="builder-title">Shape a living character</h2><p>Build a person, not just a prompt. Every change is saved to your local story.</p></div><button id="builder-close" class="subtle-button" aria-label="Close character builder">✕ Close</button></div>
     <div class="builder-grid">
@@ -31,10 +39,12 @@
         <p class="builder-note">Your image stays on this computer. Portraits are stored separately from story text.</p>
         <div class="builder-nav" role="tablist" aria-label="Character builder sections">
           <button data-builder-tab="identity" class="active">01 · Identity</button>
-          <button data-builder-tab="mind">02 · Inner life</button>
-          <button data-builder-tab="voice">03 · Voice</button>
-          <button data-builder-tab="scene">04 · First encounter</button>
-          <button data-builder-tab="lab">05 · Character test lab</button>
+          <button data-builder-tab="appearance">02 · Appearance</button>
+          <button data-builder-tab="mind">03 · Inner life</button>
+          <button data-builder-tab="history">04 · Life history</button>
+          <button data-builder-tab="life">05 · Places & daily life</button>
+          <button data-builder-tab="voice">06 · Voice</button>
+          <button data-builder-tab="lab">07 · Character test lab</button>
         </div>
       </aside>
       <section class="builder-editor"><div id="builder-fields"></div></section>
@@ -43,9 +53,9 @@
         <p class="builder-note">Optional suggestions from your loaded local model. Nothing is applied without your approval.</p>
         <label class="field-label" for="builder-ai-target">What to draft</label><select id="builder-ai-target"></select>
         <label class="field-label" for="builder-ai-guidance">Creative direction</label><textarea id="builder-ai-guidance" rows="4" maxlength="1400" placeholder="For example: a guarded historian with a sharp sense of humor, keeping a dangerous secret…"></textarea>
-        <div class="inline-actions"><button id="builder-ai-generate" class="primary-button">✦ Suggest draft</button><button id="builder-ai-stop" class="subtle-button hidden">Stop</button></div>
+        <p id="builder-ai-reference" class="help">AI suggestions will be grounded in the active world and protected character profile.</p><div class="inline-actions"><button id="builder-ai-generate" class="primary-button">✦ Suggest draft</button><button id="builder-ai-stop" class="subtle-button hidden">Stop</button></div>
         <p id="builder-ai-status" class="builder-note" role="status"></p>
-        <div id="builder-ai-preview" class="hidden"><label class="field-label" for="builder-ai-result">Review and edit before applying</label><textarea id="builder-ai-result" rows="12" spellcheck="false"></textarea><button id="builder-ai-apply" class="primary-button">Apply reviewed draft</button></div>
+        <div id="builder-ai-preview" class="hidden"><label class="field-label" for="builder-ai-result">Review and edit before applying</label><textarea id="builder-ai-result" rows="12" spellcheck="false"></textarea><div id="builder-ai-changes"></div><button id="builder-ai-apply" class="primary-button">Apply reviewed draft</button></div>
       </aside>
     </div>
   </dialog>

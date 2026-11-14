@@ -1,3 +1,4 @@
+import { CHARACTER_V2_FIELDS, normalizeCharacterV2, importedEncounter, normalizeEncounters } from './character/schema.mjs';
 import { normalizeScene, canKnowLore } from './harness.mjs';
 import { createMind,normalizeMind,normalizeDisposition,DEFAULT_DISPOSITION } from './psychology.mjs';
 // Pure roleplay prompt and persistence helpers; no browser dependencies.
@@ -15,7 +16,7 @@ export const THEMES = Object.freeze([
   { id: 'parchment', name: 'Parchment', accent: '#795b9f' },
 ]);
 export const DEFAULT_SETTINGS = Object.freeze({ model: '', temperature: 0.95, max_tokens: 450, readingMode: false, theme: 'nocturne', customAccent: '' });
-export const CHARACTER_FIELDS = Object.freeze(['name','handle','tagline','description','personality','backstory','motivations','fears','boundaries','speechStyle','inPersonStyle','phoneStyle','textStyle','scenario','greeting','exampleDialogue']);
+export const CHARACTER_FIELDS = CHARACTER_V2_FIELDS;
 export const PORTRAIT_PATH = /^\/portraits\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:webp|jpg)$/i;
 
 export const DEFAULT_EMOTION = Object.freeze({ valence: 0, arousal: 0.25, trust: 0 });
@@ -68,19 +69,23 @@ export function createCharacter(name = 'New character') {
   return {
     id: crypto.randomUUID(), name, handle: '', tagline: '', description: '', personality: '', backstory: '',
     motivations: '', fears: '', boundaries: '', speechStyle: '', inPersonStyle: '', phoneStyle: '', textStyle: '', exampleDialogue: '',
-    tags: [], alternateGreetings: [], portrait: '',disposition:{...DEFAULT_DISPOSITION},
-    scenario: '', greeting: '', color: '#a68dd6',
+    ...normalizeCharacterV2({name}), tags: [], portrait: '',disposition:{...DEFAULT_DISPOSITION},
+    homeLocationId: null, workLocationId: null, frequentPlaces: [], color: '#a68dd6',
   };
 }
 
-export function createSession(character) {
+export function createSession(character, encounter = null) {
   return {
     id: crypto.randomUUID(), characterId: character.id, title: `With ${character.name}`,
-    messages: character.greeting ? [{ id: crypto.randomUUID(), role: 'assistant', content: character.greeting }] : [],
+    messages: encounter?.opening ? [{id:crypto.randomUUID(),role:'assistant',content:encounter.opening,speakerId:character.id,witnessIds:[character.id],channelId:encounter.channelId||'in_person'}] : [],
     summary: '', publicSummary: '', authorNote: '', emotion: { ...DEFAULT_EMOTION }, emotionByActor: {}, emotionEvents: [],
-    castIds: [character.id], speakerId: character.id, speakerMode: 'natural', channelId: 'in_person', location: '', worldTime: '', atmosphere: '', direction: '', sceneEvents: [],
+    castIds: [character.id], speakerId: character.id, speakerMode: 'natural', channelId: encounter?.channelId||'in_person', location: '', worldTime: '', atmosphere: '', direction: encounter?.premise || '', encounterId: encounter?.id || null, sceneEvents: [],
     psychologyByActor:{[character.id]:createMind()},director:{mode:'collaborative',pace:.5,tension:.5,initiative:.5,narration:.5},timeHoursElapsed:0, updatedAt: Date.now(),
   };
+}
+
+export function makeEmptyWorldState() {
+  return normalizeState({ characters: [], sessions: [], lore: [], encounters: [], persona: {name: 'Player', description: ''}, settings: { ...DEFAULT_SETTINGS } });
 }
 
 export function makeInitialState() {
@@ -89,12 +94,16 @@ export function makeInitialState() {
     description: 'A watchful antiquarian who runs a bookshop in a rain-soaked harbor town.',
     personality: 'Dry wit, careful with trust, curious, quietly compassionate. Never omniscient.',
     backstory: 'Mara inherited the shop from her missing mentor. She knows the town has secrets, but not their answers.',
-    scenario: 'Late evening in the harbor bookshop, during a storm. The player has just entered.',
-    greeting: 'The bell above the door gives a tired chime. Mara looks up from an old photograph. "We are technically closed," she says, but makes no move to send you away.',
+    preferredEnvironment: 'Quiet bookshops, old harbor streets, and familiar spaces.',
   };
   const session = createSession(character);
+  const opening='The bell above the door gives a tired chime. Mara looks up from an old photograph. "We are technically closed," she says, but makes no move to send you away.';
+  const encounter={id:'demo-harbor-bookshop',title:'First visit to the harbor bookshop',
+    characterIds:[character.id],locationId:null,channelId:'in_person',
+    premise:'A stormy evening; the player has just entered the bookshop.',opening};
+  session.messages.push({id:crypto.randomUUID(),role:'assistant',speakerId:character.id,witnessIds:[character.id],channelId:'in_person',content:opening});
   return {
-    characters: [character], sessions: [session], activeSessionId: session.id,
+    characters: [character], sessions: [session], encounters: [encounter], activeSessionId: session.id,
     lore: [], persona: { name: 'Player', description: '' }, settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -103,12 +112,14 @@ export function normalizeState(value) {
   if (!value || typeof value !== 'object' || !Array.isArray(value.characters) || !Array.isArray(value.sessions)) {
     return makeInitialState();
   }
+  const legacyEncounters=value.characters.map(c=>importedEncounter(c)).filter(Boolean);
   const characters = value.characters.filter(c => c && typeof c.id === 'string' && typeof c.name === 'string')
-    .map(c => ({ ...createCharacter(c.name), ...c,
+    .map(c => ({ ...createCharacter(c.name), ...c, ...normalizeCharacterV2(c),
       portrait: typeof c.portrait === 'string' && PORTRAIT_PATH.test(c.portrait) ? c.portrait : '',
       disposition:normalizeDisposition(c.disposition),
       tags: Array.isArray(c.tags) ? c.tags.filter(x => typeof x === 'string').slice(0, 30) : [],
-      alternateGreetings: Array.isArray(c.alternateGreetings) ? c.alternateGreetings.filter(x => typeof x === 'string').slice(0, 12) : [],
+      frequentPlaces: normalizeCharacterV2(c).frequentPlaces,
+      scenario: undefined, greeting: undefined, alternateGreetings: undefined,
     }));
   const sessions = value.sessions.filter(s => s && typeof s.id === 'string' && typeof s.characterId === 'string' && Array.isArray(s.messages))
     .map(s => ({ ...s, ...normalizeScene(s, characters),
@@ -133,6 +144,7 @@ export function normalizeState(value) {
   // Empty libraries and fully trashed libraries are valid; don't recreate deleted stories.
   return {
     characters, sessions,
+    encounters: normalizeEncounters([...(value.encounters||[]),...legacyEncounters.filter(e=>!(value.encounters||[]).some(x=>x.id===e.id))],characters.map(c=>c.id)),
     activeSessionId: sessions.some(s => s.id === value.activeSessionId && !s.trashedAt) ? value.activeSessionId : (sessions.find(s => !s.trashedAt)?.id || null),
     lore: Array.isArray(value.lore) ? value.lore.filter(l => l && typeof l.content === 'string' && Array.isArray(l.keywords))
       .map(l => ({...l, id: typeof l.id === 'string' ? l.id : crypto.randomUUID(), visibility: l.visibility === 'private' ? 'private' : 'public',
@@ -154,7 +166,7 @@ export function getActiveLore(entries, messages, maxEntries = 4, options = {}) {
     .slice(0, maxEntries);
 }
 
-export function buildMessages({ character, persona, summary = '', authorNote = '', emotion, lore = [], history = [], sceneNotes = '', psychologyNotes = '', styleInstruction = '', channelVoice = '' }) {
+export function buildMessages({ character, persona, summary = '', authorNote = '', emotion, lore = [], history = [], sceneNotes = '', psychologyNotes = '', styleInstruction = '', channelVoice = '', worldPlaceNotes = '' }) {
   if (!character) throw new Error('Select a character first');
   const selectedLore = getActiveLore(lore, history);
   const part = (label, text, cap = 1600) => `${label}:\n${String(text || 'Not specified').slice(0, cap)}`;
@@ -165,16 +177,27 @@ export function buildMessages({ character, persona, summary = '', authorNote = '
     styleInstruction ? 'Follow the active interaction channel. Avoid formulaic replies; make each message sound like this particular person. Never write player-character dialogue or actions.' : 'Avoid repetitive phrases. Match the pacing and length of the player, normally 1-4 paragraphs. Leave room for the player to respond.',
     part('Character name', character.name, 120),
     character.tagline ? part('Character tagline', character.tagline, 180) : '',
-    part('Appearance and identity', character.description),
+    part('Appearance and identity', [character.description,character.age&&`Age: ${character.age}`,character.pronouns&&`Pronouns: ${character.pronouns}`,character.facialFeatures,character.hair&&`Hair: ${character.hair}`,character.eyes&&`Eyes: ${character.eyes}`,character.physique,character.clothingStyle].filter(Boolean).join('; ')),
     part('Personality and voice', character.personality),
+    character.values ? part('Personal values',character.values,800) : '',
+    character.contradictions ? part('Personal contradictions',character.contradictions,650) : '',
+    character.stressBehavior ? part('Behavior under stress',character.stressBehavior,650) : '',
+    character.comfortBehavior ? part('Behavior when comfortable',character.comfortBehavior,650) : '',
+    character.conflictStyle ? part('Conflict habits',character.conflictStyle,650) : '',
+    character.socialHabits ? part('Social habits',character.socialHabits,650) : '',
     part('Backstory and character knowledge', character.backstory),
     character.motivations ? part('Personal goals, drives, and desires', character.motivations) : '',
+    character.hobbies ? part('Interests and hobbies',character.hobbies,600) : '',
+    character.dailyRoutine ? part('Usual routines, not current whereabouts',character.dailyRoutine,650) : '',
+    character.preferredEnvironment ? part('Preferred environments, not current scene location',character.preferredEnvironment,650) : '',
+    worldPlaceNotes ? part('Established familiar places (habits, NOT current whereabouts)',worldPlaceNotes,1300) : '',
+    character.occupation ? part('Occupation',character.occupation,240) : '',
     character.fears ? part('Fears and vulnerabilities', character.fears) : '',
     character.boundaries ? part('Character boundaries and principles', character.boundaries) : '',
     character.speechStyle ? part('Speech habits and distinctive voice', character.speechStyle) : '',
     channelVoice ? part('Character-specific voice in the active communication channel',channelVoice,900) : '',
     character.exampleDialogue ? part('Sample dialogue to emulate (not events that already happened)', character.exampleDialogue, 1200) : '',
-    part('Scene and premise', character.scenario),
+    // Encounter premises are WORLD/SCENE data. Never inject an old card's opening on every NPC turn.
     sceneNotes ? part('Current witnessed scene and director constraints', sceneNotes, 2600) : '',
     'Only portray the selected acting character. Other participants speak only on their own turns. Do not invent their private thoughts or control the player.',
     part('Player name', persona.name, 120),
@@ -208,9 +231,13 @@ export function importCharacter(obj) {
   }
   if (typeof source.color === 'string' && /^#[0-9a-f]{6}$/i.test(source.color)) result.color = source.color;
   if (typeof source.portrait === 'string' && PORTRAIT_PATH.test(source.portrait)) result.portrait = source.portrait;
-  for (const key of ['tags', 'alternateGreetings']) {
+  for (const key of ['tags']) {
     if (Array.isArray(source[key])) result[key] = source[key].filter(v => typeof v === 'string').slice(0, key === 'tags' ? 30 : 12);
   }
+  // Preserve old card openings as migration input for the world-level encounter library.
+  if(typeof source.scenario==='string')result.scenario=source.scenario.slice(0,3000);
+  if(typeof source.greeting==='string')result.greeting=source.greeting.slice(0,3000);
+  if(Array.isArray(source.alternateGreetings))result.alternateGreetings=source.alternateGreetings.filter(x=>typeof x==='string').slice(0,12);
   return result;
 }
 
@@ -226,7 +253,7 @@ export function parseCharacterDraft(output) {
   for (const key of CHARACTER_FIELDS) {
     if (typeof value[key] === 'string' && value[key].trim()) result[key] = value[key].slice(0, key === 'name' ? 100 : 12000);
   }
-  for (const key of ['tags', 'alternateGreetings']) {
+  for (const key of ['tags']) {
     if (Array.isArray(value[key])) result[key] = value[key].filter(x => typeof x === 'string').slice(0, key === 'tags' ? 30 : 12);
   }
   if (!Object.keys(result).length) throw new Error('AI suggestion did not include any recognized character fields');

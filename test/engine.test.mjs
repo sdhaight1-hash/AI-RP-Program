@@ -125,7 +125,8 @@ test('character builder fields persist through JSON migration and affect actor i
     portrait:'/portraits/9ad7faaf-3264-4232-88c3-927865ec430c.webp', });
   const cloned = normalizeState(JSON.parse(JSON.stringify(state)));
   assert.deepEqual(cloned.characters[0].tags,['Mystery','Noir']);
-  assert.deepEqual(cloned.characters[0].alternateGreetings,['Come inside.','It is late.']);
+  assert.equal(cloned.characters[0].alternateGreetings,undefined);
+  assert.deepEqual(cloned.encounters.find(e=>e.id==='imported-encounter:'+c.id)?.alternativeOpenings,['Come inside.','It is late.']);
   assert.equal(cloned.characters[0].portrait,c.portrait);
   const prompt = buildMessages({character:cloned.characters[0], persona:cloned.persona});
   assert.match(prompt.messages[0].content,/hidden chart/);

@@ -189,3 +189,20 @@
 .review-warnings{margin:8px 0 12px;padding-left:20px;font-size:12px;line-height:1.55}
 .reply-review .inline-actions{display:flex;flex-wrap:wrap;gap:8px}
 .reply-review button{font-size:11px;padding:9px 12px}
+
+/* v2: worlds are the top-level workspace; character proposals are reviewed per field. */
+.world-launcher{width:min(720px,calc(100vw - 28px));max-height:min(88vh,900px);overflow:auto;padding:28px;border-radius:18px;border:1px solid var(--border-strong);background:var(--panel);color:var(--text);box-shadow:0 22px 75px #0008}
+.world-launcher::backdrop{background:#080812b5;backdrop-filter:blur(7px)}
+.world-launcher-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}
+.world-launcher-head h2{margin:0;font-size:24px}
+.world-launcher-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:12px;margin:18px 0 24px}
+.world-launcher-item{display:flex;flex-direction:column;align-items:flex-start;gap:9px;min-width:0;border:1px solid var(--border);background:var(--composer);border-radius:12px;padding:17px}
+.world-launcher-item strong{font-size:15px;overflow-wrap:anywhere}
+.world-launcher-item p{margin:0 0 8px;line-height:1.55;overflow-wrap:anywhere}
+.world-launcher-item button{margin-top:auto}
+.builder-ai-change{background:var(--composer);border:1px solid var(--border);border-radius:11px;padding:12px;margin:12px 0;min-width:0}
+.builder-ai-change label{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.builder-ai-change input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+.builder-ai-change textarea{display:block;width:100%;min-height:85px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px;resize:vertical;color:var(--text)}
+#builder-ai-reference{margin:8px 0;line-height:1.55}
+@media(max-width:650px){.world-launcher{padding:16px}.world-launcher-head h2{font-size:20px}}
