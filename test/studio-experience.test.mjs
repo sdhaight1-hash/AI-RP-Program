@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve,dirname } from 'node:path';
 import { StudioStore } from '../storage.mjs';
 import { createApp } from '../server.mjs';
+import { WORKSPACE_META,searchStudioCommands } from '../public/studio-navigation.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const html=readFileSync(resolve(root,'public/index.html'),'utf8');
@@ -52,7 +53,7 @@ test('every major workspace and all thirteen functional detail desk tools remain
   const tabs=[...html.matchAll(/<button\b[^>]*data-tab="([^"]+)"/g)].map(x=>x[1]);
   assert.deepEqual(tabs,expected);
   for(const mode of workspaces)
-    assert.ok(javascript.includes(mode+':{name:'),'Missing dashboard descriptor: '+mode);
+    assert.ok(Object.hasOwn(WORKSPACE_META,mode),'Missing dashboard descriptor: '+mode);
   assert.match(javascript,/function setWorkspace\(mode\)/);
   assert.match(javascript,/function openDetailDesk\(tab\)/);
   assert.match(javascript,/button\[data-workspace\]/);
@@ -108,4 +109,17 @@ test('new stylesheet and current app are served from the real allowlisted local 
     assert.equal(app.status,200);
     assert.match(await app.text(),/function renderWorkspace/);
   }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
+test('navigation search is deterministic, bounded and works without DOM state',()=>{
+  const commands=[
+    {label:'World Atlas',detail:'World',keywords:'places map'},
+    {label:'Actor memory',detail:'Memory',keywords:'recall private'},
+    {label:'Fidelity Lab',detail:'Tools',keywords:'model testing'}
+  ];
+  assert.deepEqual(searchStudioCommands(commands,'ATLAS map').map(x=>x.label),['World Atlas']);
+  assert.deepEqual(searchStudioCommands(commands,'private').map(x=>x.label),['Actor memory']);
+  assert.deepEqual(searchStudioCommands(commands,'unrelated'),[]);
+  assert.equal(searchStudioCommands(commands,'',2).length,2);
+  assert.deepEqual(Object.keys(WORKSPACE_META),['world','characters','story','memory','tools']);
 });
