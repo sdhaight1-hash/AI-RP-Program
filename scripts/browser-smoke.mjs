@@ -261,7 +261,7 @@ async function main(){
     await screenshot('06f-world-entity-after-deletion');
     assert.equal((await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(parallel.id))).json())
       .entities.some(x=>x.name===disposableName),false);
-    await script("document.querySelector('button[data-workspace=\\\"story\\\"]').click();return true");
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
 
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
