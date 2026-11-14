@@ -8,7 +8,7 @@ import { StudioStore } from '../storage.mjs';
 import { projectionPrimary } from '../storage/normalized.mjs';
 import { legacyTimelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID } from './canon.mjs';
 import { makeEmptyWorldState } from '../engine.mjs';
-import { reconcileCharacterRecords,deleteWorldRecord } from './deletion.mjs';
+import { reconcileCharacterRecords,reconcileRemovedSceneSources,deleteWorldRecord } from './deletion.mjs';
 
 const now = () => Date.now();
 const worldIdPattern = /^(?:[0-9a-f]{8}-[0-9a-f-]{27,40}|imported-local-world)$/i;
@@ -209,7 +209,9 @@ export class WorldPartitionStore {
     // Called within the story revision transaction (or explicit world-open
     // maintenance transaction). Keep archived characters; purge only IDs absent
     // from canonical state. This also repairs projections left by older builds.
-    reconcileCharacterRecords(target.db,snapshotState||target.load().state,worldId);
+    const canonical=snapshotState||target.load().state;
+    reconcileCharacterRecords(target.db,canonical,worldId);
+    reconcileRemovedSceneSources(target.db,canonical);
     // One lookup for the cast rather than a query per character on every
     // debounced save/streamed reply. Stable character IDs remain authoritative.
     const knownByCharacter = new Map(target.db.prepare(`SELECT id,name,source_character_id AS characterId
