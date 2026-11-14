@@ -51,14 +51,14 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const latest=visible.history.slice(-8).map(m=>m.content).join(' ');
   const directCue=visible.history.filter(m=>m.role==='user').slice(-2).map(m=>m.content).join(' ') || latest;
   const details=selectCharacterDetails(actor,directCue);
-  const query=[directCue,scene.location,...(scene.castIds||[]).map(id=>state.characters.find(c=>c.id===id)?.name)]
+  const query=[...(scene.castIds||[]).map(id=>state.characters.find(c=>c.id===id)?.name),scene.location,directCue]
     .filter(Boolean).join(' ').slice(-900);
   const excluded=history.slice(-8).map(m=>m.id);
   const recalled=retrieveActorMemories(store.db,{timelineId:scene.timelineId,actorId,query,excludeMessageIds:excluded,limit:8});
   const events=store.events.visible(scene.timelineId,actorId,30);
   const eventWords=new Set((query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[]).slice(-40));
   const scoredEvents=events.map(e=>({...e,match:(String(e.description).toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[]).filter(w=>eventWords.has(w)).length}))
-    .sort((a,b)=>b.match-a.match||b.createdAt-a.createdAt).slice(0,5);
+    .sort((a,b)=>b.match-a.match||events.indexOf(b)-events.indexOf(a)).slice(0,5);
   const lore=[...store.searchLore(query,{actorId,sessionId:sceneId,worldId,limit:6})];
   // "alwaysActive" lore is an authoring instruction to make lore eligible,
   // not a license to reveal private information or bypass world partitions.
