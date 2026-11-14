@@ -1,5 +1,6 @@
 import { describeMind } from './psychology.mjs';
 import { getChannel, getChannelVoice, channelObservations } from './interactions/channels.mjs';
+import { encounterDependencies } from './encounters/library.mjs';
 // Deterministic orchestration primitives. No LLM output can commit world events here.
 const id = () => crypto.randomUUID();
 const MODES = new Set(['manual', 'natural', 'round-robin']);
@@ -51,7 +52,8 @@ export function actorVisibleHistory(session, actorId, characters, history = sess
       if (speakerId === actorId) return { role: 'assistant', content: m.content, pinned: m.pinned };
       if (!cast.has(speakerId)) return null;
       const name = characters.find(c => c.id === speakerId)?.name || 'Another character';
-      const observation = m.channelId === 'text_message' ? `Received text from ${name}` : m.channelId === 'phone_call' ? `Heard ${name} on the call` : `Observed ${name} speaking or acting`;
+      const source=getChannel(m.channelId);
+      const observation=source.kind==='written' ? `Read ${source.label} content from ${name}` : source.id==='phone_call' ? `Heard ${name} on the call` : source.id==='video_call' ? `Heard or saw ${name} on camera` : `Observed ${name} speaking or acting`;
       return { role: 'user', content: `[${observation}]\n${m.content}`, pinned: m.pinned };
     }).filter(Boolean);
 }
@@ -115,9 +117,9 @@ export function createActorContext({ session, characters, actorId, persona, lore
   const seenEvents = inPerson ? actorVisibleEvents(session,actorId) : channelObservations(session.sceneEvents,channel.id,actorId);
   const director=session.director || {mode:'collaborative'};
   const directorNotes=director.mode==='sandbox'?'Sandbox: avoid forcing planned plot turns or conveniently timed interruptions.':director.mode==='directed'?'Directed: favor established scene goals and authored beats when plausible; never force player decisions.':'Collaborative: offer plausible opportunities and balanced pacing without railroading.';
-  const sceneNotes = [inPerson ? `Shared location: ${session.location || 'Unspecified'}` : 'Remote communication: participants stay in their own physical locations; do not assume they can see each other.', `Time: ${session.worldTime || 'Unspecified'}`,
+  const sceneNotes = [inPerson ? `Shared location: ${session.location || 'Unspecified'}` : channel.id==='video_call' ? 'Remote webcam call: participants are in separate physical locations; only camera-framed, transmitted visuals and audio are observable.' : 'Remote communication: participants stay in their own physical locations; do not assume they can see each other.', `Time: ${session.worldTime || 'Unspecified'}`,
     `Interaction channel: ${channel.label}. Perception limits: ${channel.perceptible.join(', ')}.`,
-    inPerson && session.atmosphere && `Atmosphere: ${session.atmosphere}`, castNames.length && `Other present characters: ${castNames.join(', ')}`,
+    inPerson && session.atmosphere && `Atmosphere: ${session.atmosphere}`, castNames.length && `${inPerson?'Other present characters':'Other scene participants'}: ${castNames.join(', ')}`,
     directorNotes,
     `Scene controls (0-1): pacing ${Number(director.pace??.5).toFixed(2)}, tension ${Number(director.tension??.5).toFixed(2)}, initiative ${Number(director.initiative??.5).toFixed(2)}, narration ${Number(director.narration??.5).toFixed(2)}. Treat as tendencies, not quotas.`,
     session.direction && `Scene direction (style and pacing, never overriding agency): ${session.direction}`,
@@ -156,8 +158,9 @@ export function purgeArchived(state, kind, objectId) {
     s.messages?.some(m=>m.speakerId===objectId || m.witnessIds?.includes(objectId)))) {
     throw new Error('Character is still referenced by a scene. Purge those scenes first or keep this character archived.');
   }
-  if(state.encounters?.some(e=>e.characterIds?.includes(objectId)))
-    throw new Error('Remove encounter templates involving this character before permanently deleting them.');
+  const encounterLinks=encounterDependencies(state,objectId);
+  if(encounterLinks.length)
+    throw new Error(`Character is still used by ${encounterLinks.length} encounter template(s): ${encounterLinks.slice(0,3).map(e=>e.title).join(', ')}${encounterLinks.length>3?'…':''}. Open Encounters to delete or edit them before permanently deleting this character.`);
   // Knowledge access is an identity reference, not ordinary prose: scrub it.
   // A deleted character must not reappear in known-by lists or psychology IDs.
   for(const lore of state.lore||[])if(Array.isArray(lore.knownBy))
