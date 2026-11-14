@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path';
 import { StudioStore } from './storage.mjs';
 import { WorldPartitionStore } from './world/partition-store.mjs';
 import { ComfyClient } from './comfy.mjs';
+import { buildActorContext } from './context/assemble.mjs';
+import { discoverBackendContext, enforceTokenBudget } from './context/backend.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -252,6 +254,54 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if (!response.ok) throw new Error(`Model server returned ${response.status}`);
         const data = await response.json();
         return json(res, 200, { backend: new URL(lmUrl).host, models: Array.isArray(data.data) ? data.data.map(m => ({ id: m.id })).filter(m => typeof m.id === 'string') : [] });
+      }
+      if (req.method === 'POST' && (path === '/api/actor/context' || path === '/api/actor/reply')) {
+        const data=await readJson(req,3000);
+        requireWorldScope(data.worldId);
+        if (!data.sceneId || !data.actorId || typeof data.sceneId !== 'string' || typeof data.actorId !== 'string')
+          return json(res,400,{error:'Scene and actor are required'});
+        if (Number.isSafeInteger(data.revision) && data.revision !== store.load().revision)
+          return json(res,409,{error:'Story was changed. Save and reload the scene before generating.'});
+        const responseTokens=Number.isInteger(data.max_tokens) && data.max_tokens>=32 && data.max_tokens<=2048 ? data.max_tokens : 450;
+        const contextRequested=Number.isInteger(data.contextWindow) && data.contextWindow>=2048 && data.contextWindow<=32768 ? data.contextWindow : 4096;
+        // The configured context cannot override the local backend's real allocation.
+        const backend=await discoverBackendContext(lmUrl,data.model,fetchImpl);
+        requireWorldScope(data.worldId);
+        let prompt;
+        try {
+          prompt=buildActorContext({store,worldId:data.worldId,sceneId:data.sceneId,actorId:data.actorId,
+            mode:data.mode||'normal',contextWindow:Math.min(contextRequested,backend.contextWindow||4096),
+            maxOutput:responseTokens});
+          prompt=await enforceTokenBudget(prompt,backend);
+        } catch(error) {return json(res,422,{error:error.message});}
+        if (path === '/api/actor/context') return json(res,200,prompt);
+        if (typeof data.model !== 'string' || !data.model || data.model.length>250 ||
+            !Number.isFinite(data.temperature) || data.temperature<0 || data.temperature>2)
+          return json(res,400,{error:'Select a valid local model and temperature'});
+        const aborter=new AbortController();
+        res.on('close',()=>aborter.abort());
+        let upstream;
+        try {
+          upstream=await fetchImpl(lmUrl+'/chat/completions',{
+            method:'POST',signal:aborter.signal,headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({model:data.model,messages:prompt.messages,temperature:data.temperature,
+              max_tokens:responseTokens,stream:true})
+          });
+        } catch(error) {return json(res,502,{error:'Local model unavailable: '+error.message});}
+        if(!upstream.ok)return json(res,502,{error:'Model server returned '+upstream.status+': '+(await upstream.text()).slice(0,800)});
+        if(!upstream.body)return json(res,502,{error:'Model server returned an empty stream'});
+        res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','X-Content-Type-Options':'nosniff'});
+        try {
+          for await(const chunk of upstream.body) {
+            if(res.destroyed)break;
+            if(!res.write(chunk))await new Promise(resolve=>{
+              const done=()=>{res.off('drain',done);res.off('close',done);resolve();};
+              res.once('drain',done);res.once('close',done);
+            });
+          }
+        } catch(error) {if(!res.destroyed)res.write('event: error\ndata: '+JSON.stringify({error:error.message})+'\n\n');}
+        if(!res.destroyed)res.end();
+        return;
       }
       if (req.method === 'POST' && path === '/api/chat') {
         const data = await readJson(req);
