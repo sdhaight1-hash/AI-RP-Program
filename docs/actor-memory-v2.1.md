@@ -1,6 +1,6 @@
 # Actor-perspective memory and small-context generation (v2.1 development)
 
-Status: implemented first milestone (world-scoped dialogue memory + context assembly). Code and tests are on the feature branch; this is not a fully autonomous semantic/episodic consolidation system.
+Status: dialogue memory and server-owned compact context are merged. A second incremental milestone adds evidence-linked, user-reviewed subjective actor facts. Automatic memory extraction and semantic consolidation remain separate work.
 
 ## Authority contract
 
@@ -10,7 +10,7 @@ Status: implemented first milestone (world-scoped dialogue memory + context asse
 - **Speech is not canon**. "Player said X" records hearing X, not that X happened. Accepted world events remain separately authorized and exposed through the existing event ledger.
 - **Character definitions** are durable world canon and subject to topic-sensitive retrieval; ephemeral mood, current location, and clock are timeline state.
 - **Browser** cannot construct the acting system prompt. The server resolves the saved scene, eligible acting NPC, witnessed history, role/medium rules, permitted lore, and memory evidence.
-- **No automatic LLM memory extraction** is enabled yet. The current system indexes witnessed dialogue deterministically and reads already accepted world events.
+- **Reviewed character knowledge** (beliefs, promises, relationship memories, autobiographical details, observations) can be manually captured from witnessed messages. Corrections supersede earlier notes, preserving their history. No automatic LLM memory extraction is enabled yet.
 
 ## Files and data flow
 
@@ -19,6 +19,7 @@ Status: implemented first milestone (world-scoped dialogue memory + context asse
 - context/assemble.mjs — per-turn actor-visible context, hybrid source selection (FTS, recent evidence, timeline events, permitted lore, structured character detail), prompt packing.
 - context/backend.mjs — KoboldCpp context capacity and exact token counts when available; LM Studio loaded-instance context discovery; conservative estimated fallback.
 - storage.mjs, world/persistence.mjs, world/partition-store.mjs — transactional memory updates and safe world migration.
+- GET/POST /api/actor/facts and POST /api/actor/facts/revoke — inspect, add, supersede or revoke evidence-linked subjective actor knowledge within the active world and timeline.
 - POST /api/actor/context — server-owned preview, selected memory IDs, actual/estimated prompt tokens.
 - POST /api/actor/reply — server-owned prompt, streaming OpenAI-compatible local model response; client cannot supply arbitrary actor history.
 - POST /api/chat remains available for explicitly stateless tools such as character authoring and the fidelity lab. Normal NPC turns no longer use this path.
@@ -48,11 +49,17 @@ The existing event-ledger and world-isolation regression suite must remain green
 ## Known limitations / next milestones
 
 1. **Semantic paraphrases**: FTS5 matches lexical terms, not general concepts. An optional CPU-friendly embedding index is the next experiment, only if recall tests prove an improvement.
-2. **Belief/subjective state**: dialogue memory distinguishes "said" from "true" but does not yet extract enduring beliefs, promises, intentions, and relationship episodes into reviewed structured facts. That requires evidence-backed proposals, conflict resolution, and explicit actor ownership.
+2. **Automatic extraction**: evidence-linked subjective memories can be entered and revised by the player using the Context Inspector's memory notebook. AI-generated memory proposals and confidence-aware extraction are not implemented; do not treat this editor as automatic interpretation or canon creation.
 3. **Summarization**: long histories are indexed, not semantically consolidated. Structured and reversible consolidation is still needed.
 4. **Corpus scale**: the original JSON snapshot still has its 4 MB limit. Large-world normalized transcript migration is a separate change.
 5. **Multi-tab concurrency**: the process-wide active world remains in v2.0.1; stale-world protection survives but a future per-request scoped store would allow simultaneous worlds.
 6. **Fallback token counts**: exact Kobold counting is used when available; other local servers use a conservative estimator. No estimator can guarantee a model's tokenizer-specific fit.
-7. **Memory UI**: the context inspector now previews the real server-generated actor prompt and budget. A dedicated memory explorer/editor and retrieval-ranking diagnostics remain planned.
+7. **Memory UI**: the context inspector previews the server-generated actor prompt and budget and supports an actor-scoped reviewed memory notebook. A dedicated cross-scene memory explorer, broader editing and retrieval-ranking diagnostics remain planned.
 
 Do not promote any AI-authored summary or unreviewed speech to authoritative event state.
+
+## Subjective actor facts (second milestone)
+
+The Memory Notebook (Context tab) lets a player review a witnessed message and write an NPC-owned recollection: belief, promise, relationship, autobiography, or observation. The backend validates that the source exists, that the actor was a speaker or witness, and that the source is in the acting timeline. Stored notes are separate from canonical world events. Changes to or removal of source dialogue invalidate direct memories for retrieval; the notebook displays `source changed (not recalled)` rather than silently trusting them. Explicit corrections supersede old active notes and revocations preserve an audit trail. Forks freeze only active memories whose source evidence was valid at fork time. Actor knowledge must not leak across worlds or to other actors.
+
+No model guesses or extracts these automatically in this milestone. The player reviews and writes them; eventual AI suggestions must remain proposals and never promote unsupported facts to world canon.
