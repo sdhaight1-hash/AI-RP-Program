@@ -59,10 +59,21 @@ export function revokeActorFact(store,{id,actorId,timelineId}){
   return {id,status:'revoked'};
 }
 
+function hasCurrentSource(f,scenes,actorId){
+  if(f.origin==='inherited')return true;
+  const scene=scenes.get(f.scene_id);
+  const message=scene?.messages?.find(m=>m.id===f.source_message_id);
+  return canRecall(message,actorId,scene) && sourceFingerprint(message)===f.source_hash;
+}
+
 export function listActorFacts(store,{timelineId,actorId}){
   if(!actorInTimeline(store.db,timelineId,actorId))throw new Error('Actor is not in this timeline');
-  return store.db.prepare("SELECT id,timeline_id AS timelineId,actor_id AS actorId,scene_id AS sceneId,source_message_id AS sourceMessageId,kind,text,status,origin,supersedes_id AS supersedesId,created_at AS createdAt FROM actor_facts WHERE timeline_id=? AND actor_id=? ORDER BY created_at DESC,rowid DESC")
+  const rows=store.db.prepare("SELECT * FROM actor_facts WHERE timeline_id=? AND actor_id=? ORDER BY created_at DESC,rowid DESC LIMIT 200")
     .all(timelineId,actorId);
+  const scenes=new Map((store.load().state?.sessions||[]).map(s=>[s.id,s]));
+  return rows.map(f=>({id:f.id,timelineId:f.timeline_id,actorId:f.actor_id,sceneId:f.scene_id,
+    sourceMessageId:f.source_message_id,kind:f.kind,text:f.text,status:f.status,origin:f.origin,
+    supersedesId:f.supersedes_id,createdAt:f.created_at,validSource:hasCurrentSource(f,scenes,actorId)}));
 }
 
 export function snapshotFactsForFork(db,parentId,childId){
@@ -85,12 +96,8 @@ export function retrieveActorFacts(store,{timelineId,actorId,query='',limit=5}){
   const recent=db.prepare("SELECT * FROM actor_facts WHERE timeline_id=? AND actor_id=? AND status='active' ORDER BY created_at DESC LIMIT 3").all(timelineId,actorId);
   const all=[...found,...recent.filter(x=>!found.some(y=>y.id===x.id))];
   const scenes=new Map((store.load().state?.sessions||[]).map(s=>[s.id,s]));
-  return all.filter(f=>{
-    if(f.origin==='inherited')return true; // Immutable fork snapshot of already approved knowledge.
-    const scene=scenes.get(f.scene_id);
-    const message=scene?.messages?.find(m=>m.id===f.source_message_id);
-    return canRecall(message,actorId,scene) && sourceFingerprint(message)===f.source_hash;
-  }).slice(0,Math.max(1,Math.min(12,limit))).map(f=>({
+  return all.filter(f=>hasCurrentSource(f,scenes,actorId))
+    .slice(0,Math.max(1,Math.min(12,limit))).map(f=>({
     id:f.id,kind:f.kind,text:f.text,origin:f.origin,sourceMessageId:f.source_message_id,
     sceneId:f.scene_id,createdAt:f.created_at
   }));
