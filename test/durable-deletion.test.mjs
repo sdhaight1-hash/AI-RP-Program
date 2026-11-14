@@ -8,6 +8,7 @@ import {makeEmptyWorldState,createCharacter,createSession} from '../engine.mjs';
 import {archiveCharacter,archiveSession,purgeArchived} from '../harness.mjs';
 import {createApp} from '../server.mjs';
 import {inspectWorldStorage} from '../scripts/storage-health.mjs';
+import {addActorFact} from '../memory/facts.mjs';
 
 const fixture=()=>{
   const dir=mkdtempSync(join(tmpdir(),'rp-delete-'));
@@ -181,6 +182,57 @@ test('synchronous HTTP purge enforces archives, rejects stale revisions and clea
     assert.equal(f.scoped.db.prepare('PRAGMA foreign_key_check').all().length,0);
   }finally{
     // createApp closes its supplied store when the HTTP listener closes.
+    await new Promise(resolve=>app.close(resolve));
+    rmSync(f.dir,{recursive:true,force:true});
+  }
+});
+
+
+test('purging a scene removes its derived memories and scoped lore without unscoping secrets',()=>{
+  const f=fixture();
+  try{
+    const actor=createCharacter('Witness'),state=makeEmptyWorldState(),scene=createSession(actor);
+    scene.messages.push({id:'fact-evidence',role:'user',content:'We saw the red metal star in the attic.',
+      witnessIds:[actor.id]});
+    state.characters=[actor];state.sessions=[scene];state.activeSessionId=scene.id;
+    state.lore=[{id:'scene-only',title:'Private clue',content:'Vault key is moon-gray.',
+      visibility:'private',keywords:['vault'],knownBy:[actor.id],sessionIds:[scene.id]}];
+    save(f.scoped,f.worldId,state);
+    addActorFact(f.scoped,{sceneId:scene.id,actorId:actor.id,
+      sourceMessageId:'fact-evidence',kind:'observation',
+      text:'The red metal star was in the attic.'});
+    assert.equal(count(f.scoped.db,'actor_facts','scene_id=?',[scene.id]),1);
+    const toPurge=f.scoped.load().state;
+    archiveSession(toPurge,scene.id);
+    purgeArchived(toPurge,'scene',scene.id);
+    assert.equal(toPurge.lore.length,0,'scope-only lore must not become public world lore');
+    save(f.scoped,f.worldId,toPurge);
+    assert.equal(count(f.scoped.db,'actor_memories','scene_id=?',[scene.id]),0);
+    assert.equal(count(f.scoped.db,'actor_facts','scene_id=?',[scene.id]),0);
+    assert.equal(count(f.scoped.db,'actor_memories_fts'),0);
+    assert.equal(count(f.scoped.db,'actor_facts_fts'),0);
+    assert.equal(f.scoped.load().state.lore.length,0);
+    assert.equal(f.scoped.db.prepare('PRAGMA foreign_key_check').all().length,0);
+  }finally{f.close();}
+});
+
+test('scoped world-entry HTTP deletion never reaches another world and blocks cross-origin calls',async()=>{
+  const f=fixture(),a=f.scoped.worlds.createEntity({worldId:f.worldId,name:'Temporary canon object'});
+  const other=f.store.worlds.createWorld({name:'Separate testing universe'});
+  const b=f.store.forWorld(other.id).worlds.createEntity({worldId:other.id,name:'Preserved record'});
+  const app=createApp({store:f.store,fetchImpl:async()=>{throw Error('No inference')}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+app.address().port;
+  try{
+    const request=(worldId,id,origin)=>fetch(base+'/api/worlds/entries/delete',{
+      method:'POST',headers:{'Content-Type':'application/json',...(origin?{origin}:{})},
+      body:JSON.stringify({worldId,kind:'entity',id})});
+    assert.equal((await request(other.id,a.id)).status,422);
+    assert.equal((await request(f.worldId,a.id,'https://unauthorized.invalid')).status,403);
+    assert.equal((await request(f.worldId,a.id)).status,200);
+    assert.equal(count(f.scoped.db,'world_entities','id=?',[a.id]),0);
+    assert.equal(count(f.store.forWorld(other.id).db,'world_entities','id=?',[b.id]),1);
+  }finally{
     await new Promise(resolve=>app.close(resolve));
     rmSync(f.dir,{recursive:true,force:true});
   }
