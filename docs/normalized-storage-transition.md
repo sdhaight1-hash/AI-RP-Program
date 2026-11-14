@@ -1,6 +1,6 @@
 # Normalized story projection — opt-in migration gate
 
-Status: **shadow/dual-write only, not a primary storage cutover**. The existing per-world `studio_state` JSON snapshot remains authoritative for reads and writes. The projection is additive, per-world, and reversible by restoring the full backup. This stage is designed to prove parity and failure recovery before replacing the snapshot or removing the existing roughly 4 MB save limit.
+Status: **shadow/dual-write by default**, with a separate explicitly opted-in normalized-primary conversion now available. No existing world converts automatically. This document covers the shadow staging step; see `docs/normalized-primary-optin.md` for the primary cutover, guarded limits and full backup recovery.
 
 ## Safety and preparation
 
@@ -34,6 +34,6 @@ The migration's one-world-at-a-time commits are **not** atomic across all world 
 
 This projection introduces a second, testable representation and makes future incremental storage possible, **but it does not yet reduce full-JSON network payloads or eliminate the 4 MB snapshot limit**. Source event locks, forks and actor visibility still read their original authoritative tables. Enabling dual-write may increase write time until a proven primary cutover removes redundant work. The baseline at 1K/4K turns is in `docs/storage-scale-baseline.md`.
 
-Issue #31 remains open until a separately tested normalized-primary/partial-write API can load, edit and save large worlds without serializing the entire transcript each turn. Acceptance requires 1K/4K/10K/25K load/save/restore benchmarks, crash injection, multi-tab conflict testing and exact authority/provenance parity. Never delete the canonical snapshot before that gate passes.
+Issue #31 remains open for **incremental** scene/message synchronization. The optional primary mode can load and save stories larger than the legacy snapshot cap, but the browser still transfers the entire transcript each turn and write costs remain history-dependent. Acceptance for the remaining work requires 1K/4K/10K/25K load/save/restore benchmarks, crash injection, multi-tab conflict testing and exact authority/provenance parity. Before primary conversion, retain a full restorable snapshot backup.
 
 Tests: `test/normalized-storage.test.mjs`, `test/normalize-storage-migration.test.mjs`, plus existing world/actor/event/backup tests.
