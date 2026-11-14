@@ -91,8 +91,9 @@ export function deleteWorldRecord(store,{worldId,kind,id}) {
         throw new Error('This place is referenced by a timeline position or world event; update those records first');
       if(state?.characters?.some(c=>c.homeLocationId===id||c.workLocationId===id||
         c.frequentPlaces?.some(x=>x.locationId===id)) ||
-        state?.encounters?.some(e=>e.locationId===id))
-        throw new Error('This place is used by a character or encounter; unlink it first');
+        state?.encounters?.some(e=>e.locationId===id) ||
+        state?.sessions?.some(s=>s.locationId===id))
+        throw new Error('This place is used by a character, scene or encounter; unlink it first');
       db.prepare('DELETE FROM location_connections WHERE world_id=? AND (from_id=? OR to_id=?)')
         .run(worldId,id,id);
       db.prepare("DELETE FROM character_world_sources WHERE world_id=? AND entry_type='location' AND entry_id=?")
