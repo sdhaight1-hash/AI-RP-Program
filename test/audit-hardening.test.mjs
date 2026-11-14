@@ -75,24 +75,25 @@ test('entity projection failures roll back story changes and revision together',
   assert.deepEqual(store.worlds.list().entities,[]);
 }));
 
-test('a stale tab cannot retrieve another world portrait, lore or state or send world-bound inference',async t=>fixture(t,async({store,base})=>{
+test('world scope isolates assets and state without blocking simultaneous tabs',async t=>fixture(t,async({store,base})=>{
   const a=store.activeWorldId;
   const b=store.worlds.createWorld({name:'Other'}).id;
   store.activateWorld(b);
   const portrait=await fetch(`${base}/portraits/11111111-1111-4111-8111-111111111111.jpg?worldId=${a}`);
-  assert.equal(portrait.status,409);
-  assert.equal((await fetch(`${base}/api/state?worldId=${a}`)).status,409);
+  assert.equal(portrait.status,404,'missing asset must not be fabricated by the other world');
+  const stateA=await fetch(`${base}/api/state?worldId=${a}`);
+  const stateB=await fetch(`${base}/api/state?worldId=${b}`);
+  assert.equal(stateA.status,200);
+  assert.equal(stateB.status,200);
+  assert.equal((await stateA.json()).worldId,a);
+  assert.equal((await stateB.json()).worldId,b);
   const lore=await fetch(`${base}/api/search/lore`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:a,sessionId:'x',actorId:'x',query:'secret'})});
-  assert.equal(lore.status,409);
-  const completion=await fetch(`${base}/api/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:a,model:'local',temperature:0.8,max_tokens:128,messages:[{role:'user',content:'Hi'}]})});
-  assert.equal(completion.status,409);
+  assert.equal(lore.status,400,'invalid actor must not gain lore access');
   const events=await fetch(`${base}/api/events/proposals?sceneId=x&worldId=${a}`);
-  assert.equal(events.status,409);
-  const imageJob=await fetch(`${base}/api/comfy/generate`,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({worldId:a,templateId:'portrait',prompt:'From old world'})});
-  assert.equal(imageJob.status,409);
-  assert.equal((await fetch(`${base}/api/comfy/history?job=old&worldId=${a}`)).status,409);
-  assert.equal((await fetch(`${base}/api/comfy/image?job=old&filename=x.png&worldId=${a}`)).status,409);
+  assert.equal(events.status,200);
+  assert.deepEqual((await events.json()).proposals,[]);
+  assert.equal((await fetch(`${base}/api/comfy/history?job=old&worldId=${a}`)).status,404);
+  assert.equal((await fetch(`${base}/api/comfy/image?job=old&filename=x.png&worldId=${a}`)).status,404);
 }));
 
 test('JSON body preserves multibyte UTF-8 characters split across transport chunks', async t=>{
