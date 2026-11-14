@@ -12,6 +12,7 @@ import { discoverBackendContext, enforceTokenBudget } from './context/backend.mj
 import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mjs';
 import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
+import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -27,6 +28,7 @@ const ALLOWED = new Map([
   ['/character/context.mjs', ['../character/context.mjs', 'text/javascript; charset=utf-8']],
   ['/character/schema.mjs', ['../character/schema.mjs', 'text/javascript; charset=utf-8']],
   ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
+  ['/character/world-bridge.mjs', ['../character/world-bridge.mjs', 'text/javascript; charset=utf-8']],
   ['/character/field-contracts.mjs', ['../character/field-contracts.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/reply-review.mjs', ['../interactions/reply-review.mjs', 'text/javascript; charset=utf-8']],
@@ -157,6 +159,24 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const data=await readJson(req,3000);
         try {return json(res,201,store.worlds.createEntity(data));}
         catch(err){return json(res,400,{error:err.message});}
+      }
+      if (req.method === 'POST' && path === '/api/character/world-entries/approve') {
+        const input=await readJson(req,6000);
+        requireWorldScope(input.worldId);
+        try{return json(res,201,commitCharacterWorldEntry(store,input));}
+        catch(error){
+          const stale=/changed since|changed; regenerate|Wrong world/.test(error.message);
+          return json(res,stale?409:422,{error:error.message});
+        }
+      }
+      if (req.method === 'GET' && path === '/api/character/world-entries/sources') {
+        const worldId=requestUrl.searchParams.get('worldId');
+        const characterId=requestUrl.searchParams.get('characterId');
+        requireWorldScope(worldId);
+        if(!characterId||characterId.length>160)return json(res,400,{error:'Valid character required'});
+        const actor=store.load().state?.characters?.find(c=>c.id===characterId&&!c.trashedAt);
+        if(!actor||(actor.worldId&&actor.worldId!==worldId))return json(res,404,{error:'Character not found in this world'});
+        return json(res,200,{sources:listCharacterWorldSources(store,{worldId,characterId})});
       }
       if (req.method === 'POST' && path === '/api/worlds/relationships') {
         const data=await readJson(req,5000);
