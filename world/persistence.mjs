@@ -255,6 +255,9 @@ export class WorldRepository {
     if(!ENTITY_KINDS.includes(kind))throw new TypeError('Invalid entity kind');
     if(sourceCharacterId!==null&&(typeof sourceCharacterId!=='string'||sourceCharacterId.length>160))throw new TypeError('Invalid character reference');
     if(!this.db.prepare('SELECT id FROM worlds WHERE id=?').get(worldId))throw new Error('World does not exist');
+    if(sourceCharacterId&&this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND source_character_id=? LIMIT 1')
+      .get(worldId,sourceCharacterId))
+      throw new Error('Character already has a linked world entity; edit the existing person instead');
     const value={id:randomUUID(),worldId,name:cleanTitle(name,'Entity name'),kind,sourceCharacterId};
     this.db.prepare('INSERT INTO world_entities(id,world_id,name,kind,source_character_id,created_at) VALUES (?,?,?,?,?,?)')
       .run(value.id,worldId,value.name,kind,sourceCharacterId,now());
