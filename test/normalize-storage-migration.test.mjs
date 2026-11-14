@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { WorldPartitionStore } from '../world/partition-store.mjs';
 import { makeInitialState,makeEmptyWorldState } from '../engine.mjs';
 import { backupWorldStorage } from '../scripts/backup-storage.mjs';
@@ -68,4 +69,27 @@ test('stale backup blocks migration even if catalog world IDs still match',()=>{
     try{assert.equal(projectionEnabled(check.forWorld(id).db),false);}
     finally{check.close();}
   }finally{rmSync(temp,{recursive:true,force:true});}
+});
+
+
+test('legacy snapshots without stable source IDs are rejected before schema staging',()=>{
+  const temp=mkdtempSync(join(tmpdir(),'rp-projection-legacy-'));
+  const data=join(temp,'live');
+  try {
+    const store=new WorldPartitionStore(data),id=store.activeWorldId;
+    store.forWorld(id).save(makeInitialState(),store.forWorld(id).load().revision,{worldId:id});
+    const file=store.worldFile(id);
+    store.close();
+    const db=new DatabaseSync(file);
+    try{
+      const document=JSON.parse(db.prepare('SELECT document FROM studio_state WHERE id=1').get().document);
+      delete document.sessions[0].messages[0].id;
+      db.prepare('UPDATE studio_state SET document=? WHERE id=1').run(JSON.stringify(document));
+    }finally{db.close();}
+    assert.throws(()=>normalizeStorage(data),/unstable IDs/);
+    const inspect=new DatabaseSync(file,{readOnly:true});
+    try{
+      assert.equal(inspect.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='story_projection_meta'").get().n,0);
+    }finally{inspect.close();}
+  } finally {rmSync(temp,{recursive:true,force:true});}
 });
