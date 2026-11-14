@@ -32,6 +32,18 @@ test('studio shell has unique IDs and preserves every required scene and authori
   for(const id of essentials)assert.ok(ids.includes(id),'Missing existing or new control: '+id);
 });
 
+test('redesigned HTML preserves every existing static DOM target referenced by the application',()=>{
+  const declared=new Set([
+    ...ids,
+    ...[...javascript.matchAll(/\\bid="([^"]+)"/g)].map(x=>x[1]),
+    ...[...javascript.matchAll(/\\.id\\s*=\\s*['"]([^'"]+)['"]/g)].map(x=>x[1])
+  ]);
+  const accessed=[...new Set([...javascript.matchAll(/\\$\\(['"]([^'"]+)['"]\\)/g)].map(x=>x[1]))];
+  const missing=accessed.filter(id=>!declared.has(id));
+  assert.deepEqual(missing,[],
+    'A removed or renamed static shell element would break an existing feature: '+missing.join(', '));
+});
+
 test('every major workspace and all thirteen functional detail desk tools remain reachable',()=>{
   const workspaces=[...html.matchAll(/<button\b[^>]*data-workspace="([^"]+)"/g)].map(x=>x[1]);
   assert.deepEqual(workspaces,['world','characters','story','memory','tools']);
