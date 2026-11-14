@@ -172,6 +172,37 @@ async function main(){
       return true;
     `);
 
+    // End-to-end encounter authoring: the main workspace, not a hidden
+    // detail-desk subpanel, creates a social-media template and reuses its
+    // configured medium for a new scene.
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="encounters"]').click();
+      const title=document.querySelector('#encounter-title');
+      title.value='Browser Social DM';
+      document.querySelector('#encounter-channel').value='social_dm';
+      document.querySelector('#encounter-opening').value='hey, online now?';
+      document.querySelector('#encounter-save').click();
+      return document.body.dataset.workspace==='encounters' &&
+        document.querySelector('#workspace-title').textContent==='Encounters & communication';
+    `),true,'Encounters must be a directly navigable world-level editor');
+    await until(async()=>{
+      const result=await fetch(base+'/api/state');
+      const snapshot=await result.json();
+      return snapshot.state.encounters.some(e=>e.title==='Browser Social DM'&&e.channelId==='social_dm');
+    },'browser social encounter saved');
+    await screenshot('06b-social-encounter-workspace');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.encounter-card')].find(card=>
+        card.querySelector('strong')?.textContent==='Browser Social DM');
+      if(!row)return false;
+      const start=[...row.querySelectorAll('button')].find(x=>x.textContent==='Start scene');
+      if(!start)return false;
+      start.click();
+      return document.body.dataset.workspace==='story'&&
+        document.querySelector('#channel-select').value==='social_dm';
+    `),true,'starting the template must carry its social-media channel into the scene');
+    await screenshot('06b-social-scene-started');
+
     // Real headless browser tabs each retain their own selected world.
     // This catches browser/sessionStorage regressions that HTTP-only tests miss.
     const firstHandle=await request('GET','/session/'+sessionId+'/window');
