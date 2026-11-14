@@ -1,5 +1,5 @@
 import { describeMind } from './psychology.mjs';
-import { getChannel, channelObservations } from './interactions/channels.mjs';
+import { getChannel, getChannelVoice, channelObservations } from './interactions/channels.mjs';
 // Deterministic orchestration primitives. No LLM output can commit world events here.
 const id = () => crypto.randomUUID();
 const MODES = new Set(['manual', 'natural', 'round-robin']);
@@ -127,7 +127,7 @@ export function createActorContext({ session, characters, actorId, persona, lore
   const summary = inPerson ? ((session.castIds || []).length > 1 ? session.publicSummary : (session.summary || '')) : ''; // Do not inject unseen shared-scene narration in remote channels.
   const assembled = buildMessages({ character: actingCharacter, persona, summary, authorNote: session.authorNote,
     emotion: session.emotionByActor?.[actorId] || session.emotion,
-    lore: candidateLore, history, sceneNotes, styleInstruction: channel.direction,
+    lore: candidateLore, history, sceneNotes, styleInstruction: channel.direction, channelVoice: getChannelVoice(actor,channel.id),
     psychologyNotes: session.psychologyByActor?.[actorId] ? describeMind(session.psychologyByActor[actorId],actor.name) : '' });
   assembled.actorId = actorId;
   return assembled;

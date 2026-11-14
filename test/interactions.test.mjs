@@ -76,3 +76,40 @@ test('local server serves the channel rules module to the browser', async () => 
     assert.match(text,/text_message/);
   } finally {await new Promise(resolve=>server.close(resolve));}
 });
+
+test('NPCs use channel-specific speaking habits while preserving their core identity', () => {
+  const mara=createCharacter('Mara');
+  Object.assign(mara,{
+    personality:'INVARIANT_PERSONALITY quiet and kind',
+    speechStyle:'GENERAL_VOICE dry humor',
+    inPersonStyle:'INPERSON_STYLE makes small jokes and pauses',
+    phoneStyle:'PHONE_STYLE slow pauses and soft laughter',
+    textStyle:'TEXT_STYLE one-liners and careful punctuation',
+  });
+  const scene=createSession(mara);
+  scene.messages=[{role:'user',content:'Hi there!',witnessIds:[mara.id],channelId:'text_message'}];
+  const ctx=()=>createActorContext({session:scene,characters:[mara],actorId:mara.id,persona:{name:'Player'},lore:[],buildMessages}).messages[0].content;
+  for(const [channel,expected,forbidden] of [
+    ['text_message','TEXT_STYLE',['PHONE_STYLE','INPERSON_STYLE']],
+    ['phone_call','PHONE_STYLE',['TEXT_STYLE','INPERSON_STYLE']],
+    ['in_person','INPERSON_STYLE',['PHONE_STYLE','TEXT_STYLE']],
+  ]) {
+    scene.channelId=channel;
+    const prompt=ctx();
+    assert.match(prompt,/INVARIANT_PERSONALITY/);
+    assert.match(prompt,/GENERAL_VOICE/);
+    assert.ok(prompt.includes(expected),channel);
+    for(const item of forbidden)assert.ok(!prompt.includes(item),`${channel} leaked ${item}`);
+  }
+});
+
+test('channel voices survive native character import and save normalization', async () => {
+  const { importCharacter }=await import('../engine.mjs');
+  const imported=importCharacter({name:'Mara',phoneStyle:'gentle, slow',textStyle:'short with lowercase',inPersonStyle:'hand gestures'});
+  assert.equal(imported.textStyle,'short with lowercase');
+  const session=createSession(imported);
+  const saved=normalizeState({characters:[imported],sessions:[session],activeSessionId:session.id,lore:[],settings:{},persona:{name:'Player'}});
+  assert.equal(saved.characters[0].phoneStyle,'gentle, slow');
+  const legacy=createCharacter('Original');
+  assert.equal(legacy.phoneStyle,'');
+});

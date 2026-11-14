@@ -28,7 +28,7 @@ export const FIDELITY_PROBES = Object.freeze([
 const ratingKeys = Object.freeze(['voice', 'consistency', 'naturalness', 'agency']);
 export const FIDELITY_RATINGS = ratingKeys;
 export function fidelityProfileFingerprint(character) {
-  const source = ['name', 'personality', 'backstory', 'motivations', 'fears', 'boundaries', 'speechStyle', 'exampleDialogue']
+  const source = ['name', 'tagline', 'handle', 'description', 'personality', 'backstory', 'motivations', 'fears', 'boundaries', 'speechStyle', 'inPersonStyle', 'phoneStyle', 'textStyle', 'exampleDialogue']
     .map(key => String(character?.[key] || '')).join('\u001f');
   // Non-security version marker, not a cryptographic hash.
   let hash = 2166136261;

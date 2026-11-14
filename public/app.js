@@ -41,6 +41,9 @@ const BUILDER_SECTIONS = {
   ],
   voice: [
     ['speechStyle','Distinctive voice','textarea','Pacing, vocabulary, cadence, humor, regionalisms.'],
+    ['inPersonStyle','In-person speaking style','textarea','Body language, everyday dialogue rhythms, habits when together face-to-face.'],
+    ['phoneStyle','Phone-call speaking style','textarea','Spoken cadence, hesitation, audible mannerisms; no visible gestures or descriptions.'],
+    ['textStyle','Messaging style','textarea','Text length, punctuation, emoji, slang, habits around sending short messages.'],
     ['exampleDialogue','Sample dialogue','textarea','Example exchanges that teach cadence, not past events.'],
   ],
   scene: [

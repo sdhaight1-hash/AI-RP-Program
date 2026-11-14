@@ -55,6 +55,10 @@ test('diagnostics flag possible voice-medium and player agency errors only as wa
 test('review normalization bounds data, strips invalid ratings, and tracks profile versions', () => {
   const c=createCharacter('Mara');const a=fidelityProfileFingerprint(c);c.personality='quiet but kind';
   assert.notEqual(a,fidelityProfileFingerprint(c));
+  const voiceVersion=fidelityProfileFingerprint(c);c.textStyle='short and lowercase';
+  assert.notEqual(voiceVersion,fidelityProfileFingerprint(c));
+  const identityVersion=fidelityProfileFingerprint(c);c.description='pale freckles and a warm smile';
+  assert.notEqual(identityVersion,fidelityProfileFingerprint(c));
   const bad={id:'x'.repeat(500),probeId:'phone',reply:'h'.repeat(15000),ratings:{voice:5,agency:10,consistency:2.5,naturalness:3},notes:'x'.repeat(3000),reviewedAt:1700000000000};
   const reviews=normalizeFidelityReviews([...Array(20).fill(bad),{probeId:'invalid',reply:'x'}]);
   assert.equal(reviews.length,14); // Keep last 15 inputs, then discard the invalid probe.
