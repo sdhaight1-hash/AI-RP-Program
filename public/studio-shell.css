@@ -991,3 +991,13 @@ body.detail-focus #expand-inspector{display:none}
   .global-notice{padding:10px 16px}
   .encounter-header-actions{width:100%}
 }
+
+/* Editor feedback stays visible when focused mode overlays the workspace. */
+.detail-error{
+  flex:0 0 auto;margin:0;
+  padding:11px 19px;
+  border-bottom:1px solid color-mix(in srgb,#c9857f 35%,var(--ux-line));
+  background:color-mix(in srgb,#c9857f 11%,var(--ux-panel));
+  color:var(--text);font-size:12px;line-height:1.5;
+}
+body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
