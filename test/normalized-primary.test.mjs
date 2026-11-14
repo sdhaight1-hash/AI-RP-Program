@@ -204,3 +204,24 @@ test('legacy multiworld importer refuses a normalized-primary source without cha
     }finally{restored.close();}
   }finally{rmSync(directory,{recursive:true,force:true});}
 });
+
+test('unchanged primary message rows skip update triggers without weakening edit detection',()=>{
+  const store=new StudioStore(':memory:');
+  try{
+    store.save(makeInitialState(),0);
+    staged(store);
+    const existing=store.load();
+    store.db.exec(`CREATE TRIGGER forbid_redundant_projection_update
+      BEFORE UPDATE ON story_projection_messages
+      BEGIN SELECT RAISE(ABORT,'unchanged message should not be rewritten'); END;`);
+    const noOp=store.save(existing.state,existing.revision);
+    assert.equal(noOp.revision,existing.revision+1);
+    assert.equal(store.load().state.sessions[0].messages.length,1);
+    const changed=store.load();
+    changed.state.sessions[0].messages[0].content='A modified source must be checked.';
+    assert.throws(()=>store.save(changed,changed.revision),
+      /unchanged message should not be rewritten/);
+    assert.equal(store.load().revision,noOp.revision);
+    assert.equal(verifyStoryProjection(store.db,store.load()).status,'matched');
+  }finally{store.close();}
+});
