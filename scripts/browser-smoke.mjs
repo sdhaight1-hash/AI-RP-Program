@@ -103,7 +103,7 @@ async function main(){
         document.querySelector('#workspace-overview')).display!=='none',
         sceneHidden:getComputedStyle(document.querySelector('#messages')).display==='none',
         cards:document.querySelectorAll('.workspace-card').length,
-        selected:document.querySelector('[data-workspace="world"]').getAttribute('aria-pressed')};
+        selected:document.querySelector('button[data-workspace="world"]').getAttribute('aria-pressed')};
     `);
     assert.deepEqual(world,{workspace:'world',visible:true,sceneHidden:true,cards:4,selected:'true'});
     await screenshot('02-world-overview');
