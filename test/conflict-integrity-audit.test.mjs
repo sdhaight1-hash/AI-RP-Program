@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {inspectWorldStorage} from '../scripts/storage-health.mjs';
 import {tmpdir} from 'node:os';
 import {StudioStore} from '../storage.mjs';
 import {WorldPartitionStore} from '../world/partition-store.mjs';
@@ -243,4 +245,38 @@ test('legacy direct HTTP story saves also refuse unconfirmed deletion',async()=>
     assert.equal(store.load().revision,before.revision);
     assert.equal(store.load().state.sessions.length,1);
   }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+
+test('duplicate world-person mirror is blocked, audited and safely removable without deleting the live profile',()=>{
+  const directory=mkdtempSync(join(tmpdir(),'rp-mirror-conflict-'));
+  const store=new WorldPartitionStore(directory),worldId=store.activeWorldId;
+  try{
+    const scoped=store.forWorld(worldId);
+    const actor=createCharacter('Legacy Duplicated Person'),state=makeEmptyWorldState();
+    state.characters=[actor];
+    scoped.save(state,scoped.load().revision,{worldId});
+    const original=scoped.worlds.list().entities.find(e=>e.sourceCharacterId===actor.id);
+    assert.ok(original);
+    assert.throws(()=>scoped.worlds.createEntity({
+      worldId,name:'Accidental second mirror',sourceCharacterId:actor.id
+    }),/already has a linked world entity/);
+    const extraId=randomUUID();
+    scoped.db.prepare(`INSERT INTO world_entities
+      (id,world_id,name,kind,source_character_id,created_at)
+      VALUES(?,?,?,?,?,?)`).run(extraId,worldId,'Old Test Duplicate','character',actor.id,Date.now());
+    const audit=inspectWorldStorage(directory);
+    assert.equal(audit.ok,true);
+    assert.equal(audit.worlds.find(w=>w.id===worldId)?.duplicateCharacterMirrors,1);
+    assert.ok(audit.warnings.some(w=>/duplicate world identities/.test(w.detail)));
+    scoped.worlds.deleteEntry({worldId,kind:'entity',id:extraId});
+    assert.equal(total(scoped.db,'world_entities','source_character_id',actor.id),1);
+    assert.throws(()=>scoped.worlds.deleteEntry({
+      worldId,kind:'entity',id:original.id
+    }),/only world entity/);
+    const story=scoped.load();
+    scoped.save(story.state,story.revision,{worldId});
+    assert.equal(total(scoped.db,'world_entities','source_character_id',actor.id),1);
+    assert.equal(scoped.load().state.characters[0].name,actor.name);
+  }finally{store.close();rmSync(directory,{recursive:true,force:true});}
 });
