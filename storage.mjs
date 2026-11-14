@@ -9,6 +9,7 @@ import { bindTimelineIds } from './world/canon.mjs';
 import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } from './world/persistence.mjs';
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
+import { initializeFactSchema } from './memory/facts.mjs';
 
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
@@ -45,6 +46,7 @@ export class StudioStore {
     initializeWorldSchema(this.db, persisted, this.scopeWorldId);
     initializeEventLedger(this.db);
     initializeMemorySchema(this.db);
+    initializeFactSchema(this.db);
     this.worlds = new WorldRepository(this.db);
     this.events = new EventLedger(this);
     this.rebuildLoreIndex(persisted?.lore || []);
