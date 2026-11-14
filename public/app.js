@@ -902,10 +902,24 @@ function renderInspector() {
     const list=$('library-trash');
     const archived=[...state.characters.filter(c=>c.trashedAt).map(c=>({type:'Character',item:c})),...state.sessions.filter(s=>s.trashedAt).map(s=>({type:'Scene',item:s}))];
     if(!archived.length)list.append(el('p','Trash is empty. Use × beside a character or session to archive.','help'));
-    for(const {type,item} of archived){const row=el('div','','trash-row');row.append(el('span',`${type}: ${item.name||item.title}`));const restore=el('button','Restore','subtle-button');restore.onclick=()=>{item.trashedAt=null;if(type==='Scene')state.activeSessionId=item.id;save();render();};
+    for(const {type,item} of archived){
+      const row=el('div','','trash-row');
+      row.append(el('span',`${type}: ${item.name||item.title}`));
+      const restore=el('button','Restore','subtle-button');
+      restore.onclick=()=>{item.trashedAt=null;if(type==='Scene')state.activeSessionId=item.id;save();render();};
+      const linked=type==='Character'?encounterDependencies(state,item.id):[];
+      if(linked.length){
+        const dependency=el('div','','trash-dependency');
+        dependency.append(el('strong',`${linked.length} encounter template(s) blocking deletion`),
+          el('p',linked.map(e=>e.title).join(' · '),'help'));
+        dependency.append(el('button','Manage linked encounters','subtle-button'));
+        dependency.querySelector('button').onclick=()=>openEncounterManager(linked[0].id);
+        row.append(dependency);
+      }
       const remove=el('button','Permanently delete','mini-action');
       remove.onclick=()=>{void permanentlyPurgeLibraryItem(type,item);};
-      row.append(restore,remove);list.append(row);}
+      row.append(restore,remove);list.append(row);
+    }
   } else if (currentTab === 'lore') {
     host.innerHTML = `<h2 class="panel-title">World codex</h2><p class="help">Record canon facts. Private entries go only to characters who explicitly know them; keyword and always-on retrieval is scoped to the actor.</p><button id="add-lore" class="subtle-button" style="margin-bottom:16px">＋ New lore entry</button><div id="lore-list"></div>`;
     $('add-lore').onclick = () => { state.lore.unshift({id:crypto.randomUUID(),title:'New entry',keywords:[],content:''}); save(); renderInspector(); };
@@ -1176,6 +1190,11 @@ function setDetailDeskOpen(isOpen){
   $('expand-inspector').setAttribute('aria-pressed',String(document.body.classList.contains('detail-focus')));
   for(const id of ['open-inspector','open-workspace-inspector'])$(id)?.setAttribute('aria-expanded',String(Boolean(isOpen)));
 }
+function openEncounterManager(templateId=null){
+  encounterEditingId=templateId;
+  setWorkspace('encounters');
+  $('encounter-title')?.focus();
+}
 function setWorkspace(mode){
   if(!Object.hasOwn(WORKSPACE_META,mode))return;
   activeWorkspace=mode;
@@ -1196,6 +1215,8 @@ function studioCommands(){
   return [
     {label:'World & canon',detail:'Workspace',keywords:'universe overview',run:()=>setWorkspace('world')},
     {label:'Characters',detail:'Workspace',keywords:'cast profiles identity',run:()=>setWorkspace('characters')},
+    {label:'Encounters',detail:'Workspace',keywords:'template starter webcam video call social media email',run:()=>setWorkspace('encounters')},
+    {label:'Manage encounter templates',detail:'Encounters',keywords:'remove edit delete encounter dependency blocked purge',run:()=>openEncounterManager()},
     {label:'Story room',detail:'Workspace',keywords:'chat conversation scene',run:()=>setWorkspace('story')},
     {label:'Memory & review',detail:'Workspace',keywords:'recall evidence',run:()=>setWorkspace('memory')},
     {label:'Models & lab',detail:'Workspace',keywords:'inference setup tools',run:()=>setWorkspace('tools')},
@@ -1225,6 +1246,8 @@ function studioCommands(){
       run:()=>$('new-character').click()},
     {label:'Start a new scene',detail:'New',keywords:'chat encounter',
       run:()=>openNewSceneDialog()},
+    {label:'Create encounter template',detail:'New',keywords:'new scenario setup webcam social',
+      run:()=>openEncounterManager()},
     {label:'Choose a world',detail:'Worlds',keywords:'switch universe',
       run:()=>{renderWorldLauncher();$('world-launcher').showModal();}}
   ];
