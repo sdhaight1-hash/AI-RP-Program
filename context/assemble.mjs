@@ -2,6 +2,7 @@
 // This module never lets a browser-provided prompt define actor knowledge.
 import { createActorContext } from '../harness.mjs';
 import { characterPlaceContext } from '../character/context.mjs';
+import { selectCharacterDetails } from '../character/relevance.mjs';
 import { retrieveActorMemories } from '../memory/store.mjs';
 
 const shorten = (value, limit) => String(value || '').slice(0,limit);
@@ -27,16 +28,31 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const channelId=retry?(previous.channelId||'in_person'):scene.channelId;
   const worldLibrary={...store.worlds.list(),activeWorldId:worldId};
   const placeNotes=characterPlaceContext(actor,worldLibrary,worldId);
+  const actorPosition=worldLibrary.positions?.find(p=>p.timelineId===scene.timelineId && p.actorId===actorId);
+  const presentLocation=actorPosition ? worldLibrary.locations?.find(p=>p.id===actorPosition.locationId) : null;
+  const clock=worldLibrary.clocks?.find(c=>c.timelineId===scene.timelineId && c.isExplicit);
+  const worldTime=clock ? new Date(clock.instantMs).toISOString()+' ('+clock.timeZone+')' : scene.worldTime;
+  const entity=worldLibrary.entities?.find(e=>e.sourceCharacterId===actorId);
+  const relevantCast=new Set([actorId,...(scene.castIds||[])]);
+  const socialTies=entity ? (worldLibrary.relationships||[]).filter(r=>r.fromId===entity.id||r.toId===entity.id)
+    .map(r=>{
+      const other=worldLibrary.entities?.find(e=>e.id===(r.fromId===entity.id?r.toId:r.fromId));
+      if(!other || (other.sourceCharacterId && !relevantCast.has(other.sourceCharacterId)))return null;
+      return other.name+': '+r.kind;
+    }).filter(Boolean).slice(0,5).join('; ') : '';
   // Reuse existing witnessed-history and channel rules instead of rebuilding
   // privacy logic in a second prompt implementation.
   const visible=createActorContext({
-    session:{...scene,messages:history,channelId},
+    session:{...scene,messages:history,channelId,worldTime},
     characters:state.characters,actorId,persona:state.persona,
     lore:[],buildMessages:args=>({...args,messages:[],activatedLore:[]}),
     rememberedEvents:[],worldPlaceNotes:placeNotes
   });
   const latest=visible.history.slice(-8).map(m=>m.content).join(' ');
-  const query=[latest,scene.location,actor.occupation].filter(Boolean).join(' ').slice(-900);
+  const directCue=visible.history.filter(m=>m.role==='user').slice(-2).map(m=>m.content).join(' ') || latest;
+  const details=selectCharacterDetails(actor,directCue);
+  const query=[directCue,scene.location,...(scene.castIds||[]).map(id=>state.characters.find(c=>c.id===id)?.name)]
+    .filter(Boolean).join(' ').slice(-900);
   const excluded=history.slice(-8).map(m=>m.id);
   const recalled=retrieveActorMemories(store.db,{timelineId:scene.timelineId,actorId,query,excludeMessageIds:excluded,limit:8});
   const events=store.events.visible(scene.timelineId,actorId,30);
@@ -64,20 +80,24 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     'Motivations: '+shorten(actor.motivations,250),
     'Conflict habits: '+shorten(actor.conflictStyle,200),
     'Speech: '+shorten(actor.speechStyle,350),
+    'Example voice: '+shorten(actor.exampleDialogue,220),
     'Channel voice: '+shorten(visible.channelVoice,240),
     'Typical environment: '+shorten(placeNotes,240),
+    socialTies ? 'Known social ties: '+shorten(socialTies,320):'',
   ].filter(x=>!x.endsWith(': ')).join('\n');
   const instructions='You portray exactly one fictional NPC. Remain faithful to identity and character agency. Other participants speak only on their own turns. Never control the player character, invent their thoughts, or claim unseen knowledge. Quotes from previous dialogue are recollections of speech, NOT proof that claims were true. World and timeline facts override contradictory dialogue. Recollection does not require explicitly mentioning the memory.';
   const base=[
     instructions,
     profile,
     'Current situation (only witnessed details):\n'+shorten(visible.sceneNotes,950),
+    presentLocation?'Current actor location (world engine): '+shorten(presentLocation.name,150):'',
     'Character state:\n'+shorten(visible.psychologyNotes,400),
     'Player persona:\n'+shorten(visible.persona?.name,80)+' '+shorten(visible.persona?.description,220),
     visible.authorNote?'Author pacing guidance (not canon): '+shorten(visible.authorNote,300):''
   ].filter(Boolean);
   const memories=[
     ...scoredEvents.map(e=>'Committed event: '+shorten(e.description,240)),
+    ...details.map(d=>'Character background — '+d.name+': '+shorten(d.content,420)),
     ...recalled.map(m=>'Previously heard: '+shorten(m.text,300))
   ];
   const loreText=lore.map(x=>'World lore: '+shorten(x.content,340));
@@ -123,7 +143,8 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     contextWindow:context,maxOutput:output,safetyMargin:margin,
     promptTokensEstimated:estimateTokens(messages),
     memoryIds:recalled.filter(m=>added.some(x=>x.includes(m.text.slice(0,Math.min(40,m.text.length))))).map(m=>m.id),
-    recalled:recalled.length,visibleEvents:scoredEvents.length,lore:Math.min(lore.length,loreText.length),
+    recalled:recalled.length,selectedEvidence:added.length,characterDetails:details.length,
+    visibleEvents:scoredEvents.length,lore:loreText.filter(x=>added.includes(x)).length,
     recentMessages:recent.length
   }};
 }
