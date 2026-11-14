@@ -876,16 +876,29 @@ function renderInspector() {
     const reasons=$('psy-reasons');for(const reason of [...e.reasons].reverse().slice(0,8))reasons.append(el('p',`${reason.primary} · ${reason.summary}`,'help'));
     $('advance-time').onclick=()=>{if(running)return;const hours=Number($('advance-hours').value);if(!Number.isFinite(hours)||hours<=0||hours>168)return showError('Choose between 0 and 168 hours.');for(const id of s.castIds)s.psychologyByActor[id]=advanceMindTime(s.psychologyByActor[id]||createMind(),hours);s.timeHoursElapsed=(s.timeHoursElapsed||0)+hours;save();renderInspector();};
   } else if (currentTab === 'context') {
-    const actor=sceneActor(s); if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore a cast member or add an active character in Cast.</p>';return;} const prompt=createActorContext({session:{...s,worldTime:timelineClockLabel(s)||s.worldTime},characters:state.characters,actorId:actor.id,persona:state.persona,lore:state.lore,buildMessages,worldPlaceNotes:characterPlaceContext(actor,worldLibrary,activeWorldId)});
-    const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n');
-    const charCount=prompt.messages.reduce((n,m)=>n+m.content.length,0);
-    host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">This is the actual normal-reply prompt assembled for the local model. Continue adds an extra instruction. Sizes are rough character-based estimates, not tokenizer counts.</p>
-      <div class="context-stats"><div><strong>${prompt.messages.length}</strong><span>Messages</span></div><div><strong>~${Math.ceil(charCount/4).toLocaleString()}</strong><span>Estimated tokens</span></div><div><strong>${prompt.activatedLore.length}</strong><span>Active lore</span></div></div>
-      <div class="inline-actions"><button id="copy-context" class="subtle-button">Copy prompt</button></div><pre class="context-text" id="context-text"></pre>`;
-    $('context-text').textContent=allText;
-    $('copy-context').onclick=async()=>{try{await navigator.clipboard.writeText(allText);$('copy-context').textContent='Copied';}catch{showError('Clipboard unavailable; select the preview text to copy it.');}};
+    const actor=sceneActor(s);
+    if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore or add an actor first.</p>';return;}
+    host.innerHTML='<h2 class="panel-title">Context inspector</h2><p class="help">Reading the exact actor-visible context from SQLite…</p>';
+    const requestedScene=s.id,requestedWorld=activeWorldId;
+    void (async()=>{
+      try {
+        await requireSavedStory();
+        const result=await fetch('/api/actor/context',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({worldId:requestedWorld,sceneId:requestedScene,actorId:actor.id,
+            mode:'preview',contextWindow:state.settings.contextWindow||4096,
+            max_tokens:state.settings.max_tokens,revision})});
+        const prompt=await result.json();
+        if(!result.ok)throw new Error(prompt.error||'Context retrieval failed');
+        if(currentTab!=='context'||activeWorldId!==requestedWorld||activeSession()?.id!==requestedScene)return;
+        const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]
+${m.content}`).join('\n\n');
+        host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">Server-assembled, actor-scoped prompt. Token numbers are ${escapeHtml(prompt.metadata.countMethod)}.</p><div class="context-stats"><div><strong>${prompt.metadata.promptTokens.toLocaleString()}</strong><span>Prompt tokens</span></div><div><strong>${prompt.metadata.contextWindow.toLocaleString()}</strong><span>Context window</span></div><div><strong>${prompt.metadata.recalled}</strong><span>Retrieved memories</span></div></div><div class="inline-actions"><button id="copy-context" class="subtle-button">Copy prompt</button></div><pre class="context-text" id="context-text"></pre>`;
+        $('context-text').textContent=allText;
+        $('copy-context').onclick=async()=>{try{await navigator.clipboard.writeText(allText);}catch{showError('Clipboard unavailable.');}};
+      }catch(error){if(currentTab==='context')host.innerHTML='<h2 class="panel-title">Context inspector</h2><p class="help"></p>',host.querySelector('p').textContent=error.message;}
+    })();
   } else if (currentTab === 'setup') {
-    host.innerHTML = `<h2 class="panel-title">Studio settings</h2><p class="help">This studio talks only to your local inference server. Start LM Studio or KoboldCpp first, then refresh the model list.</p><h3 class="field-label">Color atmosphere</h3><div class="theme-tiles">${THEMES.map(t => `<button class="theme-tile ${state.settings.theme === t.id ? 'selected' : ''}" data-theme-choice="${t.id}" aria-pressed="${state.settings.theme === t.id}"><span class="theme-dot" style="background:${t.accent}"></span>${escapeHtml(t.name)}</button>`).join('')}</div><div class="group"><label class="field-label" for="custom-accent">Override accent</label><input id="custom-accent" type="color" value="${escapeHtml(state.settings.customAccent || (THEMES.find(t => t.id === state.settings.theme)?.accent || THEMES[0].accent))}" /></div><button class="subtle-button" id="accent-reset">Use theme default accent</button><p class="help">Choose a complete palette or adjust its accent. This preference is stored locally.</p><div class="group"><label class="field-label" for="model-select">Loaded model</label><select id="model-select"><option value="">Select a model</option>${models.map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===state.settings.model?'selected':''}>${escapeHtml(m.id)}</option>`).join('')}</select></div><button class="subtle-button" id="refresh-models">↻ Find local models</button><p id="backend-address" class="help">Backend: ${escapeHtml(backend)}</p>${field('temperature','Temperature',state.settings.temperature,{type:'number'})}${field('max_tokens','Max output tokens',state.settings.max_tokens,{type:'number'})}<h2 class="panel-title">Player persona</h2>${field('personaName','Your character name',state.persona.name)}${field('personaDescription','Your character',state.persona.description,{multiline:true,rows:5})}<p class="footer-note">Default server: KoboldCpp at 127.0.0.1:5001/v1. To use LM Studio instead, set INFERENCE_URL to http://127.0.0.1:1234/v1 before launching. Keep both servers on localhost.</p>`;
+    host.innerHTML = `<h2 class="panel-title">Studio settings</h2><p class="help">This studio talks only to your local inference server. Start LM Studio or KoboldCpp first, then refresh the model list.</p><h3 class="field-label">Color atmosphere</h3><div class="theme-tiles">${THEMES.map(t => `<button class="theme-tile ${state.settings.theme === t.id ? 'selected' : ''}" data-theme-choice="${t.id}" aria-pressed="${state.settings.theme === t.id}"><span class="theme-dot" style="background:${t.accent}"></span>${escapeHtml(t.name)}</button>`).join('')}</div><div class="group"><label class="field-label" for="custom-accent">Override accent</label><input id="custom-accent" type="color" value="${escapeHtml(state.settings.customAccent || (THEMES.find(t => t.id === state.settings.theme)?.accent || THEMES[0].accent))}" /></div><button class="subtle-button" id="accent-reset">Use theme default accent</button><p class="help">Choose a complete palette or adjust its accent. This preference is stored locally.</p><div class="group"><label class="field-label" for="model-select">Loaded model</label><select id="model-select"><option value="">Select a model</option>${models.map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===state.settings.model?'selected':''}>${escapeHtml(m.id)}</option>`).join('')}</select></div><button class="subtle-button" id="refresh-models">↻ Find local models</button><p id="backend-address" class="help">Backend: ${escapeHtml(backend)}</p>${field('temperature','Temperature',state.settings.temperature,{type:'number'})}${field('max_tokens','Max output tokens',state.settings.max_tokens,{type:'number'})}${field('contextWindow','Active model context tokens',state.settings.contextWindow||4096,{type:'number'})}<h2 class="panel-title">Player persona</h2>${field('personaName','Your character name',state.persona.name)}${field('personaDescription','Your character',state.persona.description,{multiline:true,rows:5})}<p class="footer-note">Default server: KoboldCpp at 127.0.0.1:5001/v1. To use LM Studio instead, set INFERENCE_URL to http://127.0.0.1:1234/v1 before launching. Keep both servers on localhost.</p>`;
     host.querySelectorAll('[data-theme-choice]').forEach(btn => btn.onclick = () => {
       state.settings.theme = btn.dataset.themeChoice; state.settings.customAccent = ''; save(); applyTheme(); renderInspector();
     });
@@ -896,6 +909,7 @@ function renderInspector() {
     attachFields((key,val) => {
       if (key === 'temperature') state.settings.temperature = Math.max(0,Math.min(2,Number(val)||0));
       else if (key === 'max_tokens') state.settings.max_tokens = Math.max(32,Math.min(2048,Math.round(Number(val)||450)));
+      else if (key === 'contextWindow') state.settings.contextWindow = Math.max(2048,Math.min(32768,Math.round(Number(val)||4096)));
       else if (key === 'personaName') state.persona.name=val;
       else if (key === 'personaDescription') state.persona.description=val;
     });
@@ -1396,29 +1410,14 @@ async function generate(mode = 'normal') {
     channelId:retry?getChannel(previous.channelId).id:getChannel(session.channelId).id,sentAt:Date.now(),
     witnessIds:retry?[...(previous.witnessIds||[])]:getChannel(session.channelId).id==='in_person'?[...session.castIds]:[actorId],provisional:true};
   try {
-    let retrieved=[];
-    const latestPlayer=[...history].reverse().find(m=>m.role==='user')?.content;
-    if(latestPlayer){
-      try{
-        const result=await fetch('/api/search/lore',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-          body:JSON.stringify({query:latestPlayer.slice(0,500),actorId,sessionId:session.id,worldId:activeWorldId})});
-        if(result.ok)retrieved=(await result.json()).entries||[];
-      }catch(err){if(err.name==='AbortError')throw err; /* Falling back to direct keyword retrieval is safe */}
-    }
-    const hits=new Set(retrieved.map(x=>x.id));
-    const scopedLore=[...retrieved.map(x=>({...x,alwaysActive:true})),...state.lore.filter(x=>!hits.has(x.id))];
-    let rememberedEvents=[];
-    if (session.timelineId) {
-      try {
-        const url=`/api/events/visible?timelineId=${encodeURIComponent(session.timelineId)}&actorId=${encodeURIComponent(actorId)}`;
-        const result=await fetch(scopedUrl(url),{signal:controller.signal});
-        if(result.ok)rememberedEvents=(await result.json()).events || [];
-      } catch(err) {if(err.name==='AbortError')throw err; /* Fall back without optional event memories */}
-    }
-    const prompt=createActorContext({session:{...session,messages:history,channelId:retry?(previous.channelId||'in_person'):session.channelId,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages,rememberedEvents,worldPlaceNotes:characterPlaceContext(state.characters.find(c=>c.id===actorId),worldLibrary,activeWorldId)});
-    if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
-    $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
-    const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:activeWorldId,model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
+    // Acting context is resolved from authoritative SQLite state on the server.
+    await requireSavedStory();
+    const response=await fetch('/api/actor/reply',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({worldId:activeWorldId,sceneId:session.id,actorId,mode,
+        revision,model:state.settings.model,temperature:state.settings.temperature,
+        max_tokens:state.settings.max_tokens,contextWindow:state.settings.contextWindow||4096}),
+      signal:controller.signal});
+    $('lore-active').textContent='Actor memory: world-scoped retrieval active';
     if (!response.ok) {const issue=await response.json().catch(()=>({error:`HTTP ${response.status}`}));throw new Error(issue.error||`HTTP ${response.status}`);}
     if (!response.body) throw new Error('Model server returned no response stream');
     streamingReply={sessionId:session.id,message};
