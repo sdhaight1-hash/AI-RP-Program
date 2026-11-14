@@ -96,7 +96,7 @@ export class StudioStore {
     return candidates.map(hit => allowed.get(hit.id)).filter(Boolean);
   }
 
-  save(state, expectedRevision, { beforeCommit } = {}) {
+  save(state, expectedRevision, { beforeCommit, beforeReplace } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new TypeError('Invalid revision');
     const validated = bindTimelineIds(normalizeState(state));
     const fullPayload=JSON.stringify(validated);
@@ -114,13 +114,18 @@ export class StudioStore {
       // A previously opted-in normalized shadow may never silently diverge
       // from the canonical snapshot. Validate before changing either copy.
       const projectionActive=projectionEnabled(this.db);
+      // Compare against the old canonical state AFTER BEGIN IMMEDIATE, before
+      // publishing the new revision. The same snapshot serves the projection
+      // consistency check, avoiding a redundant primary-story reconstruction.
+      const previous=projectionActive||beforeReplace?this.load():null;
       if(projectionActive) {
-        const current=this.load();
         // readPrimaryStory already validates revision, fingerprint and the
         // compact metadata. Reconstructing the whole projection again here
         // doubled every primary save's preflight cost with no additional gate.
-        if(!primary)verifyStoryProjection(this.db,current);
+        if(!primary)verifyStoryProjection(this.db,previous);
       }
+      if(beforeReplace&&previous?.revision===expectedRevision)
+        beforeReplace(previous.state,validated);
       // Accepted world events depend on their precise source response. Never
       // overwrite its wording, speaker, channel or witnesses via Retry/swipes.
       const accepted=this.db.prepare(`SELECT p.scene_id AS sceneId,p.timeline_id AS timelineId,
