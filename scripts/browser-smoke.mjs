@@ -225,6 +225,46 @@ async function main(){
     await request('POST','/session/'+sessionId+'/refresh',{});
     await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'world after character save reload');
 
+    // The browser's normal composer must use the short server-owned append
+    // route, rather than resending all prior dialogue on every player turn.
+    const browserDelta='BROWSER_DELTA_SCOPED_TO_WORLD_A';
+    await script(`
+      window.__appendRequests=[];
+      const fetchBefore=window.fetch;
+      window.fetch=(url,options)=>{
+        const path=String(url);
+        if(path.includes('/api/scene/messages/append')||path.includes('/api/state'))
+          window.__appendRequests.push({path,method:options?.method||'GET',
+            bodyBytes:options?.body?options.body.length:0});
+        return fetchBefore(url,options);
+      };
+      const input=document.querySelector('#message-input');
+      input.value=${JSON.stringify(browserDelta)};
+      document.querySelector('#send').click();
+      return true;
+    `);
+    await until(async()=>{
+      const response=await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld));
+      const story=await response.json();
+      return story.state?.sessions.some(x=>x.messages.some(m=>m.content===browserDelta));
+    },'browser player delta persisted in selected world');
+    const sent=await script(`return {
+      composer:document.querySelector('#message-input').value,
+      requests:window.__appendRequests,
+      world:sessionStorage.getItem('ai-rp-selected-world')
+    }`);
+    assert.equal(sent.composer,'');
+    assert.equal(sent.world,editableWorld);
+    assert.ok(sent.requests.some(x=>x.path.includes('/api/scene/messages/append')
+      &&x.method==='POST'&&x.bodyBytes<5000),
+      'player turn should use a small delta payload');
+    assert.ok(!sent.requests.some(x=>x.path==='/api/state'&&x.method==='PUT'),
+      'player-only append must not trigger a redundant whole-story PUT');
+    const otherDelta=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(parallel.id))).json();
+    assert.ok(!otherDelta.state.sessions.some(x=>x.messages.some(m=>m.content===browserDelta)),
+      'player turn cannot appear in the other universe');
+    await screenshot('06e-player-delta-saved');
+
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
       await delay(130);
