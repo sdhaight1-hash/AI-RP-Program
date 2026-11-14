@@ -13,6 +13,7 @@ import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mj
 import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
+import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -29,6 +30,7 @@ const ALLOWED = new Map([
   ['/character/schema.mjs', ['../character/schema.mjs', 'text/javascript; charset=utf-8']],
   ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
   ['/character/world-bridge.mjs', ['../character/world-bridge.mjs', 'text/javascript; charset=utf-8']],
+  ['/eval/local-model.mjs', ['../eval/local-model.mjs', 'text/javascript; charset=utf-8']],
   ['/character/field-contracts.mjs', ['../character/field-contracts.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/reply-review.mjs', ['../interactions/reply-review.mjs', 'text/javascript; charset=utf-8']],
@@ -159,6 +161,20 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const data=await readJson(req,3000);
         try {return json(res,201,store.worlds.createEntity(data));}
         catch(err){return json(res,400,{error:err.message});}
+      }
+      if (req.method === 'POST' && path === '/api/eval/semantic-local') {
+        const input=await readJson(req,1000);
+        requireWorldScope(input.worldId);
+        // Evaluate only a synthetic in-memory fixture. Never embed the user's
+        // live scenes as part of diagnostics or mutate their active world.
+        try {
+          const result=await evaluateLocalSemanticModel(semantic);
+          requireWorldScope(input.worldId);
+          return json(res,200,result);
+        }catch(error){
+          requireWorldScope(input.worldId);
+          return json(res,200,{status:'unavailable',error:error.message});
+        }
       }
       if (req.method === 'POST' && path === '/api/character/world-entries/approve') {
         const input=await readJson(req,6000);
