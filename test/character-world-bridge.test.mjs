@@ -146,6 +146,6 @@ test('world-specific character links and relationships precede generic catalogs 
     assert.ok(context.context.indexOf('Nessa Clockworks')<context.context.indexOf('Other places'));
     const req=makeCharacterDraftRequest({character:c,target:'dailyRoutine',worldLibrary:lib,worldId:f.worldId});
     assert.match(req.messages[1].content,/Nessa Clockworks/);
-    assert.match(req.messages[1].content,/NOT their current position/);
+    assert.match(req.messages[1].content,/NOT current position/);
   }finally{f.store.close();}
 });
