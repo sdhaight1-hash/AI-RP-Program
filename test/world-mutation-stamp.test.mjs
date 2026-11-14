@@ -16,7 +16,7 @@ test('in-flight actor context refuses changed canon even when story revision sta
     actor=story.state.characters[0],timelineId=scene.timelineId;
   const location=scoped.worlds.createLocation({worldId,name:'World timeline station',kind:'building'});
   const originalRevision=story.revision;
-  let pending=null;
+  let pending=null,currentRelease=null;
   const mock=async url=>{
     if(String(url).endsWith('/api/extra/true_max_context_length'))
       return Response.json({value:4096});
@@ -41,7 +41,7 @@ test('in-flight actor context refuses changed canon even when story revision sta
     let started,release;
     const startedPromise=new Promise(resolve=>started=resolve);
     const hold=new Promise(resolve=>release=resolve);
-    pending={started,hold};
+    pending={started,hold};currentRelease=release;
     return {startedPromise,release};
   };
   try{
@@ -76,7 +76,7 @@ test('in-flight actor context refuses changed canon even when story revision sta
     assert.equal(stable.status,200,await stable.clone().text());
     assert.equal((await stable.json()).metadata.worldId,worldId);
   }finally{
-    pending?.started&&void 0;
+    currentRelease?.();
     await new Promise(resolve=>app.close(resolve));
     rmSync(dir,{recursive:true,force:true});
   }
