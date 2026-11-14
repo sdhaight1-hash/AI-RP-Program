@@ -17,6 +17,7 @@ const ALLOWED = new Map([
   ['/engine.mjs', ['../engine.mjs', 'text/javascript; charset=utf-8']],
   ['/harness.mjs', ['../harness.mjs', 'text/javascript; charset=utf-8']],
   ['/psychology.mjs', ['../psychology.mjs', 'text/javascript; charset=utf-8']],
+  ['/fidelity.mjs', ['../fidelity.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
 ]);
 const json = (res, status, data) => {
