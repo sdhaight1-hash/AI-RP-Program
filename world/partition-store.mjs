@@ -9,6 +9,7 @@ import { projectionPrimary } from '../storage/normalized.mjs';
 import { legacyTimelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID } from './canon.mjs';
 import { makeEmptyWorldState } from '../engine.mjs';
 import { reconcileCharacterRecords,reconcileRemovedSceneSources,purgeSceneSourceRecords,deleteWorldRecord } from './deletion.mjs';
+import { assertExplicitPurges } from './conflict-guards.mjs';
 
 const now = () => Date.now();
 const worldIdPattern = /^(?:[0-9a-f]{8}-[0-9a-f-]{27,40}|imported-local-world)$/i;
@@ -171,7 +172,7 @@ export class WorldPartitionStore {
     this.assertWorld(options.worldId);
     return this.current.searchLore(query, options);
   }
-  save(state,revision,{worldId,purgedSceneId=null}={}) {
+  save(state,revision,{worldId,purgedSceneId=null,purgedCharacterId=null}={}) {
     if (worldId !== this.activeWorldId) throw new Error('World changed; this save belongs to another world');
     const scoped=structuredClone(state);
     const locations=new Set(this.current.worlds.list().locations.map(x=>x.id));
@@ -201,6 +202,9 @@ export class WorldPartitionStore {
       if((encounter.characterIds||[]).some(id => !characterIds.has(id)))throw new Error('Encounter references a character outside this world');
     }
     return this.current.save(scoped, revision, {
+      beforeReplace: (previous,validated) => assertExplicitPurges(previous,validated,{
+        purgedSceneId,purgedCharacterId
+      }),
       beforeCommit: validated => {
         this.ensureCharacterEntities(validated.characters,this.current,this.activeWorldId,validated);
         if(purgedSceneId){
