@@ -977,3 +977,17 @@ body.detail-focus #expand-inspector{display:none}
   .encounter-library,.encounter-editor{padding:15px}
   .encounter-header h2,.encounter-subheading{font-size:22px}
 }
+
+
+/* One visible status surface shared by all workspaces. */
+.global-notice{
+  flex:0 0 auto;margin:0;border-bottom:1px solid color-mix(in srgb,#c9857f 35%,var(--ux-line));
+  background:color-mix(in srgb,#c9857f 12%,var(--ux-panel));
+  color:var(--text);padding:13px clamp(16px,3vw,38px);
+  font-size:12px;line-height:1.5;
+}
+.encounter-header-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+@media(max-width:760px){
+  .global-notice{padding:10px 16px}
+  .encounter-header-actions{width:100%}
+}
