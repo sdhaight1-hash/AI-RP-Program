@@ -17,9 +17,9 @@ const fixture=()=>{
     store.close();rmSync(dir,{recursive:true,force:true});
   }};
 };
-function save(scoped,worldId,state){
+function save(scoped,worldId,state,options={}){
   const revision=scoped.load().revision;
-  const result=scoped.save(state,revision,{worldId});
+  const result=scoped.save(state,revision,{worldId,...options});
   assert.equal(result.revision,revision+1);
   return scoped.load();
 }
@@ -206,7 +206,7 @@ test('purging a scene removes its derived memories and scoped lore without unsco
     archiveSession(toPurge,scene.id);
     purgeArchived(toPurge,'scene',scene.id);
     assert.equal(toPurge.lore.length,0,'scope-only lore must not become public world lore');
-    save(f.scoped,f.worldId,toPurge);
+    save(f.scoped,f.worldId,toPurge,{purgedSceneId:scene.id});
     assert.equal(count(f.scoped.db,'actor_memories','scene_id=?',[scene.id]),0);
     assert.equal(count(f.scoped.db,'actor_facts','scene_id=?',[scene.id]),0);
     assert.equal(count(f.scoped.db,'actor_memories_fts'),0);
