@@ -73,7 +73,7 @@ async function readJson(req, limit = 750_000) {
   catch { throw new Error('Invalid JSON'); }
 }
 
-export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new WorldPartitionStore(join(root, '.data')), portraitDir = null, comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows'),
+export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store: baseStore = new WorldPartitionStore(join(root, '.data')), portraitDir = null, comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows'),
   semanticModel = process.env.RP_EMBEDDING_MODEL || '',
   semanticUrl = process.env.RP_EMBEDDING_URL || 'http://127.0.0.1:1234/v1',
   semanticFetchImpl = fetchImpl
@@ -84,13 +84,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
   const semantic=semanticModel?createLocalSemanticRetriever({
     baseUrl:semanticUrl,model:semanticModel,fetchImpl:semanticFetchImpl
   }):null;
-  // With world-partitioned storage, a second tab must never change the world
-  // behind another tab's writes, portraits, lore reads, or model requests.
-  const requireWorldScope = worldId => {
-    if (typeof store.activateWorld === 'function') store.assertWorld(worldId);
-  };
   // The server binds localhost by default; this additional check rejects cross-site writes.
   const server = http.createServer(async (req, res) => {
+    // A scoped store belongs to this request, never to a process-global tab.
+    // Async embedding/model calls retain the same view even if a tab switches.
+    let store = baseStore;
+    const requireWorldScope = worldId => {
+      if (typeof baseStore.forWorld === 'function') store = baseStore.forWorld(worldId);
+      else if (typeof baseStore.activateWorld === 'function') baseStore.assertWorld(worldId);
+    };
     try {
       const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
       const path = requestUrl.pathname;
@@ -127,6 +129,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         }
       }
       if (req.method === 'GET' && path === '/api/worlds') {
+        if(requestUrl.searchParams.has('worldId')) requireWorldScope(requestUrl.searchParams.get('worldId'));
         return json(res,200,store.worlds.list());
       }
       if (req.method === 'POST' && path === '/api/worlds/activate') {
@@ -142,6 +145,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/timelines') {
         const data=await readJson(req,3000);
+        requireWorldScope(data.worldId);
         try { return json(res,201,store.worlds.createTimeline(data)); }
         catch(err) { return json(res,400,{error:err.message}); }
       }
@@ -153,16 +157,19 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/worlds/locations') {
         const data=await readJson(req,6000);
+        requireWorldScope(data.worldId);
         try {return json(res,201,store.worlds.createLocation(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds/connections') {
         const data=await readJson(req,3000);
+        requireWorldScope(data.worldId);
         try {return json(res,201,store.worlds.connectLocations(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds/entities') {
         const data=await readJson(req,3000);
+        requireWorldScope(data.worldId);
         try {return json(res,201,store.worlds.createEntity(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
@@ -209,6 +216,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/worlds/relationships') {
         const data=await readJson(req,5000);
+        requireWorldScope(data.worldId);
         try {return json(res,201,store.worlds.createRelationship(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
@@ -258,6 +266,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'PUT' && path === '/api/state') {
         const payload = await readJson(req, 4_500_000);
+        if (payload?.worldId !== undefined) requireWorldScope(payload.worldId);
         if (!payload || !Number.isSafeInteger(payload.revision) || payload.revision < 0 ||
           !payload.state || !Array.isArray(payload.state.characters) || !Array.isArray(payload.state.sessions) ||
           (!payload.state.characters.length && !store.activateWorld) ||
@@ -481,7 +490,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       else res.destroy(err);
     }
   });
-  server.on('close', () => store.close());
+  server.on('close', () => baseStore.close());
   return server;
 }
 
