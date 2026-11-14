@@ -188,3 +188,59 @@ test('damaged SQLite story refuses demo fallback and does not mutate the origina
     assert.equal(store.load().state.characters[0].name,'Mara Vale');
   }finally{store.close();}
 });
+
+
+test('duplicate character, scene and per-scene message IDs fail atomically before contaminating memory',()=>{
+  const store=new StudioStore(':memory:');
+  try{
+    store.save(makeInitialState(),0);
+    const before=store.load(),source=before.state,baseCount=store.db.prepare(
+      'SELECT count(*) AS n FROM actor_memories').get().n;
+    const variants=[
+      {kind:'character',build:()=>{
+        const draft=structuredClone(source);
+        draft.characters.push({...draft.characters[0]});
+        return draft;
+      }},
+      {kind:'scene',build:()=>{
+        const draft=structuredClone(source);
+        draft.sessions.push(structuredClone(draft.sessions[0]));
+        return draft;
+      }},
+      {kind:'message',build:()=>{
+        const draft=structuredClone(source);
+        draft.sessions[0].messages.push({...draft.sessions[0].messages[0]});
+        return draft;
+      }}
+    ];
+    for(const item of variants){
+      assert.throws(()=>store.save(item.build(),before.revision),
+        /Duplicate or invalid/,'legacy snapshots must reject duplicate '+item.kind+' IDs');
+      assert.equal(store.load().revision,before.revision);
+      assert.equal(store.db.prepare('SELECT count(*) AS n FROM actor_memories').get().n,baseCount);
+    }
+    const corrupt=structuredClone(source);
+    corrupt.sessions[0].messages.push({...corrupt.sessions[0].messages[0]});
+    store.db.prepare('UPDATE studio_state SET document=? WHERE id=1')
+      .run(JSON.stringify(corrupt));
+    assert.throws(()=>store.load(),/Duplicate or invalid message ID/);
+  }finally{store.close();}
+});
+
+test('legacy direct HTTP story saves also refuse unconfirmed deletion',async()=>{
+  const store=new StudioStore(':memory:');
+  store.save(makeInitialState(),0);
+  const app=createApp({store,fetchImpl:async()=>{throw Error('No inference')}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+app.address().port;
+  try{
+    const before=store.load(),state=structuredClone(before.state);
+    state.sessions=[];state.activeSessionId=null;
+    const res=await fetch(base+'/api/state',{method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({revision:before.revision,state})});
+    assert.equal(res.status,409,await res.clone().text());
+    assert.equal(store.load().revision,before.revision);
+    assert.equal(store.load().state.sessions.length,1);
+  }finally{await new Promise(resolve=>app.close(resolve));}
+});
