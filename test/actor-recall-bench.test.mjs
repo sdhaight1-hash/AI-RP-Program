@@ -49,3 +49,32 @@ test('continue prompt always retains the last real user turn alongside its synth
     assert.match(prompt.messages.at(-1).content,/Continue naturally/);
   }finally{store.close();}
 });
+
+test('uncued continuity retains more recent dialogue than a topic-cued memory request',()=>{
+  const store=new StudioStore(':memory:');
+  try {
+    const state=makeInitialState(),actor=state.characters[0],scene=state.sessions[0];
+    scene.messages=Array.from({length:25},(_,i)=>({
+      id:'inventory-'+i,role:'user',
+      content:'Harbor inventory report '+i+' described the cargo manifest in careful detail.',
+      witnessIds:[actor.id],sentAt:1000+i
+    }));
+    scene.messages.push({id:'cue',role:'user',content:'How are you?',
+      witnessIds:[actor.id],sentAt:2000});
+    store.save(state,0);
+    const saved=store.load().state.sessions[0];
+    const worldId=store.worlds.list().timelines.find(t=>t.id===saved.timelineId).worldId;
+    const build=()=>buildActorContext({store,worldId,sceneId:saved.id,
+      actorId:actor.id,contextWindow:2048,maxOutput:400});
+    const uncued=build();
+    const next=store.load();
+    next.state.sessions[0].messages.at(-1).content='What did the harbor inventory report say?';
+    store.save(next.state,next.revision);
+    const cued=build();
+    assert.ok(uncued.metadata.recentMessages>cued.metadata.recentMessages,
+      'uncued small talk should preserve more immediately recent context');
+    assert.ok(cued.metadata.evidence.some(x=>x.kind==='dialogue'),
+      'topic-cued history should make room for source-linked recall');
+    assert.match(cued.messages.at(-1).content,/harbor inventory report/);
+  }finally{store.close();}
+});
