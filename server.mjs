@@ -12,6 +12,7 @@ import { discoverBackendContext, enforceTokenBudget } from './context/backend.mj
 import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mjs';
 import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
+import { purgeArchived } from './harness.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
 import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
@@ -273,6 +274,24 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         requireWorldScope(requestUrl.searchParams.get('worldId'));
         try {return json(res,200,{events:store.events.visible(requestUrl.searchParams.get('timelineId'),requestUrl.searchParams.get('actorId'))});}
         catch(err){return json(res,400,{error:err.message});}
+      }
+      if (req.method === 'POST' && path === '/api/library/purge') {
+        const input=await readJson(req,1600);
+        requireWorldScope(input?.worldId);
+        if(!input || !Number.isSafeInteger(input.revision)||input.revision<0 ||
+          !['character','scene'].includes(input.kind) ||
+          typeof input.id!=='string'||!input.id||input.id.length>160)
+          return json(res,400,{error:'Invalid library purge request'});
+        const snapshot=store.load();
+        if(snapshot.revision!==input.revision)
+          return json(res,409,{error:'Story revision changed; reload before permanently deleting.'});
+        const next=structuredClone(snapshot.state);
+        try{
+          purgeArchived(next,input.kind,input.id);
+          const saved=store.save(next,input.revision,{worldId:input.worldId});
+          if(!saved)return json(res,409,{error:'Story changed before permanent deletion'});
+          return json(res,200,{...saved,worldId:input.worldId,state:store.load().state});
+        }catch(error){return json(res,422,{error:error.message});}
       }
       if (req.method === 'GET' && path === '/api/state') {
         if (requestUrl.searchParams.has('worldId')) requireWorldScope(requestUrl.searchParams.get('worldId'));
