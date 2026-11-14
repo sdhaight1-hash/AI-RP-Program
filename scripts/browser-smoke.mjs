@@ -108,6 +108,19 @@ async function main(){
     assert.deepEqual(world,{workspace:'world',visible:true,sceneHidden:true,cards:4,selected:'true'});
     await screenshot('02-world-overview');
 
+    for(const [workspace,title,filename] of [
+      ['memory','What each character can remember','02a-memory-overview'],
+      ['tools','Your private creative toolkit','02b-tools-overview']
+    ]){
+      const found=await script(`
+        document.querySelector('button[data-workspace="${workspace}"]').click();
+        return document.querySelector('#workspace-title').textContent;
+      `);
+      assert.equal(found,title);
+      await screenshot(filename);
+    }
+    await script(`document.querySelector('button[data-workspace="world"]').click();return true`);
+
     const focused=await script(`
       document.querySelector('.workspace-card.featured button').click();
       return {focus:document.body.classList.contains('detail-focus'),
@@ -145,6 +158,19 @@ async function main(){
     await script("document.querySelector('#builder-close').click();return true");
     assert.equal(await script("return document.body.dataset.workspace"),'story');
     await screenshot('06-story-with-character');
+    const previousTheme=await script("return document.querySelector('#quick-theme').value");
+    assert.equal(await script(`
+      const theme=document.querySelector('#quick-theme');
+      theme.value='parchment';theme.dispatchEvent(new Event('change',{bubbles:true}));
+      return document.documentElement.dataset.theme;
+    `),'parchment');
+    await screenshot('06b-parchment-story');
+    await script(`
+      const theme=document.querySelector('#quick-theme');
+      theme.value=${JSON.stringify(previousTheme)};
+      theme.dispatchEvent(new Event('change',{bubbles:true}));
+      return true;
+    `);
 
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
