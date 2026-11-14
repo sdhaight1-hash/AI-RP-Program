@@ -8,6 +8,7 @@ import { canKnowLore } from './harness.mjs';
 import { bindTimelineIds } from './world/canon.mjs';
 import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } from './world/persistence.mjs';
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
+import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
 
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
@@ -43,9 +44,15 @@ export class StudioStore {
     const persisted = this.load().state;
     initializeWorldSchema(this.db, persisted, this.scopeWorldId);
     initializeEventLedger(this.db);
+    initializeMemorySchema(this.db);
     this.worlds = new WorldRepository(this.db);
     this.events = new EventLedger(this);
     this.rebuildLoreIndex(persisted?.lore || []);
+    if (persisted) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {syncConversationMemories(this.db,persisted);this.db.exec('COMMIT');}
+      catch(error){this.db.exec('ROLLBACK');throw error;}
+    }
   }
 
   load() {
@@ -157,6 +164,7 @@ export class StudioStore {
       // synchronizeSceneTimelines may add metadata, so update the same revision document.
       this.db.prepare('UPDATE studio_state SET document = ? WHERE id = 1').run(JSON.stringify(validated));
       this.rebuildLoreIndex(validated.lore);
+      syncConversationMemories(this.db,validated);
       // World-specific derived records must commit or roll back with the same
       // story revision, not in a second fallible transaction afterward.
       if (beforeCommit) beforeCommit(validated);
