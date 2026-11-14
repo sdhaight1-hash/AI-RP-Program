@@ -19,7 +19,6 @@ test('small-context NPC recall keeps relevant accepted events without flooding p
     const fact=addActorFact(store,{sceneId,actorId:actor.id,sourceMessageId:'promise-source',
       kind:'promise',text:'The player promised to bring the copper lantern to the workshop.'});
 
-    const accepted=[];
     for(let i=0;i<7;i++){
       const revision=store.load().revision,current=store.load().state;
       current.sessions[0].messages.push({id:'npc-event-'+i,role:'assistant',
