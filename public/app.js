@@ -215,7 +215,7 @@ function startSession(char = activeCharacter(), encounter = null,channelId=null)
   if(encounter?.locationId && getChannel(encounter.channelId).id==='in_person')session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
   state.sessions.unshift(session);
   state.activeSessionId = session.id;
-  activeWorkspace='story';
+  activeWorkspace='story';currentTab='scene';setDetailDeskOpen(false);
   save(); render();
   $('message-input').focus();
 }
@@ -231,7 +231,9 @@ function openNewSceneDialog() {
     const template=$('new-scene-encounter');template.replaceChildren();
     template.add(new Option('Unscripted scene (no opening template)',''));
     for(const encounter of state.encounters||[]){
-      if(encounter.characterIds?.includes(chosen.value))template.add(new Option(`${encounter.title} · ${getChannel(encounter.channelId).label}`,encounter.id));
+      if(encounter.characterIds?.includes(chosen.value) &&
+        encounter.characterIds.every(id=>state.characters.some(c=>c.id===id&&!c.trashedAt)))
+        template.add(new Option(`${encounter.title} · ${getChannel(encounter.channelId).label}`,encounter.id));
     }
     const selected=$('new-scene-channel');
     selected.value='in_person';
@@ -313,7 +315,7 @@ function renderMessages() {
     const who = m.role === 'assistant' ? state.characters.find(c=>c.id === (m.speakerId || session.characterId)) : null;
     const portrait = portraitNode(m.role === 'assistant' ? who?.name : state.persona.name || 'Y', who, 'portrait');
     const bubble = el('div','','bubble');
-    const displayName = m.role === 'user' ? state.persona.name || 'You' : (channel.id === 'text_message' && who?.handle ? (who.handle.startsWith('@') ? who.handle : '@' + who.handle) : who?.name || 'Character');
+    const displayName = m.role === 'user' ? state.persona.name || 'You' : (['text_message','social_dm','social_thread'].includes(channel.id) && who?.handle ? (who.handle.startsWith('@') ? who.handle : '@' + who.handle) : who?.name || 'Character');
     bubble.append(el('div',`${displayName} · ${channel.label}${m.provisional ? ' · DRAFT (not saved)' : ''}`,'speaker'));
     const prose = el('div', m.content, 'message-text');
     bubble.append(prose);
@@ -2298,20 +2300,30 @@ function send() {
   session.messages.push({id:crypto.randomUUID(),role:'user',channelId:channel.id,content:message,sentAt:Date.now(),witnessIds:recipients});$('message-input').value='';session.updatedAt=Date.now();save();renderLists();renderMessages();generate();
 }
 
+for(const channel of CHANNEL_OPTIONS){
+  for(const id of ['channel-select','new-scene-channel'])
+    $(id).add(new Option(channel.icon+' '+channel.label,channel.id));
+}
 $('new-session').onclick=()=>openNewSceneDialog();
 $('new-scene-cancel').onclick=()=>$('new-scene-dialog').close();
 $('new-scene-confirm').onclick=()=>{
   const char=state.characters.find(c=>c.id===$('new-scene-character').value && !c.trashedAt);
   const encounter=(state.encounters||[]).find(e=>e.id===$('new-scene-encounter').value && e.characterIds.includes(char?.id));
   if(!char)return showError('Choose a character.');
-  $('new-scene-dialog').close();startSession(char,encounter||null);
+  $('new-scene-dialog').close();
+  startSession(char,encounter||null,$('new-scene-channel').value);
+};
+$('new-scene-manage-encounters').onclick=()=>{
+  const templateId=$('new-scene-encounter').value||null;
+  $('new-scene-dialog').close();
+  openEncounterManager(templateId);
 };
 $('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
 $('channel-select').onchange=()=>{
   const s=activeSession();if(!s||running||pendingReply?.sessionId===s.id){renderHeader();if(pendingReply?.sessionId===s?.id)showError('Resolve the pending draft before changing channels.');return;}
   const next=getChannel($('channel-select').value).id;
   s.channelId=next;
-  if(next!=='in_person'){const actor=sceneActor(s);if(actor){s.speakerId=actor.id;s.speakerMode='manual';}}
+  if(channelAudience(next)==='directed'){const actor=sceneActor(s);if(actor){s.speakerId=actor.id;s.speakerMode='manual';}}
   save();renderHeader();renderMessages();
 };
 $('send').onclick=send;
