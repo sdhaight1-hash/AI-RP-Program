@@ -15,7 +15,7 @@ export const THEMES = Object.freeze([
   { id: 'parchment', name: 'Parchment', accent: '#795b9f' },
 ]);
 export const DEFAULT_SETTINGS = Object.freeze({ model: '', temperature: 0.95, max_tokens: 450, readingMode: false, theme: 'nocturne', customAccent: '' });
-export const CHARACTER_FIELDS = Object.freeze(['name','handle','tagline','description','personality','backstory','motivations','fears','boundaries','speechStyle','scenario','greeting','exampleDialogue']);
+export const CHARACTER_FIELDS = Object.freeze(['name','handle','tagline','description','personality','backstory','motivations','fears','boundaries','speechStyle','inPersonStyle','phoneStyle','textStyle','scenario','greeting','exampleDialogue']);
 export const PORTRAIT_PATH = /^\/portraits\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:webp|jpg)$/i;
 
 export const DEFAULT_EMOTION = Object.freeze({ valence: 0, arousal: 0.25, trust: 0 });
@@ -67,7 +67,7 @@ export function describeEmotion(value) {
 export function createCharacter(name = 'New character') {
   return {
     id: crypto.randomUUID(), name, handle: '', tagline: '', description: '', personality: '', backstory: '',
-    motivations: '', fears: '', boundaries: '', speechStyle: '', exampleDialogue: '',
+    motivations: '', fears: '', boundaries: '', speechStyle: '', inPersonStyle: '', phoneStyle: '', textStyle: '', exampleDialogue: '',
     tags: [], alternateGreetings: [], portrait: '',disposition:{...DEFAULT_DISPOSITION},
     scenario: '', greeting: '', color: '#a68dd6',
   };
@@ -154,7 +154,7 @@ export function getActiveLore(entries, messages, maxEntries = 4, options = {}) {
     .slice(0, maxEntries);
 }
 
-export function buildMessages({ character, persona, summary = '', authorNote = '', emotion, lore = [], history = [], sceneNotes = '', psychologyNotes = '', styleInstruction = '' }) {
+export function buildMessages({ character, persona, summary = '', authorNote = '', emotion, lore = [], history = [], sceneNotes = '', psychologyNotes = '', styleInstruction = '', channelVoice = '' }) {
   if (!character) throw new Error('Select a character first');
   const selectedLore = getActiveLore(lore, history);
   const part = (label, text, cap = 1600) => `${label}:\n${String(text || 'Not specified').slice(0, cap)}`;
@@ -172,6 +172,7 @@ export function buildMessages({ character, persona, summary = '', authorNote = '
     character.fears ? part('Fears and vulnerabilities', character.fears) : '',
     character.boundaries ? part('Character boundaries and principles', character.boundaries) : '',
     character.speechStyle ? part('Speech habits and distinctive voice', character.speechStyle) : '',
+    channelVoice ? part('Character-specific voice in the active communication channel',channelVoice,900) : '',
     character.exampleDialogue ? part('Sample dialogue to emulate (not events that already happened)', character.exampleDialogue, 1200) : '',
     part('Scene and premise', character.scenario),
     sceneNotes ? part('Current witnessed scene and director constraints', sceneNotes, 2600) : '',

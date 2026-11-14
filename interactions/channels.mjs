@@ -25,3 +25,11 @@ export function channelObservations(events, channelId, actorId) {
     e && Array.isArray(e.witnessIds) && e.witnessIds.includes(actorId) &&
     typeof e.signal === 'string' && channelReceivesSignal(channelId, e.signal));
 }
+
+// Character-specific communication habits override generic channel formatting
+// without replacing the actor's stable personality and boundaries.
+const CHANNEL_VOICE_FIELDS = Object.freeze({ in_person: 'inPersonStyle', phone_call: 'phoneStyle', text_message: 'textStyle' });
+export function getChannelVoice(character, channelId) {
+  const key = CHANNEL_VOICE_FIELDS[getChannel(channelId).id];
+  return typeof character?.[key] === 'string' ? character[key].slice(0,1600) : '';
+}

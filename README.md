@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v0.9.0 (independent timeline forks).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v1.1.0 (character fidelity and per-channel NPC voice).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -43,6 +43,10 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v1.1: Character-specific communication styles
+
+Open **Character studio → Voice** to configure optional **in-person**, **phone-call**, and **messaging** styles independently. These supplement the durable shared personality and general voice rather than replacing them. Every channel prompt receives only the currently active style, preventing a texting example or an in-person gesture instruction from leaking into phone dialogue. These fields are included in native JSON character import/export and optional AI-assisted character drafting, and the Character Fidelity Lab uses them in its channel-specific probes. Existing characters default to empty overrides and keep their previous behavior.
 
 ## v1.0: Character Fidelity Lab (evaluation milestone)
 
