@@ -23,9 +23,9 @@ let activeWorkspace = 'story';
 let worldLibrary = null;
 let loadingWorlds = false;
 let selectedWorldId = null;
-let activeWorldId = null;
-// World scope accompanies every world-dependent request. The process-wide
-// active world may be changed by another browser tab between requests.
+let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
+// The selected world belongs to this browser tab. Every stateful request
+// carries its world ID, regardless of other tabs' selections.
 const scopedUrl = path => activeWorldId ? `${path}${path.includes('?') ? '&' : '?'}worldId=${encodeURIComponent(activeWorldId)}` : path;
 const portraitSrc = path => typeof path === 'string' && path.startsWith('/portraits/') ? scopedUrl(path) : path;
 let builderCharacterId = null;
@@ -184,11 +184,12 @@ async function requireSavedStory() {
 
 async function bootstrapStorage() {
   try {
-    const response = await fetch('/api/state');
+    const response = await fetch(scopedUrl('/api/state'));
     if (!response.ok) throw new Error(`Story database returned ${response.status}`);
     const result = await response.json();
     revision = result.revision;
     activeWorldId = result.worldId || null;
+    if(activeWorldId)sessionStorage.setItem('ai-rp-selected-world',activeWorldId);
     serverStorage = true;
     if (result.state) {
       const persisted = normalizeState(result.state);
@@ -416,16 +417,12 @@ async function refreshWorldLibrary() {
   if (loadingWorlds) return;
   loadingWorlds = true;
   try {
-    const response=await fetch('/api/worlds');
+    const response=await fetch(scopedUrl('/api/worlds'));
     if(!response.ok)throw Error(`World Library unavailable (${response.status})`);
     const received=await response.json();
-    if (activeWorldId && received.activeWorldId !== activeWorldId) {
-      serverStorage=false;
-      throw new Error('Another browser tab opened a different world. Reload this tab before continuing; its local edits are preserved.');
-    }
     worldLibrary=received;
-    selectedWorldId=worldLibrary.activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
-    if(worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
+    selectedWorldId=activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
+    if(!activeWorldId && worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
     const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active world';
     if(['worlds','atlas','relations'].includes(currentTab))renderInspector();
     renderHeader();
@@ -443,7 +440,7 @@ async function switchWorld(worldId) {
   if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
   if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
   await requireSavedStory();
-  const response=await fetch('/api/worlds/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId})});
+  const response=await fetch(`/api/state?worldId=${encodeURIComponent(worldId)}`);
   const result=await response.json();
   if (!response.ok) throw new Error(result.error || 'Could not open world');
   pendingReply=null;streamingReply=null;pendingSnapshot=null;
@@ -453,6 +450,7 @@ async function switchWorld(worldId) {
   $('character-builder')?.close();
   activeWorldId=result.worldId;
   selectedWorldId=result.worldId;
+  sessionStorage.setItem('ai-rp-selected-world',activeWorldId);
   state=normalizeState(result.state);
   revision=result.revision;
   serverStorage=true;
