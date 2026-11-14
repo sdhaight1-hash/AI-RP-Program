@@ -69,7 +69,13 @@ export function makeWorldEntryDraftRequest({character,worldId,worldLibrary}) {
 }
 
 export function parseWorldEntrySuggestions(text,{character,worldLibrary,worldId}) {
-  const raw=clean(text).replace(/^\`\`\`(?:json)?\s*/iu,'').replace(/\s*\`\`\`$/u,'');
+  let raw=clean(text);
+  if(raw.startsWith(String.fromCharCode(96).repeat(3))) {
+    const firstLine=raw.indexOf('\n');
+    raw=firstLine>=0?raw.slice(firstLine+1):raw.slice(3).replace(/^json\s*/iu,'');
+    raw=raw.trimEnd();
+    if(raw.endsWith(String.fromCharCode(96).repeat(3)))raw=raw.slice(0,-3);
+  }
   let data;try{data=JSON.parse(raw);}catch{throw new Error('Local model must return world entry JSON');}
   if(!data||!Array.isArray(data.entries))throw new Error('Local model did not return a world entries list');
   const results=[],seen=new Set();
