@@ -5,6 +5,11 @@
 import { createHash } from 'node:crypto';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
+const canonicalSessions=sessions=>sessions.map(({messages,...metadata})=>({...metadata,messages}));
+const fingerprint=state=>{
+  const {characters,sessions,...core}=state;
+  return hash({core,characters,sessions:canonicalSessions(sessions)});
+};
 const encode=JSON.stringify;
 const decode=JSON.parse;
 const hasSchema=db=>Boolean(db.prepare(
@@ -21,13 +26,13 @@ export function initializeStoryProjection(db) {
       core TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS story_projection_characters (
-      position INTEGER PRIMARY KEY CHECK(position>=0),
-      character_id TEXT NOT NULL UNIQUE,
+      character_id TEXT PRIMARY KEY,
+      position INTEGER NOT NULL CHECK(position>=0),
       document TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS story_projection_scenes (
       scene_id TEXT PRIMARY KEY,
-      position INTEGER NOT NULL UNIQUE CHECK(position>=0),
+      position INTEGER NOT NULL CHECK(position>=0),
       document TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS story_projection_messages (
@@ -35,8 +40,7 @@ export function initializeStoryProjection(db) {
       position INTEGER NOT NULL CHECK(position>=0),
       message_id TEXT NOT NULL,
       document TEXT NOT NULL,
-      PRIMARY KEY(scene_id,position),
-      UNIQUE(scene_id,message_id)
+      PRIMARY KEY(scene_id,position)
     );
     CREATE INDEX IF NOT EXISTS story_projection_messages_by_id
       ON story_projection_messages(scene_id,message_id);
@@ -76,11 +80,10 @@ export function writeStoryProjection(db,state,revision) {
   inspectStoryProjectionInput(state);
   initializeStoryProjection(db);
   const {characters,sessions,...core}=state;
-  const identity={core,characters,sessions};
   const keepCharacters=new Set(),keepScenes=new Set();
-  const upsertChar=db.prepare(`INSERT INTO story_projection_characters(position,character_id,document)
-    VALUES(?,?,?) ON CONFLICT(position) DO UPDATE SET character_id=excluded.character_id,
-      document=excluded.document WHERE character_id!=excluded.character_id OR document!=excluded.document`);
+  const upsertChar=db.prepare(`INSERT INTO story_projection_characters(character_id,position,document)
+    VALUES(?,?,?) ON CONFLICT(character_id) DO UPDATE SET position=excluded.position,
+      document=excluded.document WHERE position!=excluded.position OR document!=excluded.document`);
   const upsertScene=db.prepare(`INSERT INTO story_projection_scenes(scene_id,position,document)
     VALUES(?,?,?) ON CONFLICT(scene_id) DO UPDATE SET position=excluded.position,
       document=excluded.document WHERE position!=excluded.position OR document!=excluded.document`);
@@ -88,11 +91,12 @@ export function writeStoryProjection(db,state,revision) {
     VALUES(?,?,?,?) ON CONFLICT(scene_id,position) DO UPDATE SET message_id=excluded.message_id,
       document=excluded.document WHERE message_id!=excluded.message_id OR document!=excluded.document`);
   for(const [position,character] of characters.entries()){
-    keepCharacters.add(position);
-    upsertChar.run(position,character.id,encode(character));
+    keepCharacters.add(character.id);
+    upsertChar.run(character.id,position,encode(character));
   }
-  // Delete moved/deleted characters before inserting at reused positions.
-  db.prepare('DELETE FROM story_projection_characters WHERE position>=?').run(characters.length);
+  const deleteCharacter=db.prepare('DELETE FROM story_projection_characters WHERE character_id=?');
+  for(const row of db.prepare('SELECT character_id FROM story_projection_characters').all())
+    if(!keepCharacters.has(row.character_id))deleteCharacter.run(row.character_id);
   for(const [position,scene] of sessions.entries()){
     keepScenes.add(scene.id);
     const {messages,...metadata}=scene;
@@ -108,7 +112,7 @@ export function writeStoryProjection(db,state,revision) {
   db.prepare(`INSERT INTO story_projection_meta(id,format_version,revision,fingerprint,core)
     VALUES(1,1,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,
     fingerprint=excluded.fingerprint,core=excluded.core`)
-    .run(revision,hash(identity),encode(core));
+    .run(revision,fingerprint(state),encode(core));
   return {revision,...inspectStoryProjectionInput(state)};
 }
 
@@ -133,8 +137,8 @@ export function readStoryProjection(db) {
         });
       return {...scene,messages};
     });
-  const identity={core,characters,sessions};
-  if(hash(identity)!==meta.fingerprint)throw new Error('Normalized projection fingerprint mismatch');
+  if(fingerprint({characters,sessions,...core})!==meta.fingerprint)
+    throw new Error('Normalized projection fingerprint mismatch');
   return {revision:meta.revision,state:{characters,sessions,...core},fingerprint:meta.fingerprint};
 }
 
@@ -143,8 +147,7 @@ export function verifyStoryProjection(db,snapshot) {
   if(!projected)return {status:'absent'};
   if(projected.revision!==snapshot.revision)
     throw new Error('Normalized projection revision mismatch');
-  const {characters,sessions,...core}=snapshot.state;
-  if(projected.fingerprint!==hash({core,characters,sessions}))
+  if(projected.fingerprint!==fingerprint(snapshot.state))
     throw new Error('Normalized projection differs from canonical story');
   return {status:'matched',revision:snapshot.revision,
     ...inspectStoryProjectionInput(snapshot.state)};
