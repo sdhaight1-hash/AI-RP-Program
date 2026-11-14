@@ -246,6 +246,7 @@ function startSession(char = activeCharacter(), encounter = null) {
   if(encounter?.locationId)session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
   state.sessions.unshift(session);
   state.activeSessionId = session.id;
+  activeWorkspace='story';
   save(); render();
   $('message-input').focus();
 }
@@ -278,7 +279,7 @@ function renderLists() {
     info.append(el('strong', s.title || `With ${char?.name || 'unknown'}`), el('small', `${(s.castIds||[s.characterId]).length} cast · ${s.messages.length} messages`));
     button.append(badge, info);
     button.title = `Open ${s.title}`;
-    button.addEventListener('click', () => { if (running) return; state.activeSessionId = s.id; save(); render(); });
+    button.addEventListener('click', () => { if (running) return; state.activeSessionId = s.id; activeWorkspace='story'; save(); render(); });
     const actions=el('div','','row-actions');
     const rename=el('button','✎','mini-action');rename.title='Rename scene';rename.onclick=()=>{if(running)return;const value=prompt('Scene name',s.title);if(value?.trim()){s.title=value.trim().slice(0,150);save();renderLists();renderHeader();}};
     const branch=el('button','⎇','mini-action');branch.title='Fork scene into an independent world timeline';
@@ -428,6 +429,7 @@ async function refreshWorldLibrary() {
     const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active world';
     if(['worlds','atlas','relations'].includes(currentTab))renderInspector();
     renderHeader();
+    renderWorkspace();
   } catch(err) { showError(err.message); }
   finally { loadingWorlds=false; }
 }
@@ -646,6 +648,7 @@ async function requestEventDraft(npcReply) {
 function renderInspector() {
   const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
   document.querySelectorAll('[data-tab]').forEach(btn => { btn.classList.toggle('active', btn.dataset.tab === currentTab); btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab)); });
+  const heading=document.querySelector(`[data-tab="${currentTab}"]`);$('inspector-heading').textContent=heading?.textContent?.trim()||'Details';
   if ((!s || !c) && !['library','setup','worlds','atlas','relations'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
   if (currentTab === 'character') {
     host.innerHTML = `<h2 class="panel-title">${escapeHtml(c.name)}</h2>
@@ -1323,9 +1326,26 @@ function renderCharacterPlaces(host,c) {
   section.append(el('p',`Current timeline whereabouts: ${name || 'Not established'}. Updated through timeline/world events, not from routine preferences.`,'help'));
   host.append(section);
 }
+function updateBuilderContext(character){
+  const filled=CHARACTER_V2_FIELDS.filter(k=>String(character?.[k]||'').trim()).length;
+  const total=CHARACTER_V2_FIELDS.length,percent=Math.round(filled/total*100);
+  $('builder-progress-label').textContent=`${filled} of ${total} character fields established · ${percent}%`;
+  $('builder-progress-track').setAttribute('aria-valuenow',String(percent));
+  $('builder-progress-fill').style.width=percent+'%';
+  const world=worldLibrary?.worlds?.find(w=>w.id===activeWorldId);
+  const places=worldLibrary?.locations?.filter(l=>l.worldId===activeWorldId)||[];
+  const links=[character.homeLocationId,character.workLocationId,...(character.frequentPlaces||[]).map(x=>x.locationId)]
+    .filter(Boolean).map(id=>places.find(p=>p.id===id)?.name).filter(Boolean);
+  const direct=(worldLibrary?.entities||[]).filter(e=>e.worldId===activeWorldId&&e.sourceCharacterId===character.id);
+  const knownRelations=(worldLibrary?.relationships||[]).filter(edge=>edge.worldId===activeWorldId&&
+    direct.some(e=>edge.fromId===e.id||edge.toId===e.id));
+  $('builder-world-context').textContent=`WORLD CONTEXT · ${world?.name||'Current world'}\n${places.length} available places · ${knownRelations.length} established links${links.length?' · Connected places: '+links.slice(0,3).join(', '):''}. Generated fields must fit this world and the existing profile.`;
+}
+
 function renderBuilder() {
   const c = builderCharacter(); if (!c) return;
   $('builder-title').textContent = `Creating ${c.name}`;
+  updateBuilderContext(c);
   renderBuilderPortrait();
   document.querySelectorAll('[data-builder-tab]').forEach(b => {
     b.classList.toggle('active', b.dataset.builderTab === builderTab);
@@ -1347,6 +1367,7 @@ function renderBuilder() {
         : type === 'greetings' ? input.value.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean).slice(0,12)
         : input.value;
       save();
+      updateBuilderContext(c);
       if (key === 'name') $('builder-title').textContent = `Creating ${c.name}`;
       if (key === 'color') atmosphere(c.color);
       if (key === 'name' || key === 'color') renderLists();
@@ -2100,12 +2121,18 @@ $('regenerate').onclick=()=>generate('retry');
 $('continue').onclick=()=>{if (!running && activeSession()?.messages.length) generate('continue');};
 $('open-builder').onclick=()=>{if(!running)openBuilder(activeCharacter());};
 $('reading-toggle').onclick=()=>{state.settings.readingMode=!state.settings.readingMode;save();renderReadingMode();};
-$('open-inspector').onclick=()=>{$('inspector').classList.toggle('inspector-open');};
+$('open-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
+$('open-workspace-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
+$('close-inspector').onclick=()=>setDetailDeskOpen(false);
+$('inspector-scrim').onclick=()=>setDetailDeskOpen(false);
 $('message-input').addEventListener('keydown',(ev)=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isComposing){ev.preventDefault();send();}});
 $('export-data').onclick=()=>download('ai-rp-studio-backup.json',JSON.stringify(state,null,2));
 $('import-data').onclick=()=>$('import-data-file').click();
 $('import-data-file').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const candidate=JSON.parse(await file.text());if(!candidate||!Array.isArray(candidate.characters)||!Array.isArray(candidate.sessions))throw new Error('Not a valid studio backup');if(!confirm('Replace your current local stories with this backup? Export first if needed.'))return;state=normalizeState(candidate);pendingReply=null;streamingReply=null;save();render();showError();}catch(err){showError(err.message);}e.target.value='';};
-document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>{currentTab=tab.dataset.tab;renderInspector();}));
+document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>openDetailDesk(tab.dataset.tab)));
+document.querySelectorAll('button[data-workspace]').forEach(tab=>tab.addEventListener('click',()=>setWorkspace(tab.dataset.workspace)));
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('inspector').classList.contains('inspector-open'))setDetailDeskOpen(false);});
+window.addEventListener('resize',()=>{if(window.innerWidth>1100)setDetailDeskOpen(false);});
 setupBuilderAI();
 const quickTheme = $('quick-theme');
 for (const theme of THEMES) quickTheme.add(new Option(theme.name, theme.id));
@@ -2114,6 +2141,6 @@ window.addEventListener('beforeunload',()=>{controller?.abort();atmosphere('stop
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden' && pendingSnapshot) flushState();});
 bootstrapStorage();
 
-$('world-home').onclick=()=>{currentTab='worlds';renderInspector();renderWorldLauncher();$('world-launcher').showModal();};
+$('world-home').onclick=()=>{setWorkspace('world');renderWorldLauncher();$('world-launcher').showModal();};
 $('world-launcher-close').onclick=()=>{sessionStorage.setItem('ai-rp-world-opened','1');$('world-launcher').close();};
-$('world-launcher-create').onclick=()=>{ $('world-launcher').close();currentTab='worlds';renderInspector();$('world-new-name')?.focus(); };
+$('world-launcher-create').onclick=()=>{ $('world-launcher').close();setWorkspace('world');openDetailDesk('worlds');$('world-new-name')?.focus(); };
