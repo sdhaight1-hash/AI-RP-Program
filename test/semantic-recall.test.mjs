@@ -124,8 +124,8 @@ test('semantic candidate embedding never includes post-fork parent memories',asy
     f.store.save(parent.state,parent.revision);
     const fromChild=await sem.retrieve({store:f.store,worldId:f.worldId,
       sceneId:'child-scene',actorId:f.actor.id,query:'golden statue lighthouse'});
-    assert.ok(!sent.some(x=>x.includes('golden statue')),
-      'parent-only information must not even be sent to embeddings for the fork');
+    assert.ok(!sent.some(x=>x.includes('A golden statue is buried')),
+      'parent-only source content must not be sent as a candidate (the query itself is allowed)');
     assert.ok(!fromChild.some(x=>x.sourceMessageId==='parent-secret'));
     const inherited=f.store.db.prepare(
       'SELECT id FROM actor_memories WHERE timeline_id=? AND actor_id=? AND source_message_id=?'
