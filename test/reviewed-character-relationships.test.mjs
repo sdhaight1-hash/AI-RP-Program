@@ -9,6 +9,7 @@ import { characterDraftVersion,worldDraftVersion } from '../character/authoring.
 import { commitCharacterWorldEntry } from '../character/world-bridge.mjs';
 import { approveCharacterWorldRelationship,proposedRelationshipKinds } from '../character/relationship-bridge.mjs';
 import { createApp } from '../server.mjs';
+import { buildActorContext } from '../context/assemble.mjs';
 
 function fixture(){
   const directory=mkdtempSync(join(tmpdir(),'rp-reviewed-relationships-'));
@@ -103,4 +104,25 @@ test('relationship API persists directed graph and provenance across world switc
     await new Promise(resolve=>app.close(resolve));
     rmSync(f.directory,{recursive:true,force:true});
   }
+});
+
+test('reviewed family relationships inform their own actor but unreviewed incoming feelings stay private',()=>{
+  const f=fixture();
+  try {
+    const scene=f.store.load().state.sessions[0];
+    const context=()=>buildActorContext({store:f.store,worldId:f.worldId,
+      sceneId:scene.id,actorId:f.actorId,contextWindow:4096,maxOutput:400})
+      .messages[0].content;
+    assert.doesNotMatch(context(),/Known social ties: Nessa: aunt/);
+    approveCharacterWorldRelationship(f.store,{approval:'approve',...f.basis(),
+      entryId:f.entry.entry.id,kind:'aunt'});
+    assert.match(context(),/Known social ties: Nessa: aunt/);
+    const target=f.store.worlds.list().entities.find(e=>e.sourceCharacterId===f.actorId);
+    const stranger=f.store.worlds.createEntity({worldId:f.worldId,
+      name:'Unreviewed Admirer',kind:'character'});
+    f.store.worlds.createRelationship({worldId:f.worldId,fromId:stranger.id,
+      toId:target.id,kind:'admires'});
+    assert.doesNotMatch(context(),/Unreviewed Admirer/,
+      'another person\'s unreviewed incoming feelings are not actor knowledge');
+  }finally{f.close();}
 });
