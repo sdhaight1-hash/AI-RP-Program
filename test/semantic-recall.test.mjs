@@ -107,22 +107,30 @@ test('revoked and invalid-source reviewed facts are excluded before embeddings, 
   }finally{f.store.close();}
 });
 
-test('semantic embeddings never collect future parent timeline data into a fork',async()=>{
+test('semantic candidate embedding never includes post-fork parent memories',async()=>{
   const f=fixture(),sent=[];const sem=retriever(stubVectors(sent));
   try{
     const child=f.store.worlds.forkTimeline({timelineId:f.timelineId,name:'Alternate'});
+    const base=f.store.load();
+    const childScene=structuredClone(base.state.sessions[0]);
+    childScene.id='child-scene';childScene.timelineId=child.id;childScene.messages=[];
+    base.state.sessions.push(childScene);
+    f.store.save(base.state,base.revision);
     const parent=f.store.load();
-    parent.state.sessions[0].messages.splice(-1,0,{id:'parent-secret',
-      role:'user',content:'A golden statue is buried by the lighthouse.',
-      witnessIds:[f.actor.id],sentAt:999});
+    parent.state.sessions.find(s=>s.id===f.sceneId).messages.splice(-1,0,{
+      id:'parent-secret',role:'user',content:'A golden statue is buried by the lighthouse.',
+      witnessIds:[f.actor.id],sentAt:999
+    });
     f.store.save(parent.state,parent.revision);
-    await sem.retrieve({store:f.store,worldId:f.worldId,sceneId:f.sceneId,
-      actorId:f.actor.id,query:'pendant'}).catch(()=>{});
-    // A child may not query a parent scene as if it belonged to that timeline;
-    // direct inherited memory index remains strictly child-scoped.
-    const hidden=f.store.db.prepare('SELECT id FROM actor_memories WHERE timeline_id=? AND source_message_id=?')
-      .get(child.id,'parent-secret');
-    assert.equal(hidden,undefined);
+    const fromChild=await sem.retrieve({store:f.store,worldId:f.worldId,
+      sceneId:'child-scene',actorId:f.actor.id,query:'golden statue lighthouse'});
+    assert.ok(!sent.some(x=>x.includes('golden statue')),
+      'parent-only information must not even be sent to embeddings for the fork');
+    assert.ok(!fromChild.some(x=>x.sourceMessageId==='parent-secret'));
+    const inherited=f.store.db.prepare(
+      'SELECT id FROM actor_memories WHERE timeline_id=? AND actor_id=? AND source_message_id=?'
+    ).get(child.id,f.actor.id,'pendant');
+    assert.ok(inherited,'child retains its authorized pre-fork snapshot');
   }finally{f.store.close();}
 });
 
