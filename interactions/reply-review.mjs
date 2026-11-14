@@ -24,7 +24,7 @@ export function inspectNpcReply(channelId, value, characterName = '') {
     issues.push('Possible player-controlled dialogue or action. The AI must not decide for your character.');
   if (getChannel(channel).kind === 'written') {
     if (TEXT_STAGE.test(text) || TEXT_SCENE.test(text))
-      issues.push('Possible stage directions or scene narration in a written message.');
+      issues.push(channel==='text_message'?'Possible stage directions or scene narration in a text message.':'Possible stage directions or scene narration in a written message.');
     if (TEXT_ROLE.test(text) || TEXT_TIMESTAMP.test(text) || roleLine?.test(text))
       issues.push('Possible speaker label or timestamp; the interface supplies these.');
   }
