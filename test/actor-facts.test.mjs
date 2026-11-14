@@ -28,6 +28,7 @@ test('reviewed promise is linked to an actual witnessed message and never become
       kind:'promise',text:'The player promised to visit the bookstore tomorrow.'});
     assert.equal(fact.status,'active');
     assert.equal(listActorFacts(f.store,{timelineId:f.scene.timelineId,actorId:f.a.id}).length,1);
+    assert.equal(listActorFacts(f.store,{timelineId:f.scene.timelineId,actorId:f.a.id})[0].validSource,true);
     assert.throws(()=>addActorFact(f.store,{sceneId:f.scene.id,actorId:f.b.id,sourceMessageId:'heard',
       kind:'promise',text:'Something forbidden'}),/did not witness/);
     const recalled=retrieveActorFacts(f.store,{timelineId:f.scene.timelineId,actorId:f.a.id,query:'bookstore'});
@@ -48,6 +49,7 @@ test('stale source silently becomes ineligible; explicit revocation retains audi
     f.store.save(edited,1);
     assert.equal(retrieveActorFacts(f.store,{timelineId:f.scene.timelineId,actorId:f.a.id,query:'walks'}).length,0);
     assert.equal(listActorFacts(f.store,{timelineId:f.scene.timelineId,actorId:f.a.id})[0].status,'active');
+    assert.equal(listActorFacts(f.store,{timelineId:f.scene.timelineId,actorId:f.a.id})[0].validSource,false);
     revokeActorFact(f.store,{id:fact.id,actorId:f.a.id,timelineId:f.scene.timelineId});
     assert.equal(listActorFacts(f.store,{timelineId:f.scene.timelineId,actorId:f.a.id})[0].status,'revoked');
   }finally{f.store.close();}
