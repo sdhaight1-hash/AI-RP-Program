@@ -871,3 +871,6 @@ body.detail-focus .inspector-body :where(input,textarea,select){font-size:13px}
   .workspace-link{min-height:52px;padding:5px 0}
   .workspace-copy strong{font-size:9px;line-height:1.12}
 }
+
+/* In a focused editor the close button is the return action; do not stack a redundant Focus button above it. */
+body.detail-focus #expand-inspector{display:none}
