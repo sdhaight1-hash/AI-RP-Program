@@ -874,3 +874,23 @@ body.detail-focus .inspector-body :where(input,textarea,select){font-size:13px}
 
 /* In a focused editor the close button is the return action; do not stack a redundant Focus button above it. */
 body.detail-focus #expand-inspector{display:none}
+
+
+/* The parchment palette uses dark ink on light surfaces. Do not let inherited
+   accent-tinted navigation controls wash out against the paper background. */
+:root[data-theme="parchment"] .workspace-link:not(.active),
+:root[data-theme="parchment"] .inspector-tabs button:not(.active),
+:root[data-theme="parchment"] .world-home-copy strong,
+:root[data-theme="parchment"] .world-home-copy small,
+:root[data-theme="parchment"] .command-item:not(.selected),
+:root[data-theme="parchment"] .project-actions summary,
+:root[data-theme="parchment"] .topbar-private{
+  color:var(--text-dim);
+  opacity:1;
+}
+:root[data-theme="parchment"] .workspace-link.active .workspace-copy strong,
+:root[data-theme="parchment"] .workspace-link.active .workspace-icon{
+  color:#f3eafa;
+}
+:root[data-theme="parchment"] .inspector .stage-caption,
+:root[data-theme="parchment"] .inspector .stage-caption small{color:#f7f0ff}
