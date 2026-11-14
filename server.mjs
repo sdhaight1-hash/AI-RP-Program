@@ -33,6 +33,7 @@ const ALLOWED = new Map([
   ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
   ['/character/world-bridge.mjs', ['../character/world-bridge.mjs', 'text/javascript; charset=utf-8']],
   ['/character/relationship-bridge.mjs', ['../character/relationship-bridge.mjs', 'text/javascript; charset=utf-8']],
+  ['/world/geography.mjs', ['../world/geography.mjs', 'text/javascript; charset=utf-8']],
   ['/eval/local-model.mjs', ['../eval/local-model.mjs', 'text/javascript; charset=utf-8']],
   ['/character/field-contracts.mjs', ['../character/field-contracts.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
