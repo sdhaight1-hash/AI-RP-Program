@@ -19,6 +19,7 @@ const ALLOWED = new Map([
   ['/psychology.mjs', ['../psychology.mjs', 'text/javascript; charset=utf-8']],
   ['/fidelity.mjs', ['../fidelity.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
+  ['/interactions/reply-review.mjs', ['../interactions/reply-review.mjs', 'text/javascript; charset=utf-8']],
 ]);
 const json = (res, status, data) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });

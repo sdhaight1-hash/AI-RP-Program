@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v1.1.0 (character fidelity and per-channel NPC voice).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v1.2.0 (non-destructive NPC reply review).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -43,6 +43,18 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v1.2: Provisional NPC replies and review gate
+
+NPC responses now stream into a **provisional, unsaved preview**. Completed responses are checked for *likely* communication-format or player-agency issues before becoming story messages. Examples: text responses that include a narrator label or gesture markup; phone calls that narrate untransmitted visual gestures; or replies containing player-role dialogue or invented voluntary player actions.
+
+- A reply without detected issues is saved normally after generation finishes. A flagged reply stays **outside the saved transcript, SQLite world events, and character mood updates** until you explicitly select **Keep reply anyway**.
+- The review panel offers **Keep reply anyway**, **Regenerate draft**, or **Discard draft**. Regeneration uses the same original conversation basis and does not accumulate a rejected alternative in the story.
+- On **Retry**, the old NPC reply and its variants remain unchanged until a reviewed or clean replacement is accepted. Existing committed-world-event locks still forbid Retry.
+- While a draft is pending, you cannot send another message or switch its channel. Other scenes show a link back to the pending draft. Pending drafts are **in-memory only** and disappear on page reload. They do not appear in exports or SQLite snapshots.
+- The draft is tied to its timeline, cast, channel, current turn, speaker and witnesses. A changed basis invalidates acceptance.
+
+**Limitations:** The checks are conservative heuristics, not semantic validation or a safety/content filter. They can miss incorrect NPC behavior or flag legitimate writing; the author can keep a flagged response. Live GGUF generation and cross-model compliance must still be evaluated locally. This release does not automatically derive or apply fictional world events from prose.
 
 ## v1.1: Character-specific communication styles
 
