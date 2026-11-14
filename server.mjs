@@ -91,8 +91,10 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
     // Async embedding/model calls retain the same view even if a tab switches.
     let store = baseStore;
     const requireWorldScope = worldId => {
-      if (typeof baseStore.forWorld === 'function') store = baseStore.forWorld(worldId);
-      else if (typeof baseStore.activateWorld === 'function') baseStore.assertWorld(worldId);
+      if (typeof baseStore.forWorld === 'function') {
+        if(typeof worldId!=='string'||!worldId.trim())throw new RangeError('World ID required');
+        store = baseStore.forWorld(worldId);
+      } else if (typeof baseStore.activateWorld === 'function') baseStore.assertWorld(worldId);
     };
     try {
       const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
@@ -267,7 +269,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'PUT' && path === '/api/state') {
         const payload = await readJson(req, 4_500_000);
-        if (payload?.worldId !== undefined) requireWorldScope(payload.worldId);
+        if (typeof baseStore.forWorld === 'function' || payload?.worldId !== undefined) requireWorldScope(payload?.worldId);
         if (!payload || !Number.isSafeInteger(payload.revision) || payload.revision < 0 ||
           !payload.state || !Array.isArray(payload.state.characters) || !Array.isArray(payload.state.sessions) ||
           (!payload.state.characters.length && !store.activateWorld) ||
