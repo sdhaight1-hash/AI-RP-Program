@@ -88,6 +88,11 @@ async function main(){
     console.log('Browser startup diagnostics:',JSON.stringify(startup));
     await screenshot('00-startup');
     await until(async()=>script("return document.querySelector('#world-label')?.textContent?.trim() && !document.querySelector('#world-label').textContent.includes('Loading')"),'world UI bootstrap',7000);
+    // The first-run world launcher is modal. Close it explicitly before
+    // exercising navigation controls behind the dialog.
+    if(await script("return document.querySelector('#world-launcher').open")){
+      await script("document.querySelector('#world-launcher-close').click();return true");
+    }
     assert.equal(await script("return document.body.dataset.workspace"),'story');
     assert.ok(await script("return !!document.querySelector('#messages') && !!document.querySelector('#send')"));
     await screenshot('01-story-desktop');
