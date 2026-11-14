@@ -106,3 +106,17 @@ test('actor fact HTTP API rejects stale scene revisions and unobserved messages'
     assert.equal((await post('/api/actor/facts/revoke',{worldId:f.worldId,id:record.id,timelineId:f.scene.timelineId,actorId:f.a.id})).status,200);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+
+test('forking does not legitimize a recollection whose source was already rewritten',()=>{
+  const f=setup();
+  try {
+    addActorFact(f.store,{sceneId:f.scene.id,actorId:f.a.id,sourceMessageId:'heard',
+      text:'Unsupported claim about the bookstore.'});
+    const rewritten=f.store.load().state;
+    rewritten.sessions[0].messages[0].content='An unrelated statement.';
+    f.store.save(rewritten,1);
+    const child=f.store.worlds.forkTimeline({timelineId:f.scene.timelineId,name:'After source rewrite'});
+    assert.equal(retrieveActorFacts(f.store,{timelineId:child.id,actorId:f.a.id,query:'bookstore'}).length,0);
+  }finally{f.store.close();}
+});
