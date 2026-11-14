@@ -56,7 +56,9 @@ test('uncued continuity retains more recent dialogue than a topic-cued memory re
     const state=makeInitialState(),actor=state.characters[0],scene=state.sessions[0];
     scene.messages=Array.from({length:25},(_,i)=>({
       id:'inventory-'+i,role:'user',
-      content:'Harbor inventory report '+i+' described the cargo manifest in careful detail.',
+      content:'Harbor inventory report '+i+' described the cargo manifest in careful detail. '+
+        'Every crate was counted and checked against the shipping ledger twice. '+
+        'The night shift compared supply routes before completing the written audit.',
       witnessIds:[actor.id],sentAt:1000+i
     }));
     scene.messages.push({id:'cue',role:'user',content:'How are you?',
