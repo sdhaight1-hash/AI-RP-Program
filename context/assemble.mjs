@@ -181,6 +181,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   return {messages,metadata:{
     actorId,worldId,timelineId:scene.timelineId,sceneId,mode,
     contextWindow:context,maxOutput:output,safetyMargin:margin,
+    evidenceHeadroomReserved:evidenceHeadroom,
     promptTokensEstimated:estimateTokens(messages),
     // These IDs describe selected evidence; the backend may trim further
     // after a model-native exact token count.
