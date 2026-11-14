@@ -146,7 +146,9 @@ async function main(){
     assert.equal(await script("return document.querySelector('#workspace-title').textContent"),'People with lives beyond the scene');
     await screenshot('04-character-workspace');
 
-    const sceneCountBeforeCharacter=(await(await fetch(base+'/api/state')).json()).state.sessions.length;
+    const priorCharacterSnapshot=(await(await fetch(base+'/api/state')).json()).state;
+    const sceneCountBeforeCharacter=priorCharacterSnapshot.sessions.length;
+    const characterCountBeforeCharacter=priorCharacterSnapshot.characters.length;
     await script(`
       document.querySelector('button[data-workspace="story"]').click();
       document.querySelector('#new-character').click();
@@ -161,7 +163,7 @@ async function main(){
       'Creating a profile must not automatically create an unrelated scene');
     await until(async()=>{
       const snapshot=(await(await fetch(base+'/api/state')).json()).state;
-      return snapshot.characters.length>=2;
+      return snapshot.characters.length===characterCountBeforeCharacter+1;
     },'profile saved independently of any new scene');
     assert.equal((await(await fetch(base+'/api/state')).json()).state.sessions.length,
       sceneCountBeforeCharacter,'creating character must not create a scene in SQLite');
