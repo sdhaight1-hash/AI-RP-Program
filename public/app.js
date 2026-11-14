@@ -3,6 +3,7 @@ import { initAtmosphere } from '/scene.js';
 import { chooseSpeaker, createActorContext, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 import { getChannel } from '/interactions/channels.mjs';
+import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -56,6 +57,8 @@ const builderLabel = key => Object.values(BUILDER_SECTIONS).flat().find(row => r
 
 let running = false;
 let controller = null;
+let streamingReply = null; // Never saved: a provisional model response.
+let pendingReply = null; // Held for explicit review if it violates channel/agency expectations.
 let models = [];
 let backend = 'the local model server';
 let comfyJob = null;
@@ -265,19 +268,22 @@ function renderMessages() {
   if (!session || session.messages.length === 0) {
     const empty = el('section', '', 'empty');
     empty.append(el('div','✧','empty-symbol'),el('h2','A new scene awaits'),el('p',`Begin a scene with ${char?.name || 'your character'}. This is your story: describe an action, speak, or set the atmosphere.`));
-    container.append(empty); return;
+    container.append(empty); renderReplyReview(); return;
   }
-  for (const [index, m] of session.messages.entries()) {
+  const preview = streamingReply?.sessionId===session.id ? streamingReply.message : pendingReply?.sessionId===session.id ? pendingReply.message : null;
+  const display = preview ? [...session.messages, preview] : session.messages;
+  for (const [index, m] of display.entries()) {
     const channel=getChannel(m.channelId);
     const article = el('article','',`message ${m.role} channel-${channel.id}`);
     const who = m.role === 'assistant' ? state.characters.find(c=>c.id === (m.speakerId || session.characterId)) : null;
     const portrait = portraitNode(m.role === 'assistant' ? who?.name : state.persona.name || 'Y', who, 'portrait');
     const bubble = el('div','','bubble');
     const displayName = m.role === 'user' ? state.persona.name || 'You' : (channel.id === 'text_message' && who?.handle ? (who.handle.startsWith('@') ? who.handle : '@' + who.handle) : who?.name || 'Character');
-    bubble.append(el('div',`${displayName} · ${channel.label}`,'speaker'));
+    bubble.append(el('div',`${displayName} · ${channel.label}${m.provisional ? ' · DRAFT (not saved)' : ''}`,'speaker'));
     const prose = el('div', m.content, 'message-text');
     bubble.append(prose);
     const actions = el('div', '', 'message-actions');
+    if (m.provisional) { article.classList.add('provisional'); bubble.append(actions); article.append(portrait,bubble); container.append(article); continue; }
     const pin = el('button', m.pinned ? '◆ Pinned' : '◇ Pin', 'message-action');
     pin.title = m.pinned ? 'Remove from scene memory' : 'Pin this moment to scene memory (up to five)';
     pin.onclick = () => {
@@ -288,7 +294,7 @@ function renderMessages() {
       m.pinned = !m.pinned; save(); renderMessages(); renderInspector();
     };
     actions.append(pin);
-    if (m.role === 'assistant' && index === session.messages.length - 1 && Array.isArray(m.variants) && m.variants.length > 1) {
+    if (m.role === 'assistant' && index === session.messages.length - 1 && pendingReply?.sessionId!==session.id && Array.isArray(m.variants) && m.variants.length > 1) {
       const prev = el('button', '‹', 'message-action'); prev.title = 'Previous reply';
       const count = el('span', `${(m.variantIndex ?? m.variants.length - 1) + 1} / ${m.variants.length}`, 'variant-count');
       const next = el('button', '›', 'message-action'); next.title = 'Next reply';
@@ -312,6 +318,7 @@ function renderMessages() {
     }
     bubble.append(actions); article.append(portrait,bubble); container.append(article);
   }
+  renderReplyReview();
   container.scrollTop = container.scrollHeight;
 }
 
@@ -1100,9 +1107,73 @@ function parseSSE(buffer, onFrame) {
   for (const frame of pieces.slice(0,-1)) onFrame(frame);
   return pieces.at(-1) || '';
 }
+// Provisional NPC drafts are deliberately not part of state.sessions or SQLite.
+// Flagged replies require explicit approval, and every approval rechecks the
+// same immutable conversation basis used when the request was created.
+function commitNpcReply(record, reviewed = false) {
+  const session = state.sessions.find(s => s.id === record.sessionId && !s.trashedAt);
+  if (!isReplyBasisCurrent(session,record.basis)) return false;
+  if (record.retry) {
+    const last=session.messages.at(-1);
+    const choices=[...record.originalVariants];
+    if (!choices.includes(record.message.content)) choices.push(record.message.content);
+    last.content=record.message.content;
+    last.variants=choices.slice(-20);
+    last.variantIndex=last.variants.indexOf(last.content);
+    if(last.variantIndex<0)last.variantIndex=last.variants.length-1;
+  } else {
+    const final={...record.message}; delete final.provisional;
+    if (reviewed) final.reviewedDraft=true;
+    session.messages.push(final);
+    if(session.castIds.length>1)session.emotionByActor[record.actorId]=settleEmotion(session.emotionByActor[record.actorId]||session.emotion);
+    else session.emotion=settleEmotion(session.emotion);
+  }
+  if (reviewed && record.retry) session.messages.at(-1).reviewedDraft=true;
+  session.updatedAt=Date.now();
+  return true;
+}
+
+function renderReplyReview() {
+  const host=$('npc-reply-review'); if(!host)return;
+  host.replaceChildren();
+  const scene=activeSession();
+  if (!pendingReply) {host.classList.add('hidden');return;}
+  host.classList.remove('hidden');
+  if(!scene || scene.id!==pendingReply.sessionId){
+    const source=state.sessions.find(s=>s.id===pendingReply.sessionId && !s.trashedAt);
+    host.append(el('strong','Unreviewed NPC draft in another scene','review-title'),
+      el('p',`A provisional reply is waiting in ${source?.title||'an unavailable scene'}. It has not been saved.`,'review-help'));
+    if(source){const open=el('button','Return to draft','subtle-button');open.onclick=()=>{state.activeSessionId=source.id;save();render();};host.append(open);}
+    else{const discard=el('button','Discard unavailable draft','subtle-button');discard.onclick=()=>{pendingReply=null;renderMessages();};host.append(discard);}
+    return;
+  }
+  host.append(el('strong','Review NPC draft before saving','review-title'),
+    el('p','This reply may violate the selected interaction format or your player agency. It has NOT been saved to the story and will be lost if you reload.','review-help'));
+  const warnings=el('ul','','review-warnings');
+  for(const issue of pendingReply.issues)warnings.append(el('li',issue));
+  host.append(warnings);
+  const actions=el('div','','inline-actions');
+  const accept=el('button','Keep reply anyway','subtle-button');
+  accept.onclick=()=>{
+    const draft=pendingReply;if(!draft)return;
+    if(!commitNpcReply(draft,true)){pendingReply=null;renderMessages();showError('The story changed while the draft was pending. It cannot be applied; generate another reply.');return;}
+    pendingReply=null;save();renderLists();renderMessages();renderHeader();showError();
+  };
+  const again=el('button','Regenerate draft','primary-button');
+  again.onclick=()=>{
+    const draft=pendingReply;if(!draft)return;
+    if(!isReplyBasisCurrent(activeSession(),draft.basis)){pendingReply=null;renderMessages();showError('The scene changed. Start another reply from its current state.');return;}
+    pendingReply=null;renderMessages();void generate(draft.mode);
+  };
+  const discard=el('button','Discard draft','subtle-button');
+  discard.onclick=()=>{pendingReply=null;renderMessages();showError();};
+  actions.append(accept,again,discard);host.append(actions);
+}
+
 async function generate(mode = 'normal') {
   const session=activeSession(); const character=session ? sceneActor(session) : null;
   if (running || !session || !character) {if(!running)showError('Select a scene with an available cast member first.');return;}
+  if(pendingReply){const origin=state.sessions.find(s=>s.id===pendingReply.sessionId);showError(`Resolve the unsaved NPC draft in ${origin?.title||'the previous scene'} before generating another reply.`);return;}
   if (!state.settings.model) { currentTab='setup';renderInspector();showError('Load a model in KoboldCpp or LM Studio, then select it in Setup.');return; }
   const previous = session.messages.at(-1);
   const retry = mode === 'retry' && previous?.role === 'assistant';
@@ -1119,13 +1190,15 @@ async function generate(mode = 'normal') {
   }
   const actorId = retry ? (previous.speakerId || session.characterId) : character.id;
   const history = retry ? session.messages.slice(0,-1) : session.messages;
-  const originalContent = retry ? previous.content : '';
   const originalVariants = retry ? (Array.isArray(previous.variants) && previous.variants.length ? [...previous.variants] : [previous.content]) : [];
-  const originalIndex = retry ? previous.variantIndex : undefined;
+  const basis=replyBasis(session);
   running=true;controller=new AbortController();
   $('send').disabled=true; $('regenerate').disabled=true; $('continue').disabled=true;
   $('stop').classList.remove('hidden');showError();
-  let assistantText=''; let errorMessage=''; let assistant=null; let succeeded=false;
+  let assistantText='';let errorMessage='';let succeeded=false;let issues=[];
+  const message={id:retry?previous.id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,
+    channelId:retry?getChannel(previous.channelId).id:getChannel(session.channelId).id,sentAt:Date.now(),
+    witnessIds:retry?[...(previous.witnessIds||[])]:getChannel(session.channelId).id==='in_person'?[...session.castIds]:[actorId],provisional:true};
   try {
     let retrieved=[];
     const latestPlayer=[...history].reverse().find(m=>m.role==='user')?.content;
@@ -1152,8 +1225,7 @@ async function generate(mode = 'normal') {
     const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
     if (!response.ok) {const issue=await response.json().catch(()=>({error:`HTTP ${response.status}`}));throw new Error(issue.error||`HTTP ${response.status}`);}
     if (!response.body) throw new Error('Model server returned no response stream');
-    assistant=retry ? previous : {id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,channelId:getChannel(session.channelId).id,sentAt:Date.now(),witnessIds:getChannel(session.channelId).id==='in_person'?[...session.castIds]:[actorId]};
-    if (!retry) session.messages.push(assistant); else assistant.content='';
+    streamingReply={sessionId:session.id,message};
     renderMessages();
     const reader=response.body.getReader();const decode=new TextDecoder();let pending='';let done=false;
     const onFrame=(frame)=>{
@@ -1164,33 +1236,33 @@ async function generate(mode = 'normal') {
         const obj=JSON.parse(data);
         if(obj.error){errorMessage=typeof obj.error==='string'?obj.error:JSON.stringify(obj.error);return;}
         const delta=obj.choices?.[0]?.delta?.content;
-        if(typeof delta==='string'&&delta){assistantText+=delta;assistant.content=assistantText;const messages=$('messages');const last=messages.lastElementChild?.querySelector('.message-text');if(last)last.textContent=assistantText; messages.scrollTop=messages.scrollHeight;}
+        if(typeof delta==='string'&&delta){assistantText+=delta;message.content=assistantText;const messages=$('messages');const last=messages.lastElementChild?.querySelector('.message-text');if(last)last.textContent=assistantText; messages.scrollTop=messages.scrollHeight;}
       }catch{/* Ignore malformed events, not the surrounding stream. */}
     };
     while(!done){const item=await reader.read();if(item.done)break;pending=parseSSE(pending+decode.decode(item.value,{stream:true}),onFrame);}
     parseSSE(pending+decode.decode()+'\n\n',onFrame);
     if(errorMessage)throw new Error(errorMessage);
     if(!assistantText.trim())throw new Error('The model returned an empty reply. Try another model or generation preset.');
+    issues=inspectNpcReply(message.channelId,assistantText,state.characters.find(c=>c.id===actorId)?.name||'');
     succeeded=true;
   } catch(err) {
-    if(err.name!=='AbortError') showError(err.message);
-    if(retry && assistant){assistant.content=originalContent;assistant.variants=originalVariants;assistant.variantIndex=originalIndex;}
-    else if(assistant)session.messages=session.messages.filter(m=>m!==assistant);
+    if(err.name!=='AbortError')showError(err.message);
   } finally {
-    if (retry && succeeded) {
-      if (!originalVariants.includes(assistantText)) originalVariants.push(assistantText);
-      assistant.variants=originalVariants.slice(-20);
-      assistant.variantIndex=assistant.variants.indexOf(assistantText);
-      if (assistant.variantIndex < 0) assistant.variantIndex=assistant.variants.length-1;
+    streamingReply=null;
+    if(succeeded){
+      const record={sessionId:session.id,basis,actorId,mode,retry,originalVariants,
+        message:{...message,content:assistantText},issues};
+      if(issues.length)pendingReply=record;
+      else if(!commitNpcReply(record))showError('Scene changed before the NPC reply could be saved. Please try again.');
     }
-    if(succeeded && !retry) {if(session.castIds.length > 1)session.emotionByActor[actorId]=settleEmotion(session.emotionByActor[actorId]||session.emotion);else session.emotion=settleEmotion(session.emotion);}
     running=false;controller=null;$('send').disabled=false;$('regenerate').disabled=false;$('continue').disabled=false;
-    $('stop').classList.add('hidden');session.updatedAt=Date.now();save();renderLists();renderMessages();renderHeader();
+    $('stop').classList.add('hidden');save();renderLists();renderMessages();renderHeader();
   }
 }
 
 function send() {
   if (running) return;
+  if(pendingReply){showError('Review or discard the pending NPC draft before sending another message.');return;}
   const message=$('message-input').value.trim();if(!message)return;
   if(!activeSession()){showError('Create or restore a scene first.');return;}
   const session=activeSession();const channel=getChannel(session.channelId);
@@ -1202,7 +1274,7 @@ function send() {
 $('new-session').onclick=()=>{if(!running){if(!activeCharacter()){showError('Create or restore a character first.');return;}startSession();}};
 $('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
 $('channel-select').onchange=()=>{
-  const s=activeSession();if(!s||running){renderHeader();return;}
+  const s=activeSession();if(!s||running||pendingReply?.sessionId===s.id){renderHeader();if(pendingReply?.sessionId===s?.id)showError('Resolve the pending draft before changing channels.');return;}
   const next=getChannel($('channel-select').value).id;
   s.channelId=next;
   if(next!=='in_person'){const actor=sceneActor(s);if(actor){s.speakerId=actor.id;s.speakerMode='manual';}}
@@ -1218,7 +1290,7 @@ $('open-inspector').onclick=()=>{$('inspector').classList.toggle('inspector-open
 $('message-input').addEventListener('keydown',(ev)=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isComposing){ev.preventDefault();send();}});
 $('export-data').onclick=()=>download('ai-rp-studio-backup.json',JSON.stringify(state,null,2));
 $('import-data').onclick=()=>$('import-data-file').click();
-$('import-data-file').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const candidate=JSON.parse(await file.text());if(!candidate||!Array.isArray(candidate.characters)||!Array.isArray(candidate.sessions))throw new Error('Not a valid studio backup');if(!confirm('Replace your current local stories with this backup? Export first if needed.'))return;state=normalizeState(candidate);save();render();showError();}catch(err){showError(err.message);}e.target.value='';};
+$('import-data-file').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const candidate=JSON.parse(await file.text());if(!candidate||!Array.isArray(candidate.characters)||!Array.isArray(candidate.sessions))throw new Error('Not a valid studio backup');if(!confirm('Replace your current local stories with this backup? Export first if needed.'))return;state=normalizeState(candidate);pendingReply=null;streamingReply=null;save();render();showError();}catch(err){showError(err.message);}e.target.value='';};
 document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>{currentTab=tab.dataset.tab;renderInspector();}));
 setupBuilderAI();
 const quickTheme = $('quick-theme');

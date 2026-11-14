@@ -178,3 +178,14 @@
 .fidelity-history-item strong{font-size:11px;color:var(--accent-text)}
 .fidelity-history-item p{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-dim);line-height:1.5}
 .fidelity-history-item .fidelity-stale{color:var(--accent-text);font-style:italic}
+
+/* v1.2: AI responses are provisional until channel and agency checks pass. */
+.message.provisional .bubble{border:1px dashed var(--accent);opacity:.83}
+.message.provisional .speaker{color:var(--accent-text)}
+.reply-review{padding:13px 15px;margin:0 0 12px;background:var(--composer);border:1px solid var(--border-strong);border-radius:11px;color:var(--text-dim)}
+.reply-review.hidden{display:none}
+.review-title{font-size:13px;color:var(--accent-text)}
+.review-help{font-size:12px;line-height:1.55;margin:7px 0 8px}
+.review-warnings{margin:8px 0 12px;padding-left:20px;font-size:12px;line-height:1.55}
+.reply-review .inline-actions{display:flex;flex-wrap:wrap;gap:8px}
+.reply-review button{font-size:11px;padding:9px 12px}
