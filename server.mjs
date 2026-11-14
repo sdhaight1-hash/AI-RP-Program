@@ -49,6 +49,15 @@ const json = (res, status, data) => {
   res.end(JSON.stringify(data));
 };
 
+// Detect world canon/clock/actor-knowledge changes that do not increment the
+// story snapshot revision. total_changes catches writes on this connection;
+// data_version catches commits by another connection to the same world file.
+const worldMutationStamp=store=>{
+  const db=store.db;
+  return db.prepare('SELECT total_changes() AS n').get().n+':'+
+    db.prepare('PRAGMA data_version').get().data_version;
+};
+
 async function readBinary(req, limit = 1_500_000) {
   const chunks = []; let length = 0;
   for await (const chunk of req) {
@@ -380,6 +389,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const data=await readJson(req,2500);
         requireWorldScope(data.worldId);
         const startingRevision=store.load().revision;
+        const startingMutation=worldMutationStamp(store);
         if(!Number.isSafeInteger(data.revision) || data.revision!==startingRevision)
           return json(res,409,{error:'Save the current scene before suggesting memories'});
         let suggestions;
@@ -390,8 +400,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           });
         }catch(error){return json(res,422,{error:error.message});}
         requireWorldScope(data.worldId);
-        if(store.load().revision!==startingRevision)
-          return json(res,409,{error:'The scene changed while suggesting memories; try again'});
+        if(store.load().revision!==startingRevision||
+          worldMutationStamp(store)!==startingMutation)
+          return json(res,409,{error:'The scene or world knowledge changed while suggesting memories; try again'});
         // Suggestions are not persisted and do not become world canon.
         return json(res,200,{suggestions});
       }
@@ -429,6 +440,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           mode:data.mode||'normal',contextWindow:Math.min(contextRequested,backend.contextWindow||contextRequested),
           maxOutput:responseTokens};
         const startingRevision=store.load().revision;
+        const startingMutation=worldMutationStamp(store);
         let prompt,semanticEvidence=[],semanticStatus=semantic?'no-match':'disabled';
         try {
           prompt=buildActorContext(contextArgs);
@@ -446,8 +458,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             }
             // Asynchronous embedding can outlive a scene edit or world switch.
             requireWorldScope(data.worldId);
-            if(store.load().revision!==startingRevision)
-              return json(res,409,{error:'The scene changed during memory retrieval; retry'});
+            if(store.load().revision!==startingRevision||
+              worldMutationStamp(store)!==startingMutation)
+              return json(res,409,{error:'The scene or world knowledge changed during memory retrieval; retry'});
             if(semanticEvidence.length)prompt=buildActorContext({...contextArgs,semanticEvidence});
           }
           prompt=await enforceTokenBudget(prompt,backend);
@@ -458,8 +471,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         // Native token counting and embeddings may await local models. Reject
         // stale world/revision after those awaits before exposing any context.
         requireWorldScope(data.worldId);
-        if(store.load().revision!==startingRevision)
-          return json(res,409,{error:'The scene changed during context assembly; retry'});
+        if(store.load().revision!==startingRevision||
+          worldMutationStamp(store)!==startingMutation)
+          return json(res,409,{error:'The scene or world knowledge changed during context assembly; retry'});
         if (path === '/api/actor/context') return json(res,200,prompt);
         if (typeof data.model !== 'string' || !data.model || data.model.length>250 ||
             !Number.isFinite(data.temperature) || data.temperature<0 || data.temperature>2)
