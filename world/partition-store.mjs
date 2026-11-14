@@ -145,7 +145,10 @@ export class WorldPartitionStore {
     let current=this.scopedStores.get(worldId);
     if (!current) {
       current=new StudioStore(this.worldFile(worldId),{scopeWorldId:worldId});
-      this.scopedStores.set(worldId,current);
+      try{
+        this.repairWorldRecords(current,worldId);
+        this.scopedStores.set(worldId,current);
+      }catch(error){current.close();throw error;}
     }
     const scope=Object.create(this);
     scope.current=current;
@@ -206,7 +209,8 @@ export class WorldPartitionStore {
         purgedSceneId,purgedCharacterId
       }),
       beforeCommit: validated => {
-        this.ensureCharacterEntities(validated.characters,this.current,this.activeWorldId,validated);
+        this.ensureCharacterEntities(validated.characters,this.current,this.activeWorldId,
+          validated,{removedCharacterId:purgedCharacterId});
         if(purgedSceneId){
           if(validated.sessions.some(s=>s.id===purgedSceneId))
             throw new Error('Cannot purge derived records of a live scene');
@@ -216,12 +220,13 @@ export class WorldPartitionStore {
     });
   }
   ensureCharacterEntities(characters = this.current.load().state?.characters || [],
-    target = this.current, worldId = this.activeWorldId, snapshotState = null) {
+    target = this.current, worldId = this.activeWorldId, snapshotState = null,
+    reconciliationOptions = {}) {
     // Called within the story revision transaction (or explicit world-open
     // maintenance transaction). Keep archived characters; purge only IDs absent
     // from canonical state. This also repairs projections left by older builds.
     const canonical=snapshotState||target.load().state;
-    reconcileCharacterRecords(target.db,canonical,worldId);
+    reconcileCharacterRecords(target.db,canonical,worldId,reconciliationOptions);
     // One lookup for the cast rather than a query per character on every
     // debounced save/streamed reply. Stable character IDs remain authoritative.
     const knownByCharacter = new Map(target.db.prepare(`SELECT id,name,source_character_id AS characterId
@@ -234,6 +239,19 @@ export class WorldPartitionStore {
       else target.worlds.createEntity({worldId,name:character.name,kind:'character',sourceCharacterId:character.id});
     }
   }
+  repairWorldRecords(target,worldId) {
+    target.db.exec('BEGIN IMMEDIATE');
+    try{
+      const loaded=target.load().state;
+      this.ensureCharacterEntities(loaded?.characters||[],target,worldId,loaded,{
+        repairOrphans:true
+      });
+      // Historical orphan scans run once per newly opened connection, never
+      // on every debounced story save.
+      reconcileRemovedSceneSources(target.db,loaded);
+      target.db.exec('COMMIT');
+    }catch(error){if(target.db.isTransaction)target.db.exec('ROLLBACK');throw error;}
+  }
   activateWorld(id) {
     if (!catalogRows(this.registry).some(w=>w.id===id)) throw new Error('World not found');
     if (this.activeWorldId === id && this.current) return this.load();
@@ -241,13 +259,7 @@ export class WorldPartitionStore {
     try {
       // Build the next world without invalidating the currently open one.
       // An entity-projection failure must not partially publish this switch.
-      next.db.exec('BEGIN IMMEDIATE');
-      const loaded=next.load().state;
-      this.ensureCharacterEntities(loaded?.characters || [],next,id,loaded);
-      // Repair obsolete scene-derived memories from earlier versions once on
-      // world open, not with an O(history) scan on every debounced save.
-      reconcileRemovedSceneSources(next.db,loaded);
-      next.db.exec('COMMIT');
+      this.repairWorldRecords(next,id);
       this.registry.prepare("INSERT INTO registry_settings(key,value) VALUES('active_world',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(id);
     } catch(error) {
       if(next.db.isTransaction)next.db.exec('ROLLBACK');
