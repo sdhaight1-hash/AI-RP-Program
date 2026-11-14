@@ -4,7 +4,7 @@ import { chooseSpeaker, archiveCharacter, archiveSession, duplicateSession, purg
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 import { getChannel } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
-import { normalizeFrequentPlaces, importedEncounter } from '/character/schema.mjs';
+import { normalizeFrequentPlaces, importedEncounter, CHARACTER_V2_FIELDS } from '/character/schema.mjs';
 import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis, characterDraftVersion, worldDraftVersion } from '/character/authoring.mjs';
 import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/character/world-bridge.mjs';
 import { proposedRelationshipKinds } from '/character/relationship-bridge.mjs';
@@ -19,6 +19,7 @@ const text = (s) => String(s ?? '');
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch { state = makeInitialState(); }
 let currentTab = 'character';
+let activeWorkspace = 'story';
 let worldLibrary = null;
 let loadingWorlds = false;
 let selectedWorldId = null;
@@ -245,6 +246,7 @@ function startSession(char = activeCharacter(), encounter = null) {
   if(encounter?.locationId)session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
   state.sessions.unshift(session);
   state.activeSessionId = session.id;
+  activeWorkspace='story';
   save(); render();
   $('message-input').focus();
 }
@@ -277,7 +279,7 @@ function renderLists() {
     info.append(el('strong', s.title || `With ${char?.name || 'unknown'}`), el('small', `${(s.castIds||[s.characterId]).length} cast · ${s.messages.length} messages`));
     button.append(badge, info);
     button.title = `Open ${s.title}`;
-    button.addEventListener('click', () => { if (running) return; state.activeSessionId = s.id; save(); render(); });
+    button.addEventListener('click', () => { if (running) return; state.activeSessionId = s.id; activeWorkspace='story'; save(); render(); });
     const actions=el('div','','row-actions');
     const rename=el('button','✎','mini-action');rename.title='Rename scene';rename.onclick=()=>{if(running)return;const value=prompt('Scene name',s.title);if(value?.trim()){s.title=value.trim().slice(0,150);save();renderLists();renderHeader();}};
     const branch=el('button','⎇','mini-action');branch.title='Fork scene into an independent world timeline';
@@ -427,6 +429,7 @@ async function refreshWorldLibrary() {
     const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active world';
     if(['worlds','atlas','relations'].includes(currentTab))renderInspector();
     renderHeader();
+    renderWorkspace();
   } catch(err) { showError(err.message); }
   finally { loadingWorlds=false; }
 }
@@ -461,11 +464,21 @@ async function switchWorld(worldId) {
 function renderWorldLauncher() {
   const host=$('world-launcher-list');if(!host)return;
   host.replaceChildren();
-  for (const world of worldLibrary?.worlds||[]) {
+  const all=worldLibrary?.worlds||[];
+  const term=String($('world-filter')?.value||'').trim().toLocaleLowerCase();
+  const shown=term?all.filter(w=>[w.name,w.description].some(x=>String(x||'').toLocaleLowerCase().includes(term))):all;
+  $('world-list-count').textContent=`${shown.length} of ${all.length} independent ${all.length===1?'world':'worlds'}`;
+  if(!shown.length)host.append(el('p','No worlds match this search. Clear the filter to see every universe.','empty-note'));
+  for (const world of shown) {
     const card=el('div','','world-launcher-item');
-    card.append(el('strong',world.name),el('p',world.description||'An unpopulated world','help'));
-    const open=el('button',world.id===activeWorldId?'Enter Current World':'Open World','primary-button');
-    open.onclick=()=>world.id===activeWorldId ? (sessionStorage.setItem('ai-rp-world-opened','1'),$('world-launcher').close()) : void switchWorld(world.id).catch(err=>showError(err.message));
+    const active=world.id===activeWorldId;
+    card.append(el('span',active?'CURRENT UNIVERSE':'INDEPENDENT WORLD','workspace-card-index'),
+      el('strong',world.name),el('p',world.description||'A world ready to be shaped.','help'));
+    const timelineCount=(worldLibrary?.timelines||[]).filter(t=>t.worldId===world.id).length;
+    card.append(el('span',`${timelineCount} ${timelineCount===1?'timeline':'timelines'} · isolated continuity`,'workspace-entity-meta'));
+    const open=el('button',active?'Stay in this world':'Open world',active?'subtle-button':'primary-button');
+    open.onclick=()=>active ? (sessionStorage.setItem('ai-rp-world-opened','1'),$('world-launcher').close()) :
+      void switchWorld(world.id).catch(err=>showError(err.message));
     card.append(open);host.append(card);
   }
 }
@@ -484,7 +497,7 @@ const postWorld = async (endpoint,data)=>{
   await refreshWorldLibrary();return value;
 };
 function renderAtlasPanel(host,session) {
-  host.innerHTML=`<h2 class="panel-title">World Atlas</h2><p class="help">Build nested real-world or invented places, from regions to apartments and rooms. Places belong to their canon world. Directed travel paths and detailed maps will expand this system.</p><div class="group"><label class="field-label" for="atlas-world">Selected canon world</label><select id="atlas-world"></select></div><div id="atlas-places"></div><div class="group"><label class="field-label" for="atlas-name">New location</label><input id="atlas-name" maxlength="120" placeholder="e.g. Mara's Apartment"/><select id="atlas-kind"><option value="region">Region</option><option value="town">Town</option><option value="neighborhood">Neighborhood</option><option value="building">Building</option><option value="room">Room</option><option value="outdoor">Outdoor area</option><option value="other">Other</option></select><label class="field-label" for="atlas-parent">Inside</label><select id="atlas-parent"></select><textarea id="atlas-description" rows="3" maxlength="4000" placeholder="Description, atmosphere, daily life..."></textarea><button class="primary-button" id="atlas-create">Create place</button></div>`;
+  host.innerHTML=`<h2 class="panel-title">World Atlas</h2><p class="help">Create and connect locations within the active universe. Places can be a character’s usual home or workplace without declaring where they are in the current scene.</p><div class="group"><label class="field-label" for="atlas-world">Selected canon world</label><select id="atlas-world"></select></div><div id="atlas-places"></div><div class="group"><label class="field-label" for="atlas-name">New location</label><input id="atlas-name" maxlength="120" placeholder="e.g. Mara's Apartment"/><select id="atlas-kind"><option value="region">Region</option><option value="town">Town</option><option value="neighborhood">Neighborhood</option><option value="building">Building</option><option value="room">Room</option><option value="outdoor">Outdoor area</option><option value="other">Other</option></select><label class="field-label" for="atlas-parent">Inside</label><select id="atlas-parent"></select><textarea id="atlas-description" rows="3" maxlength="4000" placeholder="Description, atmosphere, daily life..."></textarea><button class="primary-button" id="atlas-create">Create place</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
   addWorldChooser('atlas-world');
   const world=selectedWorld();if(!world){$('atlas-create').disabled=true;return;}
@@ -510,7 +523,7 @@ function renderAtlasPanel(host,session) {
   };
 }
 function renderRelationsPanel(host) {
-  host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Characters and organizations can be linked in a directional social graph. A relationship entered here is part of authored canon; changing feelings within a playthrough will be a separate system.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="object">Object</option><option value="concept">Concept</option></select><button id="relations-add-entity" class="subtle-button">Add to world</button></div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="3" maxlength="2000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
+  host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Author directed social relationships between people and organizations. Biographies can suggest source-backed kinships in Character Studio; no relationship changes an actor's momentary feelings or timeline events.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="object">Object</option><option value="concept">Concept</option></select><button id="relations-add-entity" class="subtle-button">Add to world</button></div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="3" maxlength="2000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
   addWorldChooser('relations-world');
   const world=selectedWorld();if(!world){$('relations-add-entity').disabled=true;$('relations-add').disabled=true;return;}
@@ -645,6 +658,7 @@ async function requestEventDraft(npcReply) {
 function renderInspector() {
   const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
   document.querySelectorAll('[data-tab]').forEach(btn => { btn.classList.toggle('active', btn.dataset.tab === currentTab); btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab)); });
+  const heading=document.querySelector(`[data-tab="${currentTab}"]`);$('inspector-heading').textContent=heading?.textContent?.trim()||'Details';
   if ((!s || !c) && !['library','setup','worlds','atlas','relations'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
   if (currentTab === 'character') {
     host.innerHTML = `<h2 class="panel-title">${escapeHtml(c.name)}</h2>
@@ -660,7 +674,7 @@ function renderInspector() {
     $('import-character').onclick = () => $('character-upload').click();
     $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } e.target.value=''; };
   } else if (currentTab === 'worlds') {
-    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Canon worlds are independent of roleplay scenes. Each playthrough has its own timeline; changing one does not rewrite another. This first release provides world containers and scene assignment. Location and relationship editors come next.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><section class="world-encounters"><h3 class="builder-subtitle">World Encounter Templates</h3><p class="help">Optional scene openings belong to this world—not to an NPC’s permanent personality. You can also start an unscripted scene.</p><div id="world-encounter-list"></div><div class="group"><label class="field-label" for="encounter-title">Encounter name</label><input id="encounter-title" maxlength="120" placeholder="Late-night text from Mara"/><label class="field-label" for="encounter-character">Participating character</label><select id="encounter-character"></select><label class="field-label" for="encounter-channel">Interaction channel</label><select id="encounter-channel"><option value="in_person">In person</option><option value="phone_call">Phone call</option><option value="text_message">Text message</option></select><label class="field-label" for="encounter-location">Optional starting location</label><select id="encounter-location"></select><label class="field-label" for="encounter-premise">Scene circumstances</label><textarea id="encounter-premise" rows="3" maxlength="3000"></textarea><label class="field-label" for="encounter-opening">Optional NPC opening message</label><textarea id="encounter-opening" rows="3" maxlength="3000"></textarea><button id="encounter-create" class="primary-button">Save Encounter Template</button></div></section><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
+    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Each world is independent. Manage its setting, canon entities, timelines and encounters here; the Atlas and Relations desks handle places and social connections. Actor memories stay within their witnessed timeline.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><section class="world-encounters"><h3 class="builder-subtitle">World Encounter Templates</h3><p class="help">Optional scene openings belong to this world—not to an NPC’s permanent personality. You can also start an unscripted scene.</p><div id="world-encounter-list"></div><div class="group"><label class="field-label" for="encounter-title">Encounter name</label><input id="encounter-title" maxlength="120" placeholder="Late-night text from Mara"/><label class="field-label" for="encounter-character">Participating character</label><select id="encounter-character"></select><label class="field-label" for="encounter-channel">Interaction channel</label><select id="encounter-channel"><option value="in_person">In person</option><option value="phone_call">Phone call</option><option value="text_message">Text message</option></select><label class="field-label" for="encounter-location">Optional starting location</label><select id="encounter-location"></select><label class="field-label" for="encounter-premise">Scene circumstances</label><textarea id="encounter-premise" rows="3" maxlength="3000"></textarea><label class="field-label" for="encounter-opening">Optional NPC opening message</label><textarea id="encounter-opening" rows="3" maxlength="3000"></textarea><button id="encounter-create" class="primary-button">Save Encounter Template</button></div></section><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
     const report = $('world-library-list');
     if (!worldLibrary) {
       report.append(el('p','Loading your local worlds...','help'));
@@ -1054,7 +1068,296 @@ async function checkComfyJob() {
     }
   }catch(err){status.textContent='ComfyUI job status: '+err.message;}
 }
-function render() { applyTheme(); renderLists(); renderHeader(); renderMessages(); renderInspector(); renderReadingMode(); }
+
+const WORKSPACE_META=Object.freeze({
+  world:{name:'World & canon',kicker:'THE UNIVERSE',title:'The world behind the story',
+    summary:'A consistent setting with its own places, people, relationships and independent timelines. Edit canon deliberately; scenes do not silently rewrite it.',
+    tab:'worlds'},
+  characters:{name:'Characters',kicker:'THE CAST',title:'People with lives beyond the scene',
+    summary:'Build distinct personalities, histories, routines and voices rooted in this world. Reviewed character details can inform new world canon without forcing it.',
+    tab:'character'},
+  story:{name:'Story room',kicker:'LIVE STORY',title:'Story room',summary:'',tab:'scene'},
+  memory:{name:'Memory & review',kicker:'EVIDENCE & CONTINUITY',title:'What each character can remember',
+    summary:'Witnessed dialogue, reviewed subjective beliefs and objective world events are different kinds of knowledge. Review the evidence before making it canon.',
+    tab:'context'},
+  tools:{name:'Models & lab',kicker:'LOCAL INFRASTRUCTURE',title:'Your private creative toolkit',
+    summary:'Choose a local model, inspect exactly what it sees, test character fidelity, evaluate semantic recall and manage visual workflows—all from this machine.',
+    tab:'setup'}
+});
+const workspaceButton=(label,action,primary=false)=>{
+  const button=el('button',label,primary?'primary-button workspace-link-button':'subtle-button workspace-link-button');
+  button.type='button';
+  button.onclick=action;
+  return button;
+};
+function workspaceCard({index,title,description,actions=[],featured=false,wide=false,content=null}){
+  const card=el('section','',`workspace-card${featured?' featured':''}${wide?' wide':''}`);
+  card.append(el('span',index,'workspace-card-index'),el('h2',title),el('p',description));
+  if(content)card.append(content);
+  const footer=el('div','','workspace-actions');
+  for(const [label,action,primary] of actions)footer.append(workspaceButton(label,action,Boolean(primary)));
+  if(actions.length)card.append(footer);
+  return card;
+}
+function workspaceStats(entries){
+  const grid=el('div','','workspace-stat-grid');
+  for(const [value,label] of entries){
+    const item=el('div','','workspace-stat');
+    item.append(el('div',String(value),'workspace-stat-number'),el('div',label,'workspace-stat-label'));
+    grid.append(item);
+  }
+  return grid;
+}
+function workspaceRows(items,display){
+  const wrap=el('div','','workspace-entity-list');
+  if(!items.length){wrap.append(el('p','Nothing established here yet.','empty-note'));return wrap;}
+  for(const item of items.slice(0,7)){
+    const [title,meta]=display(item),row=el('div','','workspace-entity-row');
+    row.append(el('span',title,'workspace-entity-name'),el('span',meta||'','workspace-entity-meta'));
+    wrap.append(row);
+  }
+  return wrap;
+}
+function openDetailDesk(tab) {
+  if(!document.querySelector(`[data-tab="${tab}"]`))return;
+  currentTab=tab;
+  renderInspector();
+  // Full workspaces open their editor in a focused canvas, not the old
+  // narrow 340px column. Story still retains its lightweight detail desk.
+  const focus=activeWorkspace!=='story';
+  document.body.classList.toggle('detail-focus',focus);
+  if(focus||window.matchMedia('(max-width:1100px)').matches)setDetailDeskOpen(true);
+}
+function setDetailDeskOpen(isOpen){
+  const desk=$('inspector'),scrim=$('inspector-scrim');
+  if(!isOpen)document.body.classList.remove('detail-focus');
+  desk.classList.toggle('inspector-open',Boolean(isOpen));
+  scrim.classList.toggle('hidden',!isOpen);
+  $('expand-inspector').setAttribute('aria-pressed',String(document.body.classList.contains('detail-focus')));
+  for(const id of ['open-inspector','open-workspace-inspector'])$(id)?.setAttribute('aria-expanded',String(Boolean(isOpen)));
+}
+function setWorkspace(mode){
+  if(!Object.hasOwn(WORKSPACE_META,mode))return;
+  activeWorkspace=mode;
+  currentTab=WORKSPACE_META[mode].tab;
+  setDetailDeskOpen(false);
+  renderWorkspace();
+  renderInspector();
+}
+// One searchable jump surface replaces hunting through nested feature tabs.
+// All actions reuse existing route guards and never mutate canon implicitly.
+let commandResults=[];
+let commandIndex=0;
+function studioCommands(){
+  const desk=(label,workspace,tab,keywords='')=>({
+    label,detail:WORKSPACE_META[workspace].name,keywords,
+    run:()=>{setWorkspace(workspace);openDetailDesk(tab);}
+  });
+  return [
+    {label:'World & canon',detail:'Workspace',keywords:'universe overview',run:()=>setWorkspace('world')},
+    {label:'Characters',detail:'Workspace',keywords:'cast profiles identity',run:()=>setWorkspace('characters')},
+    {label:'Story room',detail:'Workspace',keywords:'chat conversation scene',run:()=>setWorkspace('story')},
+    {label:'Memory & review',detail:'Workspace',keywords:'recall evidence',run:()=>setWorkspace('memory')},
+    {label:'Models & lab',detail:'Workspace',keywords:'inference setup tools',run:()=>setWorkspace('tools')},
+    desk('World Library & timelines','world','worlds','world switch clocks encounters'),
+    desk('Atlas & places','world','atlas','geography location map'),
+    desk('World relationships','world','relations','kinships social graph'),
+    desk('Character details','characters','character','profile overview'),
+    desk('Scene cast','characters','cast','speaker witnesses'),
+    desk('Emotion & disposition','characters','emotion','psychology moods'),
+    desk('Scene direction & event review','story','scene','director events actions'),
+    desk('Authored lore','memory','lore','knowledge records'),
+    desk('Story journal','memory','memory','history pinned moments'),
+    desk('Actor memory trace','memory','context','retrieval context evidence'),
+    desk('Visual workflows','tools','gallery','ComfyUI portraits'),
+    desk('Archives & library','tools','library','trash export'),
+    desk('Local model setup','tools','setup','KoboldCpp LM Studio'),
+    {label:'Character Studio · edit active character',detail:'Character authoring',
+      keywords:'editor coauthor fields biography',
+      run:()=>activeCharacter()?openBuilder(activeCharacter()):showError('Create a character in this world first.')},
+    {label:'Character Fidelity Lab',detail:'Local-model evaluation',keywords:'test character benchmarks',
+      run:()=>{
+        const c=activeCharacter();
+        if(!c)return showError('Create a character first.');
+        openBuilder(c);builderTab='lab';renderBuilder();
+      }},
+    {label:'Create a character',detail:'New',keywords:'person npc character',
+      run:()=>$('new-character').click()},
+    {label:'Start a new scene',detail:'New',keywords:'chat encounter',
+      run:()=>openNewSceneDialog()},
+    {label:'Choose a world',detail:'Worlds',keywords:'switch universe',
+      run:()=>{renderWorldLauncher();$('world-launcher').showModal();}}
+  ];
+}
+function performStudioCommand(command){
+  $('command-palette').close();
+  $('command-search').value='';
+  command?.run();
+}
+function renderStudioCommands(){
+  const term=$('command-search').value.trim().toLocaleLowerCase();
+  const search=term.split(/\s+/u).filter(Boolean);
+  commandResults=studioCommands().filter(item=>{
+    const haystack=(item.label+' '+item.detail+' '+item.keywords).toLocaleLowerCase();
+    return search.every(word=>haystack.includes(word));
+  }).slice(0,16);
+  commandIndex=0;
+  const host=$('command-items');host.replaceChildren();
+  if(!commandResults.length){host.append(el('p','No matching workspace or tool.','empty-note'));return;}
+  commandResults.forEach((command,index)=>{
+    const btn=el('button','','command-item');
+    btn.type='button';
+    btn.dataset.commandIndex=String(index);
+    btn.append(el('strong',command.label),el('span',command.detail,'command-item-detail'));
+    btn.classList.toggle('selected',index===commandIndex);
+    btn.onclick=()=>performStudioCommand(command);
+    host.append(btn);
+  });
+}
+function openStudioCommands(){
+  const modal=$('command-palette');
+  if(document.querySelector('dialog[open]')&&!modal.open)return;
+  if(!modal.open)modal.showModal();
+  $('command-search').value='';
+  renderStudioCommands();
+  $('command-search').focus();
+}
+function moveStudioCommand(delta){
+  if(!commandResults.length)return;
+  commandIndex=(commandIndex+delta+commandResults.length)%commandResults.length;
+  document.querySelectorAll('.command-item').forEach((button,i)=>{
+    button.classList.toggle('selected',i===commandIndex);
+    if(i===commandIndex)button.scrollIntoView({block:'nearest'});
+  });
+}
+function renderWorkspace(){
+  const mode=Object.hasOwn(WORKSPACE_META,activeWorkspace)?activeWorkspace:'story';
+  const chosen=WORKSPACE_META[mode];
+  document.body.dataset.workspace=mode;
+  document.querySelectorAll('button[data-workspace]').forEach(button=>{
+    const active=button.dataset.workspace===mode;
+    button.classList.toggle('active',active);
+    button.setAttribute('aria-pressed',String(active));
+  });
+  const world=worldLibrary?.worlds?.find(x=>x.id===activeWorldId);
+  const worldName=world?.name||'Choose a world';
+  $('top-world-name').textContent=worldName;
+  $('top-workspace-name').textContent=chosen.name;
+  const panel=$('workspace-overview');
+  panel.classList.toggle('hidden',mode==='story');
+  if(mode==='story')return;
+  $('workspace-kicker').textContent=chosen.kicker;
+  $('workspace-title').textContent=chosen.title;
+  $('workspace-summary').textContent=chosen.summary;
+  const host=$('workspace-content');host.replaceChildren();
+  const characters=state.characters.filter(c=>!c.trashedAt);
+  const scenes=state.sessions.filter(s=>!s.trashedAt);
+  const places=(worldLibrary?.locations||[]).filter(x=>x.worldId===activeWorldId);
+  const entities=(worldLibrary?.entities||[]).filter(x=>x.worldId===activeWorldId);
+  const relationships=(worldLibrary?.relationships||[]).filter(x=>x.worldId===activeWorldId);
+  const timelines=(worldLibrary?.timelines||[]).filter(x=>x.worldId===activeWorldId);
+  const scene=activeSession(),character=activeCharacter();
+  const grid=el('div','','workspace-grid');
+  if(mode==='world'){
+    host.append(workspaceStats([[places.length,'Established places'],[entities.length,'People & entities'],
+      [relationships.length,'Authored relationships'],[timelines.length,'Independent timelines']]));
+    grid.append(workspaceCard({index:'01 · WORLD LIBRARY',title:worldName,
+      featured:true,description:world?.description||'Define the setting, era, atmosphere and social fabric of this universe.',
+      actions:[['Manage world & timelines',()=>openDetailDesk('worlds'),true],
+        ['Switch universe',()=>{renderWorldLauncher();$('world-launcher').showModal();}]],
+      content:workspaceRows(timelines,x=>[x.name,'Timeline'])}));
+    grid.append(workspaceCard({index:'02 · GEOGRAPHY',title:'Places that matter',
+      description:'Build a navigable atlas. A usual location is not an actor’s current position in a scene.',
+      content:workspaceRows(places,x=>[x.name,x.kind]),
+      actions:[['Open World Atlas',()=>openDetailDesk('atlas'),true]]}));
+    grid.append(workspaceCard({index:'03 · SOCIAL FABRIC',title:'People & relationships',
+      description:'Known people, institutions, and their authored relationships belong to this world. They do not automatically know each other’s private thoughts.',
+      content:workspaceRows(relationships,x=>{
+        const from=entities.find(e=>e.id===x.fromId),to=entities.find(e=>e.id===x.toId);
+        return [`${from?.name||'?'} → ${to?.name||'?'}`,x.kind];
+      }),actions:[['Open relationship graph',()=>openDetailDesk('relations'),true]]}));
+    grid.append(workspaceCard({index:'04 · CREATIVE LOOP',title:'World ⇄ character',
+      description:'Character biography can propose named world entries with exact source quotes. Accepting a place or kinship remains a creator decision—not a model action.',
+      actions:[['Open Character Studio',()=>character&&openBuilder(character),true],
+        ['View world lore',()=>openDetailDesk('lore')]]}));
+  }else if(mode==='characters'){
+    const complete=characters.reduce((total,c)=>total+CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length,0);
+    host.append(workspaceStats([[characters.length,'Active characters'],[CHARACTER_V2_FIELDS.length,'Dedicated field contracts'],
+      [complete,'Completed profile fields'],[entities.filter(e=>e.kind==='character').length,'World people']]));
+    const roster=workspaceCard({index:'01 · CHARACTER LIBRARY',title:'Your cast',
+      featured:true,wide:true,
+      description:'A profile captures enduring identity, appearance, psychology and history. Current location and emotions belong to the active timeline.',
+      actions:[['Create character',()=>$('new-character').click(),true],
+        ['Open active character',()=>character&&openBuilder(character)]]});
+    const rosterList=el('div','','workspace-entity-list');
+    for(const c of characters.slice(0,10)){
+      const row=el('div','','workspace-entity-row');
+      const detail=el('span','', 'workspace-entity-name');
+      const name=el('span',c.name||'Unnamed character');
+      const percent=CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length;
+      const info=el('span',`${percent}/${CHARACTER_V2_FIELDS.length} core fields`,'workspace-entity-meta');
+      const edit=workspaceButton('Edit',()=>openBuilder(c));
+      detail.append(name,el('span',c.occupation||c.tagline||'Character in development','workspace-entity-meta'));
+      row.append(detail,info,edit);rosterList.append(row);
+    }
+    if(!characters.length)rosterList.append(el('p','Create your first character to begin.','empty-note'));
+    roster.append(rosterList);grid.append(roster);
+    grid.append(workspaceCard({index:'02 · CHARACTER WORKSHOP',title:'A complete inner life',
+      description:'Use field-specific AI assistance grounded in everything already established. Each field has a separate purpose and the full character stays coherent.',
+      actions:[['Edit character',()=>character&&openBuilder(character),true],
+        ['View character details',()=>openDetailDesk('character')]]}));
+    grid.append(workspaceCard({index:'03 · WORLD PARTICIPATION',title:'Their place in the world',
+      description:'Link homes, workplaces, frequent places and evidence-backed relatives. Reviewed character-origin details can become world canon.',
+      actions:[['Open relationships',()=>openDetailDesk('relations'),true],
+        ['Open cast',()=>openDetailDesk('cast')]]}));
+  }else if(mode==='memory'){
+    const pinned=(scene?.messages||[]).filter(x=>x.pinned).length;
+    host.append(workspaceStats([[scenes.length,'Story timelines / scenes'],[pinned,'Pinned scene moments'],
+      [state.lore?.length||0,'Authored lore records'],[scene?.castIds?.length||0,'Current scene witnesses']]));
+    grid.append(workspaceCard({index:'01 · ACTOR EVIDENCE',title:'Who knows what?',
+      featured:true,description:'Actor-owned recall only uses witnessed speech, reviewed personal memories, and allowed lore. Audit exactly which source IDs reached the model.',
+      actions:[['Inspect recall & context',()=>openDetailDesk('context'),true]]}));
+    grid.append(workspaceCard({index:'02 · SCENE JOURNAL',title:'Past events and notes',
+      description:'Pinned moments and summaries preserve narrative continuity without converting unreviewed NPC speech into facts.',
+      actions:[['Open story journal',()=>openDetailDesk('memory'),true],
+        ['Review world events',()=>openDetailDesk('scene')]]}));
+    grid.append(workspaceCard({index:'03 · REFERENCE KNOWLEDGE',title:'World lore',
+      description:'Creator-authored world knowledge is separate from actor belief. Visibility and triggering decide what a character can legitimately recall.',
+      actions:[['Manage lore',()=>openDetailDesk('lore'),true]]}));
+    grid.append(workspaceCard({index:'04 · TRUST BOUNDARIES',title:'Evidence before canon',
+      description:'Private messages stay private. Reviewed beliefs are subjective, and timeline forks keep earlier knowledge snapshots without inheriting future events.',
+      actions:[['View world timelines',()=>openDetailDesk('worlds'),true]]}));
+  }else if(mode==='tools'){
+    host.append(workspaceStats([[state.settings.model?'1':'0','Selected chat models'],
+      [state.settings.contextWindow||state.settings.context_window||4096,'Requested context tokens'],
+      [characters.length,'Characters available for testing'],
+      [state.settings.readingMode?'ON':'OFF','Reading view']]));
+    grid.append(workspaceCard({index:'01 · INFERENCE',title:'Local model setup',
+      featured:true,description:`Current model: ${state.settings.model||'none selected'}. Configure KoboldCpp or LM Studio and inspect the model’s loaded context budget.`,
+      actions:[['Configure local model',()=>openDetailDesk('setup'),true],
+        ['Inspect prompt context',()=>openDetailDesk('context')]]}));
+    grid.append(workspaceCard({index:'02 · CHARACTER QUALITY',title:'Fidelity & evaluation',
+      description:'Run repeatable sandbox probes for voice, personality consistency, agency, world grounding and local-model latency. No story state is modified.',
+      actions:[['Open Fidelity Lab',()=>{
+        if(!character)return;
+        builderCharacterId=character.id;builderTab='lab';openBuilder(character);
+        builderTab='lab';renderBuilder();
+      },true]]}));
+    grid.append(workspaceCard({index:'03 · VISUAL WORKFLOWS',title:'Portraits & imagery',
+      description:'Work with local ComfyUI workflows, character portraits, and generated visual assets independently of story canon.',
+      actions:[['Open visuals',()=>openDetailDesk('gallery'),true]]}));
+    grid.append(workspaceCard({index:'04 · DATA OWNERSHIP',title:'Library & backups',
+      description:'Keep your fiction portable. Export local backups and manage archived scenes without connecting to a cloud story account.',
+      actions:[['Open library',()=>openDetailDesk('library'),true],
+        ['Export backup',()=>$('export-data').click()]]}));
+  }
+  host.append(grid);
+  if(mode==='world' || mode==='memory')host.append(el('p',
+    'World canon, timeline state, actor memories, and unreviewed drafts are distinct. No AI suggestion changes an established world without your approval.',
+    'workspace-note'));
+}
+function render() { applyTheme(); renderLists(); renderHeader(); renderMessages(); renderInspector(); renderReadingMode(); renderWorkspace(); }
+
 function renderReadingMode() {
   document.body.classList.toggle('reading-mode', Boolean(state.settings.readingMode));
   $('reading-toggle').textContent = state.settings.readingMode ? '◫ Chat view' : '◫ Story view';
@@ -1125,9 +1428,26 @@ function renderCharacterPlaces(host,c) {
   section.append(el('p',`Current timeline whereabouts: ${name || 'Not established'}. Updated through timeline/world events, not from routine preferences.`,'help'));
   host.append(section);
 }
+function updateBuilderContext(character){
+  const filled=CHARACTER_V2_FIELDS.filter(k=>String(character?.[k]||'').trim()).length;
+  const total=CHARACTER_V2_FIELDS.length,percent=Math.round(filled/total*100);
+  $('builder-progress-label').textContent=`${filled} of ${total} character fields established · ${percent}%`;
+  $('builder-progress-track').setAttribute('aria-valuenow',String(percent));
+  $('builder-progress-fill').style.width=percent+'%';
+  const world=worldLibrary?.worlds?.find(w=>w.id===activeWorldId);
+  const places=worldLibrary?.locations?.filter(l=>l.worldId===activeWorldId)||[];
+  const links=[character.homeLocationId,character.workLocationId,...(character.frequentPlaces||[]).map(x=>x.locationId)]
+    .filter(Boolean).map(id=>places.find(p=>p.id===id)?.name).filter(Boolean);
+  const direct=(worldLibrary?.entities||[]).filter(e=>e.worldId===activeWorldId&&e.sourceCharacterId===character.id);
+  const knownRelations=(worldLibrary?.relationships||[]).filter(edge=>edge.worldId===activeWorldId&&
+    direct.some(e=>edge.fromId===e.id||edge.toId===e.id));
+  $('builder-world-context').textContent=`WORLD CONTEXT · ${world?.name||'Current world'}\n${places.length} available places · ${knownRelations.length} established links${links.length?' · Connected places: '+links.slice(0,3).join(', '):''}. Generated fields must fit this world and the existing profile.`;
+}
+
 function renderBuilder() {
   const c = builderCharacter(); if (!c) return;
   $('builder-title').textContent = `Creating ${c.name}`;
+  updateBuilderContext(c);
   renderBuilderPortrait();
   document.querySelectorAll('[data-builder-tab]').forEach(b => {
     b.classList.toggle('active', b.dataset.builderTab === builderTab);
@@ -1149,6 +1469,7 @@ function renderBuilder() {
         : type === 'greetings' ? input.value.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean).slice(0,12)
         : input.value;
       save();
+      updateBuilderContext(c);
       if (key === 'name') $('builder-title').textContent = `Creating ${c.name}`;
       if (key === 'color') atmosphere(c.color);
       if (key === 'name' || key === 'color') renderLists();
@@ -1902,12 +2223,43 @@ $('regenerate').onclick=()=>generate('retry');
 $('continue').onclick=()=>{if (!running && activeSession()?.messages.length) generate('continue');};
 $('open-builder').onclick=()=>{if(!running)openBuilder(activeCharacter());};
 $('reading-toggle').onclick=()=>{state.settings.readingMode=!state.settings.readingMode;save();renderReadingMode();};
-$('open-inspector').onclick=()=>{$('inspector').classList.toggle('inspector-open');};
+$('open-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
+$('open-workspace-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
+$('open-command').onclick=openStudioCommands;
+$('command-close').onclick=()=>$('command-palette').close();
+$('command-search').oninput=renderStudioCommands;
+$('command-search').onkeydown=event=>{
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    event.preventDefault();moveStudioCommand(event.key==='ArrowDown'?1:-1);
+  }else if(event.key==='Enter'){
+    event.preventDefault();performStudioCommand(commandResults[commandIndex]);
+  }
+};
+$('command-palette').onclick=event=>{if(event.target===$('command-palette'))$('command-palette').close();};
+document.addEventListener('keydown',event=>{
+  if((event.ctrlKey||event.metaKey)&&event.key.toLocaleLowerCase()==='k'){
+    if(document.querySelector('dialog[open]')&&!$('command-palette').open)return;
+    event.preventDefault();
+    if($('command-palette').open)$('command-palette').close();
+    else openStudioCommands();
+  }
+});
+
+$('expand-inspector').onclick=()=>{
+  const focus=!document.body.classList.contains('detail-focus');
+  document.body.classList.toggle('detail-focus',focus);
+  setDetailDeskOpen(focus||window.matchMedia('(max-width:1100px)').matches);
+};
+$('close-inspector').onclick=()=>setDetailDeskOpen(false);
+$('inspector-scrim').onclick=()=>setDetailDeskOpen(false);
 $('message-input').addEventListener('keydown',(ev)=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isComposing){ev.preventDefault();send();}});
 $('export-data').onclick=()=>download('ai-rp-studio-backup.json',JSON.stringify(state,null,2));
 $('import-data').onclick=()=>$('import-data-file').click();
 $('import-data-file').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const candidate=JSON.parse(await file.text());if(!candidate||!Array.isArray(candidate.characters)||!Array.isArray(candidate.sessions))throw new Error('Not a valid studio backup');if(!confirm('Replace your current local stories with this backup? Export first if needed.'))return;state=normalizeState(candidate);pendingReply=null;streamingReply=null;save();render();showError();}catch(err){showError(err.message);}e.target.value='';};
-document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>{currentTab=tab.dataset.tab;renderInspector();}));
+document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>openDetailDesk(tab.dataset.tab)));
+document.querySelectorAll('button[data-workspace]').forEach(tab=>tab.addEventListener('click',()=>setWorkspace(tab.dataset.workspace)));
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('inspector').classList.contains('inspector-open'))setDetailDeskOpen(false);});
+window.addEventListener('resize',()=>{if(window.innerWidth>1100)setDetailDeskOpen(false);});
 setupBuilderAI();
 const quickTheme = $('quick-theme');
 for (const theme of THEMES) quickTheme.add(new Option(theme.name, theme.id));
@@ -1916,6 +2268,7 @@ window.addEventListener('beforeunload',()=>{controller?.abort();atmosphere('stop
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden' && pendingSnapshot) flushState();});
 bootstrapStorage();
 
-$('world-home').onclick=()=>{currentTab='worlds';renderInspector();renderWorldLauncher();$('world-launcher').showModal();};
+$('world-home').onclick=()=>{setWorkspace('world');renderWorldLauncher();$('world-launcher').showModal();};
 $('world-launcher-close').onclick=()=>{sessionStorage.setItem('ai-rp-world-opened','1');$('world-launcher').close();};
-$('world-launcher-create').onclick=()=>{ $('world-launcher').close();currentTab='worlds';renderInspector();$('world-new-name')?.focus(); };
+$('world-filter').addEventListener('input',renderWorldLauncher);
+$('world-launcher-create').onclick=()=>{ $('world-launcher').close();setWorkspace('world');openDetailDesk('worlds');$('world-new-name')?.focus(); };
