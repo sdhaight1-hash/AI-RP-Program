@@ -486,7 +486,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       return json(res, 404, { error: 'Not found' });
     } catch (err) {
       if (!res.headersSent && /Open that world before editing it/.test(err.message)) return json(res, 409, { error: 'Another tab opened a different world. Reload this world before continuing.' });
-      if (!res.headersSent) json(res, err.message === 'Invalid JSON' || err.message === 'Request too large' || err instanceof RangeError ? 400 : 500, { error: err.message });
+      if (!res.headersSent) json(res, err.message === 'World not found' ? 404 : err.message === 'Invalid JSON' || err.message === 'Request too large' || err instanceof RangeError ? 400 : 500, { error: err.message });
       else res.destroy(err);
     }
   });
