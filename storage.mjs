@@ -10,6 +10,7 @@ import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } fro
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
 import { initializeFactSchema } from './memory/facts.mjs';
+import { projectionEnabled,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
 
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
@@ -99,6 +100,10 @@ export class StudioStore {
     const updatedAt = Date.now();
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      // A previously opted-in normalized shadow may never silently diverge
+      // from the canonical snapshot. Validate before changing either copy.
+      const projectionActive=projectionEnabled(this.db);
+      if(projectionActive)verifyStoryProjection(this.db,this.load());
       // Accepted world events depend on their precise source response. Never
       // overwrite its wording, speaker, channel or witnesses via Retry/swipes.
       const accepted=this.db.prepare(`SELECT p.scene_id AS sceneId,p.timeline_id AS timelineId,
@@ -167,6 +172,10 @@ export class StudioStore {
       this.db.prepare('UPDATE studio_state SET document = ? WHERE id = 1').run(JSON.stringify(validated));
       this.rebuildLoreIndex(validated.lore);
       syncConversationMemories(this.db,validated);
+      if(projectionActive) {
+        writeStoryProjection(this.db,validated,expectedRevision+1);
+        verifyStoryProjection(this.db,{revision:expectedRevision+1,state:validated});
+      }
       // World-specific derived records must commit or roll back with the same
       // story revision, not in a second fallible transaction afterward.
       if (beforeCommit) beforeCommit(validated);
