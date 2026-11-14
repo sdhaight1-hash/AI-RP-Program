@@ -28,7 +28,8 @@ test('normalized shadow is opt-in, parity-verified, and follows edits/reorders/d
     assert.equal(projectionEnabled(store.db),false);
     assert.equal(stage(store).status,'matched');
     let snapshot=store.load();
-    assert.deepEqual(readStoryProjection(store.db).state,snapshot.state);
+    assert.deepEqual(readStoryProjection(store.db).state,JSON.parse(JSON.stringify(snapshot.state)));
+    // JSON persistence discards undefined legacy fields; their absence is not data loss.
     const first=snapshot.state.sessions[0];
     const old=first.messages[0];
     first.messages.push({
