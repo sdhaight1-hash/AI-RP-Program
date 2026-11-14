@@ -211,8 +211,8 @@ test('unchanged primary message rows skip update triggers without weakening edit
     store.save(makeInitialState(),0);
     staged(store);
     const existing=store.load();
-    store.db.exec(`CREATE TRIGGER forbid_redundant_projection_update
-      BEFORE UPDATE ON story_projection_messages
+    store.db.exec(`CREATE TRIGGER forbid_redundant_projection_write
+      BEFORE INSERT ON story_projection_messages
       BEGIN SELECT RAISE(ABORT,'unchanged message should not be rewritten'); END;`);
     const noOp=store.save(existing.state,existing.revision);
     assert.equal(noOp.revision,existing.revision+1);
