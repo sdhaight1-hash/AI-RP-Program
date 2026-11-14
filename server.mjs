@@ -13,6 +13,7 @@ import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mj
 import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 import { purgeArchived } from './harness.mjs';
+import {assertExplicitPurges,DeletionConflictError} from './world/conflict-guards.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
 import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
@@ -289,7 +290,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try{
           purgeArchived(next,input.kind,input.id);
           const saved=store.save(next,input.revision,{
-            worldId:input.worldId,purgedSceneId:input.kind==='scene'?input.id:null
+            worldId:input.worldId,
+            purgedSceneId:input.kind==='scene'?input.id:null,
+            purgedCharacterId:input.kind==='character'?input.id:null
           });
           if(!saved)return json(res,409,{error:'Story changed before permanent deletion'});
           return json(res,200,{...saved,worldId:input.worldId,state:store.load().state});
@@ -313,9 +316,18 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           return json(res, 400, { error: 'Invalid story document or revision' });
         }
         try {
+          // Even the legacy single-file backend must not allow a normal PUT
+          // to bypass explicit archival/dependency checks. Partitioned stores
+          // revalidate under their SQLite write lock as well.
+          if(typeof baseStore.forWorld!=='function'){
+            const before=store.load();
+            if(before.revision===payload.revision)
+              assertExplicitPurges(before.state,payload.state);
+          }
           const result = store.save(payload.state, payload.revision, { worldId: payload.worldId });
           return result ? json(res, 200, result) : json(res, 409, { error: 'Story was changed in another tab; export local changes before reloading.' });
         } catch(err) {
+          if(err instanceof DeletionConflictError)return json(res,409,{error:err.message});
           if (/World changed;/.test(err.message)) return json(res,409,{error:err.message});
           if (/belongs to another world|not a location in this world|not in this world/.test(err.message))return json(res,422,{error:err.message});
           throw err;
