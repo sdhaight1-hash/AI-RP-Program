@@ -97,7 +97,7 @@ export function duplicateSession(state, sessionId) {
   if (!source || source.trashedAt) throw new Error('Scene not available');
   const copy = structuredClone(source);
   copy.id = id(); copy.title = `${source.title} (branch)`; copy.updatedAt = Date.now();
-  copy.messages = copy.messages.map(m => ({ ...m, id: id() }));
+  copy.messages = copy.messages.map(m => ({ ...m, id: id(), originMessageId: m.id }));
   copy.sceneEvents = (copy.sceneEvents || []).map(e => ({ ...e, id: id(), sourceMessageId: null }));
   copy.trashedAt = null; copy.parentSceneId = source.id;
   state.sessions.unshift(copy); state.activeSessionId = copy.id;

@@ -96,6 +96,11 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try { return json(res,201,store.worlds.createTimeline(data)); }
         catch(err) { return json(res,400,{error:err.message}); }
       }
+      if (req.method === 'POST' && path === '/api/timelines/fork') {
+        const input=await readJson(req,3000);
+        try{return json(res,201,store.worlds.forkTimeline(input));}
+        catch(err){return json(res,400,{error:err.message});}
+      }
       if (req.method === 'POST' && path === '/api/worlds/locations') {
         const data=await readJson(req,6000);
         try {return json(res,201,store.worlds.createLocation(data));}

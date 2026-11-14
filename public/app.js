@@ -216,7 +216,19 @@ function renderLists() {
     button.addEventListener('click', () => { if (running) return; state.activeSessionId = s.id; save(); render(); });
     const actions=el('div','','row-actions');
     const rename=el('button','✎','mini-action');rename.title='Rename scene';rename.onclick=()=>{if(running)return;const value=prompt('Scene name',s.title);if(value?.trim()){s.title=value.trim().slice(0,150);save();renderLists();renderHeader();}};
-    const branch=el('button','⎇','mini-action');branch.title='Branch this story';branch.onclick=()=>{if(running)return;duplicateSession(state,s.id);save();render();};
+    const branch=el('button','⎇','mini-action');branch.title='Fork scene into an independent world timeline';
+    branch.onclick=async()=>{
+      if(running)return;
+      branch.disabled=true;
+      try{
+        await requireSavedStory();
+        if(!s.timelineId)throw Error('This scene has no saved timeline yet.');
+        const timeline=await postWorld('/api/timelines/fork',{timelineId:s.timelineId,name:`${s.title} (alternate)`});
+        const copy=duplicateSession(state,s.id);
+        copy.timelineId=timeline.id;
+        save();render();showError();
+      }catch(err){showError(err.message);branch.disabled=false;}
+    };
     const archive=el('button','×','mini-action');archive.title='Move scene to Trash';archive.onclick=()=>{if(running||!confirm(`Move “${s.title}” to Trash? You can restore it from Library.`))return;archiveSession(state,s.id);save();render();};
     actions.append(rename,branch,archive);
     const row=el('div','','session-row');row.append(button,actions);sessions.append(row);
@@ -280,7 +292,7 @@ function renderMessages() {
           const response=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`);
           const data=await response.json();if(!response.ok)throw Error(data.error);
           if(data.proposals?.some(p=>p.sourceMessageId===m.id && p.status==='accepted'))
-            return showError('This reply is locked by an accepted world event. Keep its canon or create a new independent timeline.');
+            return showError('This reply is locked by an accepted world event. To change it, start a fresh timeline from canon without this event.');
           if(activeSession()?.id!==session.id||session.messages.at(-1)!==m)return;
           const current = Number.isInteger(m.variantIndex) ? m.variantIndex : m.variants.length - 1;
           m.variantIndex = (current + step + m.variants.length) % m.variants.length;
@@ -981,7 +993,7 @@ async function generate(mode = 'normal') {
       const check=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`);
       const result=await check.json();if(!check.ok)throw Error(result.error);
       if(result.proposals?.some(p=>p.sourceMessageId===previous.id && p.status==='accepted'))
-        return showError('Retry is locked by a committed world event. Use a new independent timeline for an alternative story.');
+        return showError('Retry is locked by a committed world event. Start a fresh timeline from canon without this event for an alternative history.');
     }catch(err){showError(err.message);return;}
   }
   const actorId = retry ? (previous.speakerId || session.characterId) : character.id;
