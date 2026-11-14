@@ -13,8 +13,15 @@ const fingerprint = value => {
   for(let i=0;i<text.length;i++)hash=Math.imul(hash ^ text.charCodeAt(i),16777619);
   return (hash>>>0).toString(16);
 };
-export const characterDraftVersion = character => fingerprint(
-  Object.fromEntries(CHARACTER_V2_FIELDS.map(k=>[k,character?.[k]||''])));
+export const characterDraftVersion = character => fingerprint({
+  fields:Object.fromEntries(CHARACTER_V2_FIELDS.map(k=>[k,character?.[k]||''])),
+  // Place links influence the AI's grounded suggestions as much as prose does.
+  // Changing one while a draft streams must invalidate that draft.
+  worldId:character?.worldId||null,
+  homeLocationId:character?.homeLocationId||null,
+  workLocationId:character?.workLocationId||null,
+  frequentPlaces:character?.frequentPlaces||[],
+});
 export const worldDraftVersion = library => fingerprint({id:library?.activeWorldId,
   worlds:library?.worlds,locations:library?.locations,entities:library?.entities,relationships:library?.relationships});
 

@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v2.0.0 (world isolation + character creation redesign).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v2.0.1 (world isolation + character creation redesign).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -43,6 +43,10 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v2.0.1: Repository audit and hardening
+
+Fixes a broken browser module route, atomic world/character saves, lore visibility ranking, cross-world identity and media boundaries, consistent SQLite backups, stale-tab handling and UTF-8 parsing. It also reduces repeated database work. See the [code audit and remaining-risk register](docs/code-audit-v2.0.1.md). **Back up `.data/` before upgrading.**
 
 ## v2.0: World-first workspaces and Character Studio 2.0
 

@@ -12,19 +12,26 @@ import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/e
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
     this.scopeWorldId = scopeWorldId;
-    if (filename !== ':memory:') {
-      mkdirSync(dirname(filename), { recursive: true });
-      // Keep one pre-upgrade backup of the original single-document database.
-      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v1.bak`))
-        copyFileSync(filename, `${filename}.before-world-v1.bak`);
-      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v2.bak`))
-        copyFileSync(filename, `${filename}.before-world-v2.bak`);
-      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v3.bak`))
-        copyFileSync(filename, `${filename}.before-world-v3.bak`);
-      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v4.bak`))
-        copyFileSync(filename, `${filename}.before-world-v4.bak`);
-    }
+    const existingFile = filename !== ':memory:' && existsSync(filename);
+    if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true });
     this.db = new DatabaseSync(filename);
+    if (!this.scopeWorldId && existingFile) {
+      // VACUUM INTO captures a consistent SQLite snapshot, including WAL data.
+      // A raw file copy is not safe while another connection has pending WAL pages.
+      // Keep historical backup filenames for existing migration/recovery tools.
+      const missing = [1, 2, 3, 4]
+        .map(version => `${filename}.before-world-v${version}.bak`)
+        .filter(path => !existsSync(path));
+      if (missing.length) {
+        try {
+          this.db.exec(`VACUUM INTO '${missing[0].replaceAll("'", "''")}'`);
+          for (const path of missing.slice(1)) copyFileSync(missing[0], path);
+        } catch (err) {
+          this.db.close();
+          throw err;
+        }
+      }
+    }
     this.db.exec(`CREATE TABLE IF NOT EXISTS studio_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       revision INTEGER NOT NULL,
@@ -62,15 +69,20 @@ export class StudioStore {
     if (!tokens.length) return [];
     const expression = tokens.map(x => `"${x.replaceAll('"','')}"`).join(' OR ');
     // Retrieval uses FTS candidates; access-control is checked against canonical lore.
-    const candidates = this.db.prepare('SELECT id, bm25(lore_fts) AS rank FROM lore_fts WHERE lore_fts MATCH ? ORDER BY rank LIMIT 100').all(expression);
     const { state } = this.load();
-    const source = new Map((state?.lore || []).map(x => [x.id,x]));
-    return candidates.map(hit => source.get(hit.id))
-      .filter(entry => entry && canKnowLore(entry, actorId, sessionId))
-      .slice(0, Math.min(20,Math.max(1,Math.round(limit))));
+    const visible = (state?.lore || []).filter(entry => canKnowLore(entry, actorId, sessionId));
+    if (!visible.length) return [];
+    // Restrict candidates BEFORE FTS ranking/limiting: otherwise many private
+    // high-ranked hits can starve the few public/actor-visible results.
+    const allowed = new Map(visible.map(entry => [entry.id, entry]));
+    const count = Math.min(20, Math.max(1, Math.round(Number(limit) || 6)));
+    const candidates = this.db.prepare(`SELECT id FROM lore_fts
+      WHERE lore_fts MATCH ? AND id IN (SELECT value FROM json_each(?))
+      ORDER BY bm25(lore_fts) LIMIT ?`).all(expression, JSON.stringify([...allowed.keys()]), count);
+    return candidates.map(hit => allowed.get(hit.id)).filter(Boolean);
   }
 
-  save(state, expectedRevision) {
+  save(state, expectedRevision, { beforeCommit } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new TypeError('Invalid revision');
     const validated = bindTimelineIds(normalizeState(state));
     const payload = JSON.stringify(validated);
@@ -85,6 +97,18 @@ export class StudioStore {
         FROM event_proposals p JOIN timeline_events e ON e.proposal_id=p.id
         WHERE p.status='accepted'`).all();
       const scenes=new Map(validated.sessions.map(s=>[s.id,s]));
+      const acceptedByScene=new Map();
+      for(const lock of accepted) {
+        if(!acceptedByScene.has(lock.sceneId))acceptedByScene.set(lock.sceneId,[]);
+        acceptedByScene.get(lock.sceneId).push(lock);
+      }
+      // A descendant that still points at its source must retain that source.
+      // Otherwise deleting the parent would silently defeat inherited event locks.
+      for (const scene of validated.sessions) {
+        if (scene.parentSceneId && !scenes.has(scene.parentSceneId) &&
+            scene.messages.some(m => m.originMessageId))
+          throw new Error('A branch still depends on its original scene history. Restore or retain its parent before saving.');
+      }
       for(const lock of accepted){
         const scene=scenes.get(lock.sceneId);
         if(!scene)continue; // Library purge may delete a source scene, but not its event ledger.
@@ -107,7 +131,7 @@ export class StudioStore {
         }
         for(let depth=0;depth<ancestry.length;depth++){
           const {parent,fork}=ancestry[depth];
-          for(const lock of accepted.filter(x=>x.sceneId===parent.id && x.eventSeq<=fork.cutoff)){
+          for(const lock of (acceptedByScene.get(parent.id)||[]).filter(x=>x.eventSeq<=fork.cutoff)){
             const descendant=scene.messages.find(msg=>{
               let origin=msg;
               for(let i=0;i<=depth;i++){
@@ -133,6 +157,9 @@ export class StudioStore {
       // synchronizeSceneTimelines may add metadata, so update the same revision document.
       this.db.prepare('UPDATE studio_state SET document = ? WHERE id = 1').run(JSON.stringify(validated));
       this.rebuildLoreIndex(validated.lore);
+      // World-specific derived records must commit or roll back with the same
+      // story revision, not in a second fallible transaction afterward.
+      if (beforeCommit) beforeCommit(validated);
       this.db.exec('COMMIT');
       return { revision: expectedRevision + 1, updatedAt };
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
