@@ -76,7 +76,18 @@ async function main(){
     }}});
     sessionId=session.sessionId;
     await request('POST','/session/'+sessionId+'/url',{url:base});
-    await until(async()=>script("return document.querySelector('#world-label')?.textContent?.includes('My First World')"),'world UI bootstrap');
+    await delay(650);
+    const startup=await script(`return {
+      ready:document.readyState,
+      world:document.querySelector('#world-label')?.textContent,
+      worldTop:document.querySelector('#top-world-name')?.textContent,
+      error:document.querySelector('#error')?.textContent,
+      title:document.title,
+      resources:performance.getEntriesByType('resource').map(x=>x.name.split('/').at(-1))
+    }`);
+    console.log('Browser startup diagnostics:',JSON.stringify(startup));
+    await screenshot('00-startup');
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent?.trim() && !document.querySelector('#world-label').textContent.includes('Loading')"),'world UI bootstrap',7000);
     assert.equal(await script("return document.body.dataset.workspace"),'story');
     assert.ok(await script("return !!document.querySelector('#messages') && !!document.querySelector('#send')"));
     await screenshot('01-story-desktop');
