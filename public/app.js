@@ -48,6 +48,7 @@ const builderCharacter = () => state.characters.find(c => c.id === builderCharac
 const builderLabel = key => Object.values(BUILDER_SECTIONS).flat().find(row => row[0] === key)?.[1] || key;
 
 let running = false;
+let sending = false; // In-flight player append prevents world/scene switches.
 let controller = null;
 let streamingReply = null; // Never saved: a provisional model response.
 let pendingReply = null; // Held for explicit review if it violates channel/agency expectations.
@@ -205,7 +206,7 @@ async function bootstrapStorage() {
 const showError = (message = '') => { $('error').textContent = message; $('error').classList.toggle('hidden', !message); };
 
 function startSession(char = activeCharacter(), encounter = null) {
-  if (!char) return;
+  if (!char || sending) return;
   const session = createSession(char,encounter);
   if(encounter?.locationId)session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
   state.sessions.unshift(session);
@@ -216,7 +217,7 @@ function startSession(char = activeCharacter(), encounter = null) {
 }
 
 function openNewSceneDialog() {
-  if(running)return;
+  if(running||sending)return;
   const actors=state.characters.filter(c=>!c.trashedAt);
   if(!actors.length)return showError('Create a character inside this world first.');
   const chosen=$('new-scene-character');chosen.replaceChildren();
@@ -400,7 +401,7 @@ async function refreshWorldLibrary() {
 async function switchWorld(worldId) {
   if (worldId === activeWorldId) { $('world-launcher')?.close();return; }
   if(switchingWorld)throw new Error('Another world switch is already in progress.');
-  if (running || aiDraftController || fidelityController || localEvalController || worldEntryController) throw new Error('Finish or cancel generation before switching worlds.');
+  if (running || sending || aiDraftController || fidelityController || localEvalController || worldEntryController) throw new Error('Finish or cancel the current turn before switching worlds.');
   if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
   if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
   switchingWorld=true;
@@ -2152,9 +2153,9 @@ $('new-scene-confirm').onclick=()=>{
   if(!char)return showError('Choose a character.');
   $('new-scene-dialog').close();startSession(char,encounter||null);
 };
-$('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
+$('new-character').onclick=()=>{if(running||sending)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
 $('channel-select').onchange=()=>{
-  const s=activeSession();if(!s||running||pendingReply?.sessionId===s.id){renderHeader();if(pendingReply?.sessionId===s?.id)showError('Resolve the pending draft before changing channels.');return;}
+  const s=activeSession();if(!s||running||sending||pendingReply?.sessionId===s.id){renderHeader();if(pendingReply?.sessionId===s?.id)showError('Resolve the pending draft before changing channels.');return;}
   const next=getChannel($('channel-select').value).id;
   s.channelId=next;
   if(next!=='in_person'){const actor=sceneActor(s);if(actor){s.speakerId=actor.id;s.speakerMode='manual';}}
