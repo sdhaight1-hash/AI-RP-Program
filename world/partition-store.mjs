@@ -94,6 +94,7 @@ function pruneDatabase(db, worldId, state, priorRevision) {
 export class WorldPartitionStore {
   constructor(dataDir = join(process.cwd(), '.data')) {
     this.dataDir = dataDir;
+    this.scopedStores = new Map();
     mkdirSync(join(dataDir,'worlds'),{recursive:true});
     this.registry = new DatabaseSync(join(dataDir,'registry.sqlite'));
     this.registry.exec(`CREATE TABLE IF NOT EXISTS world_catalog (
@@ -105,9 +106,12 @@ export class WorldPartitionStore {
     }
     const selected = this.registry.prepare("SELECT value FROM registry_settings WHERE key='active_world'").get()?.value;
     this.activateWorld(catalogRows(this.registry).some(w=>w.id===selected) ? selected : catalogRows(this.registry)[0].id);
-    // Compatibility with the existing HTTP world API; only the active world
-    // exposes details such as people, locations, timelines and relationships.
-    this.worlds = {
+    // The default world remains available for legacy local clients.
+    this.worlds = this.makeWorldApi();
+  }
+
+  makeWorldApi() {
+    return {
       list: () => ({...this.current.worlds.list(),worlds:catalogRows(this.registry),activeWorldId:this.activeWorldId}),
       createWorld: input => this.createWorld(input),
       createTimeline: input => {this.assertWorld(input.worldId);return this.current.worlds.createTimeline(input);},
@@ -126,6 +130,24 @@ export class WorldPartitionStore {
       actorLocations: timelineId => this.current.worlds.actorLocations(timelineId),
       authorize: (...args) => this.current.worlds.authorize(...args),
     };
+  }
+
+  // Request-scoped store views bind all reads, writes and asynchronous work
+  // to an explicit world ID. Selecting a world in another tab cannot reroute
+  // an already-running request. Keep one connection per world for efficiency.
+  forWorld(worldId) {
+    if (!catalogRows(this.registry).some(world => world.id === worldId))
+      throw new Error('World not found');
+    let current=this.scopedStores.get(worldId);
+    if (!current) {
+      current=new StudioStore(this.worldFile(worldId),{scopeWorldId:worldId});
+      this.scopedStores.set(worldId,current);
+    }
+    const scope=Object.create(this);
+    scope.current=current;
+    scope.activeWorldId=worldId;
+    scope.worlds=scope.makeWorldApi();
+    return scope;
   }
 
   worldFile(id) {
@@ -286,5 +308,10 @@ export class WorldPartitionStore {
       }catch(error){this.registry.exec('ROLLBACK');throw error;}
     }finally{source.close();}
   }
-  close() {this.current?.close();this.registry.close();}
+  close() {
+    for(const store of this.scopedStores.values())store.close();
+    this.scopedStores.clear();
+    this.current?.close();
+    this.registry.close();
+  }
 }
