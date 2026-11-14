@@ -274,6 +274,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             maxOutput:responseTokens});
           prompt=await enforceTokenBudget(prompt,backend);
         } catch(error) {return json(res,422,{error:error.message});}
+        // Exact token counting may await the local backend. Reject a world
+        // switch that occurs during that await before disclosing any prompt.
+        requireWorldScope(data.worldId);
         if (path === '/api/actor/context') return json(res,200,prompt);
         if (typeof data.model !== 'string' || !data.model || data.model.length>250 ||
             !Number.isFinite(data.temperature) || data.temperature<0 || data.temperature>2)
