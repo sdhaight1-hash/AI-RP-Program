@@ -225,6 +225,43 @@ async function main(){
     await request('POST','/session/'+sessionId+'/refresh',{});
     await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'world after character save reload');
 
+
+    // The relationship codex must delete a real SQLite entry, not just hide a
+    // client card or leave an orphaned world entity after refresh.
+    const disposableName='Browser Deletion Regression Entity';
+    await script(`
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-tab="relations"]').click();
+      document.querySelector('#relations-entity-name').value=${JSON.stringify(disposableName)};
+      document.querySelector('#relations-entity-kind').value='object';
+      document.querySelector('#relations-add-entity').click();
+      return true;
+    `);
+    await until(async()=>{
+      const response=await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld));
+      const catalog=await response.json();
+      return catalog.entities.some(x=>x.name===disposableName);
+    },'browser world entity created');
+    await screenshot('06e-world-entity-before-deletion');
+    const deletedUi=await script(`
+      window.confirm=()=>true;
+      const card=[...document.querySelectorAll('#relations-list .lore-card')]
+        .find(row=>row.querySelector('strong')?.textContent===${JSON.stringify(disposableName)});
+      const button=card?.querySelector('button');
+      if(!button)return false;
+      button.click();
+      return true;
+    `);
+    assert.equal(deletedUi,true,'relationship codex must expose a permanent entity delete');
+    await until(async()=>{
+      const response=await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld));
+      const catalog=await response.json();
+      return !catalog.entities.some(x=>x.name===disposableName);
+    },'browser world entity was purged from SQLite');
+    await screenshot('06f-world-entity-after-deletion');
+    assert.equal((await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(parallel.id))).json())
+      .entities.some(x=>x.name===disposableName),false);
+
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
       await delay(130);
@@ -257,7 +294,7 @@ async function main(){
         await script("document.querySelector('#close-inspector').click();return true");
       }
     }
-    console.log('Browser UI smoke: parallel world tabs, persisted character editing, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
+    console.log('Browser UI smoke: parallel world tabs, persisted character editing, durable canon deletion, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');
