@@ -34,7 +34,9 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const worldTime=clock ? new Date(clock.instantMs).toISOString()+' ('+clock.timeZone+')' : scene.worldTime;
   const entity=worldLibrary.entities?.find(e=>e.sourceCharacterId===actorId);
   const relevantCast=new Set([actorId,...(scene.castIds||[])]);
-  const socialTies=entity ? (worldLibrary.relationships||[]).filter(r=>r.fromId===entity.id||r.toId===entity.id)
+  // Only the actor's authored outgoing ties may be treated as their own
+  // social knowledge. Incoming ties can encode another NPC's private feelings.
+  const socialTies=entity ? (worldLibrary.relationships||[]).filter(r=>r.fromId===entity.id)
     .map(r=>{
       const other=worldLibrary.entities?.find(e=>e.id===(r.fromId===entity.id?r.toId:r.fromId));
       if(!other || (other.sourceCharacterId && !relevantCast.has(other.sourceCharacterId)))return null;
