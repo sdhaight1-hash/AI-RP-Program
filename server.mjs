@@ -26,6 +26,7 @@ const ALLOWED = new Map([
   ['/character/context.mjs', ['../character/context.mjs', 'text/javascript; charset=utf-8']],
   ['/character/schema.mjs', ['../character/schema.mjs', 'text/javascript; charset=utf-8']],
   ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
+  ['/character/field-contracts.mjs', ['../character/field-contracts.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/reply-review.mjs', ['../interactions/reply-review.mjs', 'text/javascript; charset=utf-8']],
 ]);
