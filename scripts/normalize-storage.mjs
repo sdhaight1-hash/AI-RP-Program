@@ -17,8 +17,14 @@ import { sha256 } from './backup-storage.mjs';
 function snapshot(db) {
   const row=db.prepare('SELECT revision,document FROM studio_state WHERE id=1').get();
   if(!row)throw new Error('Story snapshot not found');
-  return {revision:row.revision,state:bindTimelineIds(normalizeState(JSON.parse(row.document))),
-    document:row.document};
+  const normalize=()=>bindTimelineIds(normalizeState(JSON.parse(row.document)));
+  const state=normalize();
+  // Some very old exports omit message IDs or emotion-event IDs. Their
+  // normalization generates random IDs each load; never project one arbitrary
+  // interpretation and then block every future save on a fingerprint mismatch.
+  if(JSON.stringify(state)!==JSON.stringify(normalize()))
+    throw Error('Legacy snapshot produces unstable IDs when loaded; save it once through the current application before staging the projection');
+  return {revision:row.revision,state,document:row.document};
 }
 function open(file,readonly=true){return new DatabaseSync(file,{readOnly:readonly});}
 function matchingBackup(dataDir,backupDir,health){
