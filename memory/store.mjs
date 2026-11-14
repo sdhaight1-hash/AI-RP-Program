@@ -65,15 +65,18 @@ export function snapshotMemoriesForFork(db, parentTimelineId, childTimelineId) {
 export function retrieveActorMemories(db,{timelineId,actorId,query='',excludeMessageIds=[],limit=6}) {
   if (!timelineId || !actorId || !db.prepare('SELECT 1 FROM timeline_actors WHERE timeline_id=? AND actor_id=?').get(timelineId,actorId))
     throw new Error('Actor is not in this timeline');
-  const words = [...new Set((String(query).match(/[\p{L}\p{N}]{2,32}/gu)||[]).map(x=>x.toLocaleLowerCase()))].slice(0,12);
+  const stop = new Set(['the','and','for','are','was','were','that','this','with','from','have','has','had','what','when','where','would','about','there','your','you','they','them','then','can','did','does','will','could','should','into','our','her','his','she','him','not','but','just','here','how','why','which','who','said']);
+  const words = [...new Set((String(query).match(/[\p{L}\p{N}]{3,32}/gu)||[]).map(x=>x.toLocaleLowerCase()).filter(x=>!stop.has(x)))].slice(-12);
   const match = words.map(w=>'"'+w.replaceAll('"','')+'"').join(' OR ');
   const rows = match ? db.prepare("SELECT m.*,bm25(actor_memories_fts) AS lexical FROM actor_memories_fts JOIN actor_memories m ON m.rowid=actor_memories_fts.rowid WHERE actor_memories_fts MATCH ? AND m.timeline_id=? AND m.actor_id=? ORDER BY lexical LIMIT 50").all(match,timelineId,actorId) : [];
   const recent = db.prepare("SELECT *,0 AS lexical FROM actor_memories WHERE timeline_id=? AND actor_id=? ORDER BY occurred_at DESC,rowid DESC LIMIT 12").all(timelineId,actorId);
   const excluded = new Set(excludeMessageIds);
   const matched = new Set(rows.map(x=>x.id));
-  const candidates = [...rows,...recent.filter(x=>!matched.has(x.id))];
+  // At most two uncued recent memories maintain continuity without filling
+  // small contexts with irrelevant autobiography.
+  const candidates = [...rows,...recent.filter(x=>!matched.has(x.id)).slice(0,rows.length?2:4)];
   const seen = new Set();
-  const lowerWords = words.filter(w=>!['that','this','with','from','have','what','when','where','would','about','there','your','were','then'].includes(w));
+  const lowerWords = words;
   const maxDate = Math.max(1,...candidates.map(x=>x.occurred_at));
   const ranked = candidates.filter(x=>!excluded.has(x.source_message_id)).map(x=>{
     const lower = x.text.toLocaleLowerCase();
