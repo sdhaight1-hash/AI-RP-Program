@@ -1496,7 +1496,10 @@ function renderBuilderPortrait() {
 function openBuilder(c) {
   if (!c) return;
   localEvalController?.abort();
-  selectedCharacterId=c.id;
+  if(selectedCharacterId!==c.id){
+    selectedCharacterId=c.id;
+    if(activeWorkspace==='characters')renderWorkspace();
+  }
   builderCharacterId = c.id; builderTab = 'identity';
   $('builder-ai-preview').classList.add('hidden'); $('builder-ai-status').textContent = '';
   $('builder-ai-guidance').value = '';
@@ -2352,6 +2355,7 @@ $('new-character').onclick=()=>{
   if(running)return;
   const c=createCharacter('New character');
   state.characters.push(c);
+  selectedCharacterId=c.id;
   save();
   renderLists();
   setWorkspace('characters');
