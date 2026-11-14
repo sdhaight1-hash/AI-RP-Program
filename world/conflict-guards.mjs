@@ -16,10 +16,9 @@ export function assertExplicitPurges(previous,next,{
       throw new DeletionConflictError('There is no existing library record to purge');
     return;
   }
-  const removedCharacters=(previous.characters||[]).filter(c=>
-    !recordIds(next.characters).has(c.id));
-  const removedScenes=(previous.sessions||[]).filter(s=>
-    !recordIds(next.sessions).has(s.id));
+  const nextCharacters=recordIds(next.characters),nextScenes=recordIds(next.sessions);
+  const removedCharacters=(previous.characters||[]).filter(c=>!nextCharacters.has(c.id));
+  const removedScenes=(previous.sessions||[]).filter(s=>!nextScenes.has(s.id));
 
   if(removedCharacters.length!==Number(Boolean(purgedCharacterId)) ||
      removedScenes.length!==Number(Boolean(purgedSceneId)) ||
