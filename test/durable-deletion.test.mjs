@@ -9,6 +9,7 @@ import {archiveCharacter,archiveSession,purgeArchived} from '../harness.mjs';
 import {createApp} from '../server.mjs';
 import {inspectWorldStorage} from '../scripts/storage-health.mjs';
 import {addActorFact} from '../memory/facts.mjs';
+import {writeStoryProjection,enablePrimaryProjection,projectionPrimary} from '../storage/normalized.mjs';
 
 const fixture=()=>{
   const dir=mkdtempSync(join(tmpdir(),'rp-delete-'));
@@ -236,4 +237,68 @@ test('scoped world-entry HTTP deletion never reaches another world and blocks cr
     await new Promise(resolve=>app.close(resolve));
     rmSync(f.dir,{recursive:true,force:true});
   }
+});
+
+
+test('permanently deleting the originating actor removes its accepted events and all observers',()=>{
+  const f=fixture();
+  try{
+    const actor=createCharacter('Test NPC With Canon'),state=makeEmptyWorldState(),scene=createSession(actor);
+    scene.messages.push({id:'accepted-source',role:'assistant',speakerId:actor.id,
+      witnessIds:[actor.id],content:'I discovered the hidden clock in the ruins.'});
+    state.characters=[actor];state.sessions=[scene];state.activeSessionId=scene.id;
+    save(f.scoped,f.worldId,state);
+    const timelineId=f.scoped.load().state.sessions[0].timelineId;
+    const proposed=f.scoped.events.propose({sceneId:scene.id,timelineId,
+      sourceMessageId:'accepted-source',description:'The NPC discovered the hidden clock.'});
+    f.scoped.events.decide({proposalId:proposed.id,decision:'accept'});
+    assert.equal(count(f.scoped.db,'timeline_events','actor_id=?',[actor.id]),1);
+    const archived=f.scoped.load().state;
+    archiveSession(archived,scene.id);archiveCharacter(archived,actor.id);
+    save(f.scoped,f.worldId,archived);
+    const cleaned=f.scoped.load().state;
+    purgeArchived(cleaned,'scene',scene.id);
+    save(f.scoped,f.worldId,cleaned,{purgedSceneId:scene.id});
+    assert.equal(count(f.scoped.db,'timeline_events','actor_id=?',[actor.id]),1,
+      'explicitly accepted world canon survives deleting only the scene');
+    const purged=f.scoped.load().state;
+    purgeArchived(purged,'character',actor.id);
+    save(f.scoped,f.worldId,purged);
+    assert.equal(count(f.scoped.db,'timeline_events','actor_id=?',[actor.id]),0);
+    assert.equal(count(f.scoped.db,'event_proposals','actor_id=?',[actor.id]),0);
+    assert.equal(count(f.scoped.db,'timeline_event_observers','actor_id=?',[actor.id]),0);
+    assert.equal(count(f.scoped.db,'timeline_actors','actor_id=?',[actor.id]),0);
+    assert.equal(f.scoped.db.prepare('PRAGMA foreign_key_check').all().length,0);
+  }finally{f.close();}
+});
+
+test('character purge also removes normalized-primary rows and cannot reappear on reopen',()=>{
+  const f=fixture(),{dir,worldId}=f;
+  try{
+    const character=createCharacter('Primary Test Ghost'),state=makeEmptyWorldState();
+    state.characters=[character];save(f.scoped,worldId,state);
+    const current=f.scoped.load(),db=f.scoped.db;
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      writeStoryProjection(db,current.state,current.revision);
+      enablePrimaryProjection(db,current);
+      db.exec('COMMIT');
+    }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+    assert.equal(projectionPrimary(db),true);
+    const archived=f.scoped.load().state;archiveCharacter(archived,character.id);
+    save(f.scoped,worldId,archived);
+    const purged=f.scoped.load().state;purgeArchived(purged,'character',character.id);
+    save(f.scoped,worldId,purged);
+    assert.equal(count(db,'story_projection_characters','character_id=?',[character.id]),0);
+    assert.equal(count(db,'world_entities','source_character_id=?',[character.id]),0);
+    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0);
+    f.store.close();
+    const reopened=new WorldPartitionStore(dir);
+    try{
+      const fresh=reopened.forWorld(worldId);
+      assert.equal(projectionPrimary(fresh.db),true);
+      assert.equal(fresh.load().state.characters.length,0);
+      assert.equal(fresh.worlds.list().entities.some(x=>x.sourceCharacterId===character.id),false);
+    }finally{reopened.close();}
+  }finally{rmSync(dir,{recursive:true,force:true});}
 });
