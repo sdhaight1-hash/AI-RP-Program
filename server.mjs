@@ -270,7 +270,10 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         return json(res, 200, store.load());
       }
       if (req.method === 'PUT' && path === '/api/state') {
-        const payload = await readJson(req, 4_500_000);
+        // Opt-in normalized-primary worlds can carry larger histories in the
+        // existing full-document browser protocol. The store still enforces a
+        // stricter world-specific size limit after the payload is validated.
+        const payload = await readJson(req, 17_000_000);
         if (typeof baseStore.forWorld === 'function' || payload?.worldId !== undefined) requireWorldScope(payload?.worldId);
         if (!payload || !Number.isSafeInteger(payload.revision) || payload.revision < 0 ||
           !payload.state || !Array.isArray(payload.state.characters) || !Array.isArray(payload.state.sessions) ||
