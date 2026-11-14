@@ -188,6 +188,12 @@ async function main(){
     // configured medium for a new scene.
     assert.equal(await script(`
       document.querySelector('button[data-workspace="encounters"]').click();
+      document.querySelector('#encounter-save').click();
+      return !!document.querySelector('#error')?.textContent.includes('Enter a title') &&
+        getComputedStyle(document.querySelector('#error')).display!=='none';
+    `),true,'encounter validation errors must be visible outside the hidden story composer');
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="encounters"]').click();
       const title=document.querySelector('#encounter-title');
       title.value='Browser Social DM';
       document.querySelector('#encounter-channel').value='social_dm';
@@ -213,6 +219,14 @@ async function main(){
         document.querySelector('#channel-select').value==='social_dm';
     `),true,'starting the template must carry its social-media channel into the scene');
     await screenshot('06b-social-scene-started');
+    assert.equal(await script(`
+      document.querySelector('#continue').click();
+      return document.body.dataset.workspace==='tools' &&
+        document.querySelector('[data-tab="setup"]').classList.contains('active') &&
+        getComputedStyle(document.querySelector('#error')).display!=='none' &&
+        document.querySelector('#error').textContent.includes('Choose a loaded local model');
+    `),true,'an unconfigured model must navigate directly to visible Setup with global feedback');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
 
     // Real headless browser tabs each retain their own selected world.
     // This catches browser/sessionStorage regressions that HTTP-only tests miss.
