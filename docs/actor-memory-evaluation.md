@@ -44,7 +44,7 @@ All six negative checks passed after the fix.
 
 **Cause:** the context assembler packed up to 24 recent dialogue turns first, exhausting the 2,048-token input budget before retrieved memories could be admitted.
 
-**Change:** when evidence candidates exist, reserve up to 28% of the available prompt input budget, capped at 440 estimated tokens, while selecting *older* recent turns. The latest actual conversation turn is never displaced. Evidence selection then uses the remaining budget; the reserved space is not a mandatory filler allocation. The continuation-mode assembler also refuses to drop the only remaining real conversation turn.
+**Change:** when conversation cues match eligible evidence (personal recollections, reviewed facts, accepted events, authored details or permitted lore), reserve up to 28% of the available prompt input budget, capped at 440 estimated tokens, while selecting *older* recent turns. Uncued fallback memories do not automatically displace recent dialogue. The latest actual conversation turn is never displaced. Evidence selection then uses the remaining budget; the reserved space is not a mandatory filler allocation. The continuation-mode assembler also refuses to drop the only remaining real conversation turn.
 
 This is a deliberately small allocation-policy fix, not a replacement for lexical retrieval. Different character profiles, longer turns and real native tokenizer counts may produce different outcomes.
 
