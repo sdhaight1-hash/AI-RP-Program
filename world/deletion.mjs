@@ -126,8 +126,15 @@ export function deleteWorldRecord(store,{worldId,kind,id}) {
     if(!record)throw new Error('World entry not found');
     if(kind==='entity') {
       if(record.source_character_id &&
-        store.load().state?.characters?.some(x=>x.id===record.source_character_id))
-        throw new Error('This person is linked to a character profile. Archive and permanently delete that character first.');
+        store.load().state?.characters?.some(x=>x.id===record.source_character_id)) {
+        const copies=db.prepare(`SELECT count(*) AS n FROM world_entities
+          WHERE world_id=? AND source_character_id=?`)
+          .get(worldId,record.source_character_id).n;
+        if(copies<2)
+          throw new Error('This is the only world entity for a character profile. Archive and permanently delete the character first.');
+        // An old legacy duplicate can be removed explicitly, with its own
+        // relationship dependencies, while a valid mirror still remains.
+      }
       removeEntityRelations(db,worldId,id);
       db.prepare("DELETE FROM character_world_sources WHERE world_id=? AND entry_type='entity' AND entry_id=?").run(worldId,id);
     }
