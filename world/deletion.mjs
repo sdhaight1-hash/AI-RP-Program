@@ -20,16 +20,19 @@ export function reconcileCharacterRecords(db, state, worldId,{
     // Legacy builds sometimes deleted the world-person mirror and timeline
     // membership independently, leaving orphaned memories or accepted events.
     // Only do this historical sweep when opening a world, not on every save.
+    const reserved=db.prepare(`SELECT 1 FROM timeline_actors
+      WHERE actor_id=? AND controller IN ('player','system') LIMIT 1`);
+    // Actor-owned dialogue, facts and authored NPC events have a clear source
+    // identity. Locations and observed events alone do not: an otherwise
+    // unprofiled system actor is allowed to hold a position/observe an event.
     for(const table of ['actor_memories','actor_facts','event_proposals',
-      'timeline_events','timeline_positions']){
+      'timeline_events']){
       const rows=db.prepare(`SELECT DISTINCT actor_id AS id FROM ${table}
         WHERE timeline_id IN (SELECT id FROM timelines WHERE world_id=?)`).all(worldId);
-      for(const row of rows)if(!row.id.startsWith('player:'))known.add(row.id);
+      for(const row of rows){
+        if(!row.id.startsWith('player:')&&!reserved.get(row.id))known.add(row.id);
+      }
     }
-    const observed=db.prepare(`SELECT DISTINCT o.actor_id AS id
-      FROM timeline_event_observers o JOIN timeline_events e ON e.id=o.event_id
-      JOIN timelines t ON t.id=e.timeline_id WHERE t.world_id=?`).all(worldId);
-    for(const row of observed)if(!row.id.startsWith('player:'))known.add(row.id);
   }
   let deleted=0;
   for (const id of known) {
