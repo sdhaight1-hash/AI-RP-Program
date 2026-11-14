@@ -29,6 +29,7 @@ let worldLibrary = null;
 let worldLibraryRequest = 0;
 let switchingWorld = false;
 let selectedWorldId = null;
+let selectedCharacterId = null;
 let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
 // The selected world belongs to this browser tab. Every stateful request
 // carries its world ID, regardless of other tabs' selections.
@@ -84,6 +85,7 @@ const activeSession = () => state.sessions.find(s => s.id === state.activeSessio
 const activeCharacter = () => { const session = activeSession(); return state.characters.find(c => c.id === (session?.speakerId || session?.characterId) && !c.trashedAt) || state.characters.find(c => c.id === session?.characterId && !c.trashedAt) || state.characters.find(c => !c.trashedAt) || null; };
 const sceneActor = session => state.characters.find(c => c.id === chooseSpeaker(session,state.characters)) || null;
 const playable = () => state.characters.filter(c => !c.trashedAt);
+const workspaceCharacter = () => state.characters.find(c=>c.id===selectedCharacterId&&!c.trashedAt) || activeCharacter();
 // Keep the browser copy as an emergency backup; SQLite is the primary save.
 // Serialize writes to avoid stale-response races while the user types.
 const backupStateKey = () => activeWorldId ? `${STORAGE_KEY}:world:${activeWorldId}` : STORAGE_KEY;
@@ -298,7 +300,7 @@ function renderLists() {
     play.onclick = () => { if (!running) startSession(c); };
     button.append(badge, info);
     button.title = `Edit ${c.name}'s character profile`;
-    button.addEventListener('click', () => { if (running) return; setWorkspace('characters');openBuilder(c); });
+    button.addEventListener('click', () => { if (running) return; selectedCharacterId=c.id;setWorkspace('characters');openBuilder(c); });
     const archive=el('button','×','character-edit'); archive.type='button'; archive.title=`Move ${c.name} to Trash`;
     archive.onclick=()=>{if(running || !confirm(`Move ${c.name} to Trash? Existing dialogue will remain attributed. Restore the character from Library.`))return;archiveCharacter(state,c.id);save();render();};
     const row = el('div','','character-row'); row.append(button, play, archive);
@@ -435,7 +437,7 @@ async function switchWorld(worldId) {
   pendingReply=null;streamingReply=null;pendingSnapshot=null;
   comfyJob=null;comfyImages=[]; // Do not expose another world's generated assets after switching.
   $('message-input').value='';
-  aiDraftTarget=null;builderCharacterId=null;fidelityDraft=null;
+  aiDraftTarget=null;builderCharacterId=null;selectedCharacterId=null;fidelityDraft=null;
   $('character-builder')?.close();
   activeWorldId=result.worldId;
   selectedWorldId=result.worldId;
@@ -726,7 +728,7 @@ async function requestEventDraft(npcReply) {
 }
 
 function renderInspector() {
-  const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
+  const host = $('inspector-content'); const c = activeWorkspace==='characters'?workspaceCharacter():activeCharacter(); const s = activeSession();
   const allowed=visibleDetailTabs(activeWorkspace);
   if(!allowed.includes(currentTab))currentTab=allowed[0];
   document.querySelectorAll('[data-tab]').forEach(btn => {
@@ -1338,7 +1340,7 @@ function renderWorkspace(){
   const relationships=(worldLibrary?.relationships||[]).filter(x=>x.worldId===activeWorldId &&
     activeEntityIds.has(x.fromId)&&activeEntityIds.has(x.toId));
   const timelines=(worldLibrary?.timelines||[]).filter(x=>x.worldId===activeWorldId);
-  const scene=activeSession(),character=activeCharacter();
+  const scene=activeSession(),character=activeWorkspace==='characters'?workspaceCharacter():activeCharacter();
   if(mode==='encounters'){
     renderEncounterStudio(host,{
       state,worldLibrary,worldId:activeWorldId,selectedId:encounterEditingId,
@@ -1494,6 +1496,7 @@ function renderBuilderPortrait() {
 function openBuilder(c) {
   if (!c) return;
   localEvalController?.abort();
+  selectedCharacterId=c.id;
   builderCharacterId = c.id; builderTab = 'identity';
   $('builder-ai-preview').classList.add('hidden'); $('builder-ai-status').textContent = '';
   $('builder-ai-guidance').value = '';
