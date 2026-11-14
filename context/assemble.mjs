@@ -55,16 +55,29 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const latest=visible.history.slice(-8).map(m=>m.content).join(' ');
   const directCue=visible.history.filter(m=>m.role==='user').slice(-2).map(m=>m.content).join(' ') || latest;
   const details=selectCharacterDetails(actor,directCue);
-  const query=[...(scene.castIds||[]).map(id=>state.characters.find(c=>c.id===id)?.name),scene.location,directCue]
+  // Personal recollections respond to the actual conversation cue. Names and
+  // scene labels belong in lore search, not every actor's memory search query.
+  const query=directCue.slice(-900);
+  const loreQuery=[...(scene.castIds||[]).map(id=>state.characters.find(c=>c.id===id)?.name),scene.location,directCue]
     .filter(Boolean).join(' ').slice(-900);
   const excluded=history.slice(-8).map(m=>m.id);
   const recalled=retrieveActorMemories(store.db,{timelineId:scene.timelineId,actorId,query,excludeMessageIds:excluded,limit:8});
   const facts=retrieveActorFacts(store,{timelineId:scene.timelineId,actorId,query,limit:5});
   const events=store.events.visible(scene.timelineId,actorId,30);
-  const eventWords=new Set((query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[]).slice(-40));
-  const scoredEvents=events.map(e=>({...e,match:(String(e.description).toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[]).filter(w=>eventWords.has(w)).length}))
-    .sort((a,b)=>b.match-a.match||events.indexOf(b)-events.indexOf(a)).slice(0,5);
-  const lore=[...store.searchLore(query,{actorId,sessionId:sceneId,worldId,limit:6})];
+  const stop=new Set(['the','and','for','you','your','was','were','what','when','where','with','from','about','that','this','have','just','will','into']);
+  const eventWords=new Set((query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[])
+    .filter(w=>!stop.has(w)).slice(-40));
+  const rankedEvents=events.map(e=>({...e,match:(String(e.description).toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[])
+    .filter(w=>eventWords.has(w)).length}))
+    .sort((a,b)=>b.match-a.match||events.indexOf(b)-events.indexOf(a));
+  // An unrelated event backlog must not displace a personally relevant fact
+  // or witnessed recollection. Always retain the newest accepted event for
+  // continuity, plus up to four older events actually cued by conversation.
+  const matchingEvents=rankedEvents.filter(e=>e.match>0).slice(0,4);
+  const newest=events.at(-1);
+  const scoredEvents=[...matchingEvents,...(newest&&!matchingEvents.some(e=>e.id===newest.id)
+    ?[rankedEvents.find(e=>e.id===newest.id)]:[])].slice(0,5);
+  const lore=[...store.searchLore(loreQuery,{actorId,sessionId:sceneId,worldId,limit:6})];
   // "alwaysActive" lore is an authoring instruction to make lore eligible,
   // not a license to reveal private information or bypass world partitions.
   for(const entry of state.lore||[])if(entry.alwaysActive && !lore.some(l=>l.id===entry.id)) {
