@@ -11,6 +11,7 @@ import { buildActorContext } from './context/assemble.mjs';
 import { discoverBackendContext, enforceTokenBudget } from './context/backend.mjs';
 import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mjs';
 import { suggestActorMemories } from './memory/suggestions.mjs';
+import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -64,8 +65,17 @@ async function readJson(req, limit = 750_000) {
   catch { throw new Error('Invalid JSON'); }
 }
 
-export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new WorldPartitionStore(join(root, '.data')), portraitDir = null, comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows') } = {}) {
+export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new WorldPartitionStore(join(root, '.data')), portraitDir = null, comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows'),
+  semanticModel = process.env.RP_EMBEDDING_MODEL || '',
+  semanticUrl = process.env.RP_EMBEDDING_URL || 'http://127.0.0.1:1234/v1',
+  semanticFetchImpl = fetchImpl
+} = {}) {
   const comfy = new ComfyClient({url:comfyUrl,fetchImpl:comfyFetchImpl,templateDir:comfyTemplateDir});
+  // Disabled by default: do not send private actor memory to a second model
+  // unless the local user explicitly configures a loopback embedding model.
+  const semantic=semanticModel?createLocalSemanticRetriever({
+    baseUrl:semanticUrl,model:semanticModel,fetchImpl:semanticFetchImpl
+  }):null;
   // With world-partitioned storage, a second tab must never change the world
   // behind another tab's writes, portraits, lore reads, or model requests.
   const requireWorldScope = worldId => {
@@ -307,16 +317,41 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         // The configured context cannot override the local backend's real allocation.
         const backend=await discoverBackendContext(lmUrl,data.model,fetchImpl);
         requireWorldScope(data.worldId);
-        let prompt;
+        const contextArgs={store,worldId:data.worldId,sceneId:data.sceneId,actorId:data.actorId,
+          mode:data.mode||'normal',contextWindow:Math.min(contextRequested,backend.contextWindow||contextRequested),
+          maxOutput:responseTokens};
+        const startingRevision=store.load().revision;
+        let prompt,semanticEvidence=[],semanticStatus=semantic?'no-match':'disabled';
         try {
-          prompt=buildActorContext({store,worldId:data.worldId,sceneId:data.sceneId,actorId:data.actorId,
-            mode:data.mode||'normal',contextWindow:Math.min(contextRequested,backend.contextWindow||contextRequested),
-            maxOutput:responseTokens});
+          prompt=buildActorContext(contextArgs);
+          if(semantic && prompt.metadata.retrievalCue.trim()){
+            try{
+              semanticEvidence=await semantic.retrieve({
+                store,worldId:data.worldId,sceneId:data.sceneId,actorId:data.actorId,
+                query:prompt.metadata.retrievalCue
+              });
+              semanticStatus=semanticEvidence.length?'available':'no-match';
+            }catch{
+              // An unavailable embedding model is never a reason to block an
+              // otherwise valid lexical actor reply. Never trust partial data.
+              semanticEvidence=[];semanticStatus='fallback';
+            }
+            // Asynchronous embedding can outlive a scene edit or world switch.
+            requireWorldScope(data.worldId);
+            if(store.load().revision!==startingRevision)
+              return json(res,409,{error:'The scene changed during memory retrieval; retry'});
+            if(semanticEvidence.length)prompt=buildActorContext({...contextArgs,semanticEvidence});
+          }
           prompt=await enforceTokenBudget(prompt,backend);
+          const finalEvidence=prompt.metadata.evidence||[];
+          prompt.metadata.semantic={status:semanticStatus,candidates:semanticEvidence.length,
+            selected:finalEvidence.filter(e=>semanticEvidence.some(s=>s.kind===e.kind&&s.id===e.id)).length};
         } catch(error) {return json(res,422,{error:error.message});}
-        // Exact token counting may await the local backend. Reject a world
-        // switch that occurs during that await before disclosing any prompt.
+        // Native token counting and embeddings may await local models. Reject
+        // stale world/revision after those awaits before exposing any context.
         requireWorldScope(data.worldId);
+        if(store.load().revision!==startingRevision)
+          return json(res,409,{error:'The scene changed during context assembly; retry'});
         if (path === '/api/actor/context') return json(res,200,prompt);
         if (typeof data.model !== 'string' || !data.model || data.model.length>250 ||
             !Number.isFinite(data.temperature) || data.temperature<0 || data.temperature>2)

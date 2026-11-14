@@ -892,6 +892,14 @@ function renderInspector() {
         const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]
 ${m.content}`).join('\n\n');
         host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">Server-assembled, actor-scoped prompt. Token numbers are ${escapeHtml(prompt.metadata.countMethod)}.</p><div class="context-stats"><div><strong>${prompt.metadata.promptTokens.toLocaleString()}</strong><span>Prompt tokens</span></div><div><strong>${prompt.metadata.contextWindow.toLocaleString()}</strong><span>Context window</span></div><div><strong>${prompt.metadata.recalled}</strong><span>Retrieved memories</span></div></div><div class="inline-actions"><button id="copy-context" class="subtle-button">Copy prompt</button></div><pre class="context-text" id="context-text"></pre>`;
+        const semantic=prompt.metadata.semantic;
+        const recallStatus=el('p',
+          semantic?.status==='disabled'?'Semantic recall disabled (lexical only).':
+          semantic?.status==='fallback'?'Local semantic model unavailable; lexical fallback used.':
+          semantic?.status==='no-match'?'Semantic recall enabled; no strong additional match.':
+          `Semantic recall: ${semantic?.selected||0} evidence item(s) in final prompt from ${semantic?.candidates||0} candidate(s).`,
+          'help');
+        $('context-text').before(recallStatus);
         $('context-text').textContent=allText;
         $('copy-context').onclick=async()=>{try{await navigator.clipboard.writeText(allText);}catch{showError('Clipboard unavailable.');}};
 

@@ -5,12 +5,12 @@ import { describeEmotion } from '../engine.mjs';
 import { characterPlaceContext } from '../character/context.mjs';
 import { selectCharacterDetails } from '../character/relevance.mjs';
 import { retrieveActorMemories } from '../memory/store.mjs';
-import { retrieveActorFacts } from '../memory/facts.mjs';
+import { retrieveActorFacts,listActorFacts } from '../memory/facts.mjs';
 
 const shorten = (value, limit) => String(value || '').slice(0,limit);
 export const estimateTokens = messages => messages.reduce((sum,m)=>sum+Math.ceil([...m.content].reduce((n,c)=>n+(c.codePointAt(0)>127?1.5:1),0)/2.3)+8,0) + 12;
 
-export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',contextWindow=4096,maxOutput=450}) {
+export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',contextWindow=4096,maxOutput=450,semanticEvidence=[]}) {
   if (!worldId || !sceneId || !actorId) throw new Error('World, scene and acting character are required');
   if (store.scopeWorldId && store.scopeWorldId !== worldId) throw new Error('Wrong world');
   if (store.activeWorldId && store.activeWorldId !== worldId) throw new Error('Wrong world');
@@ -68,6 +68,31 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const excluded=history.slice(-8).map(m=>m.id);
   const recalled=retrieveActorMemories(store.db,{timelineId:scene.timelineId,actorId,query,excludeMessageIds:excluded,limit:8});
   const facts=retrieveActorFacts(store,{timelineId:scene.timelineId,actorId,query,limit:5});
+  // Dense-search scores do not grant authority. Resolve every semantic ID
+  // again from this actor's own timeline; ignore caller-supplied text.
+  const already=new Set([...facts.map(x=>'fact:'+x.id),...recalled.map(x=>'dialogue:'+x.id)]);
+  const verifiedFacts=semanticEvidence.length?new Map(
+    listActorFacts(store,{timelineId:scene.timelineId,actorId})
+      .filter(f=>f.status==='active'&&f.validSource).map(f=>[f.id,f])
+  ):new Map();
+  const verifiedSemantic=[];
+  for(const evidence of semanticEvidence.slice(0,4)) {
+    if(!['fact','dialogue'].includes(evidence?.kind) ||
+      typeof evidence.id!=='string'||already.has(evidence.kind+':'+evidence.id))continue;
+    let entry;
+    if(evidence.kind==='fact'){
+      const f=verifiedFacts.get(evidence.id);
+      if(f)entry={kind:'fact',id:f.id,sourceMessageId:f.sourceMessageId,
+        text:'Reviewed personal '+f.kind+' (subjective, not world canon): '+shorten(f.text,320)};
+    }else{
+      const m=store.db.prepare(
+        'SELECT id,text,source_message_id FROM actor_memories WHERE id=? AND timeline_id=? AND actor_id=?'
+      ).get(evidence.id,scene.timelineId,actorId);
+      if(m)entry={kind:'dialogue',id:m.id,sourceMessageId:m.source_message_id,
+        text:'Previously heard: '+shorten(m.text,300)};
+    }
+    if(entry){already.add(entry.kind+':'+entry.id);verifiedSemantic.push(entry);}
+  }
   const events=store.events.visible(scene.timelineId,actorId,30);
   const stop=new Set(['the','and','for','you','your','was','were','what','when','where','with','from','about','that','this','have','just','will','into']);
   const eventWords=new Set((query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[])
@@ -125,6 +150,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     ...scoredEvents.map(e=>({kind:'event',id:e.id,text:'Committed event: '+shorten(e.description,240)})),
     ...facts.map(f=>({kind:'fact',id:f.id,sourceMessageId:f.sourceMessageId,
       text:'Reviewed personal '+f.kind+' (subjective, not world canon): '+shorten(f.text,320)})),
+    ...verifiedSemantic,
     ...details.map(d=>({kind:'character_detail',id:d.name,
       text:'Character background — '+d.name+': '+shorten(d.content,420)})),
     ...recalled.map(m=>({kind:'dialogue',id:m.id,sourceMessageId:m.sourceMessageId,
@@ -143,7 +169,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     .filter(w=>!stop.has(w));
   const matchedPersonalFact=facts.some(f=>cueTerms.some(w=>f.text.toLocaleLowerCase().includes(w)));
   const cuedEvidence=matchedPersonalFact || recalled.some(m=>m.score>=5) ||
-    scoredEvents.some(e=>e.match>0) || details.length>0 || loreText.length>0;
+    verifiedSemantic.length>0 || scoredEvents.some(e=>e.match>0) || details.length>0 || loreText.length>0;
   const evidenceHeadroom=cuedEvidence?Math.min(440,Math.floor(budget*0.28)):0;
   const systemParts=[...base];
   let system=systemParts.join('\n\n');
@@ -185,6 +211,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   if(estimateTokens(messages)>budget)throw new Error('Unable to fit acting prompt in the model context budget');
   return {messages,metadata:{
     actorId,worldId,timelineId:scene.timelineId,sceneId,mode,
+    retrievalCue:query,semanticEligible:verifiedSemantic.length,
     contextWindow:context,maxOutput:output,safetyMargin:margin,
     evidenceHeadroomReserved:evidenceHeadroom,
     promptTokensEstimated:estimateTokens(messages),
