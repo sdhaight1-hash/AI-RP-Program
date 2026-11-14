@@ -179,28 +179,40 @@ export class WorldPartitionStore {
       beforeCommit: validated => this.ensureCharacterEntities(validated.characters),
     });
   }
-  ensureCharacterEntities(characters = this.current.load().state?.characters || []) {
+  ensureCharacterEntities(characters = this.current.load().state?.characters || [],
+    target = this.current, worldId = this.activeWorldId) {
     // One lookup for the cast rather than a query per character on every
     // debounced save/streamed reply. Stable character IDs remain authoritative.
-    const knownByCharacter = new Map(this.current.db.prepare(`SELECT id,name,source_character_id AS characterId
-      FROM world_entities WHERE world_id=? AND source_character_id IS NOT NULL`).all(this.activeWorldId)
+    const knownByCharacter = new Map(target.db.prepare(`SELECT id,name,source_character_id AS characterId
+      FROM world_entities WHERE world_id=? AND source_character_id IS NOT NULL`).all(worldId)
       .map(entity => [entity.characterId, entity]));
-    const update=this.current.db.prepare('UPDATE world_entities SET name=? WHERE id=?');
+    const update=target.db.prepare('UPDATE world_entities SET name=? WHERE id=?');
     for(const character of characters) {
       const known=knownByCharacter.get(character.id);
       if(known) {if(known.name!==character.name)update.run(character.name,known.id);}
-      else this.current.worlds.createEntity({worldId:this.activeWorldId,name:character.name,kind:'character',sourceCharacterId:character.id});
+      else target.worlds.createEntity({worldId,name:character.name,kind:'character',sourceCharacterId:character.id});
     }
   }
   activateWorld(id) {
     if (!catalogRows(this.registry).some(w=>w.id===id)) throw new Error('World not found');
     if (this.activeWorldId === id && this.current) return this.load();
     const next=new StudioStore(this.worldFile(id),{scopeWorldId:id});
-    if (this.current) this.current.close();
+    try {
+      // Build the next world without invalidating the currently open one.
+      // An entity-projection failure must not partially publish this switch.
+      next.db.exec('BEGIN IMMEDIATE');
+      this.ensureCharacterEntities(next.load().state?.characters || [],next,id);
+      next.db.exec('COMMIT');
+      this.registry.prepare("INSERT INTO registry_settings(key,value) VALUES('active_world',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(id);
+    } catch(error) {
+      if(next.db.isTransaction)next.db.exec('ROLLBACK');
+      next.close();
+      throw error;
+    }
+    const previous=this.current;
     this.current=next;
     this.activeWorldId=id;
-    this.registry.prepare("INSERT INTO registry_settings(key,value) VALUES('active_world',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(id);
-    this.ensureCharacterEntities();
+    previous?.close();
     return this.load();
   }
   createWorld(input) {
