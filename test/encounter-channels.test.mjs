@@ -104,3 +104,21 @@ test('template deletion preserves played transcripts and unblocks archived chara
     'a live or archived scene still requires its own explicit purge');
   assert.throws(()=>removeEncounterTemplate(state,'nonexistent'),/not found/i);
 });
+
+test('every authored message medium survives story normalization rather than silently becoming in-person',()=>{
+  const actor=createCharacter('Avery'),scene=createSession(actor);
+  scene.channelId='video_call';
+  scene.messages=CHANNEL_OPTIONS.map((channel,index)=>({
+    id:'message-'+index,role:index%2?'assistant':'user',
+    speakerId:index%2?actor.id:undefined,channelId:channel.id,
+    content:'Author explicitly chose '+channel.label,witnessIds:[actor.id]
+  }));
+  const state=normalizeState({characters:[actor],sessions:[scene],
+    activeSessionId:scene.id,encounters:[],lore:[],settings:{},persona:{name:'Player'}});
+  assert.equal(state.sessions[0].channelId,'video_call');
+  assert.deepEqual(state.sessions[0].messages.map(x=>x.channelId),
+    CHANNEL_OPTIONS.map(channel=>channel.id));
+  const again=normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(again.sessions[0].messages.map(x=>x.channelId),
+    CHANNEL_OPTIONS.map(channel=>channel.id));
+});
