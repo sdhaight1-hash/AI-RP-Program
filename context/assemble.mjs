@@ -132,8 +132,14 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   // Unused space remains available to the model; it is not filled with padding.
   const recent=[];
   const dialogue=visible.history.filter(m=>['user','assistant'].includes(m.role)).slice(-24);
-  const evidenceHeadroom=(memories.length||loreText.length)
-    ?Math.min(440,Math.floor(budget*0.28)):0;
+  // Recent uncued memories are fallback continuity, not a reason to evict
+  // immediately preceding dialogue. Reserve headroom for topic-matched evidence.
+  const cueTerms=(query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[])
+    .filter(w=>!stop.has(w));
+  const matchedPersonalFact=facts.some(f=>cueTerms.some(w=>f.text.toLocaleLowerCase().includes(w)));
+  const cuedEvidence=matchedPersonalFact || recalled.some(m=>m.score>=5) ||
+    scoredEvents.some(e=>e.match>0) || details.length>0 || loreText.length>0;
+  const evidenceHeadroom=cuedEvidence?Math.min(440,Math.floor(budget*0.28)):0;
   const systemParts=[...base];
   let system=systemParts.join('\n\n');
   const asMessages=()=>[{role:'system',content:system},...recent];
