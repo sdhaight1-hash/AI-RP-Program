@@ -907,7 +907,7 @@ ${m.content}`).join('\n\n');
           el('p','Record a concise belief, promise, or meaningful personal detail. The source must be something this character actually heard or said. These notes are subjective memories, never world canon.','help'));
         for(const fact of factData.facts.slice(0,15)){
           const entry=el('div','','lore-card');
-          entry.append(el('strong',fact.kind+' · '+fact.status),el('p',fact.text,'help'));
+          entry.append(el('strong',fact.kind+' · '+fact.status+(fact.validSource?'':' · source changed (not recalled)')),el('p',fact.text,'help'));
           if(fact.status==='active'){
             const revoke=el('button','Revoke memory','subtle-button');
             revoke.onclick=async()=>{
@@ -923,8 +923,9 @@ ${m.content}`).join('\n\n');
           }
           section.append(entry);
         }
-        const visibleSources=s.messages.filter(m=>m.id && (m.witnessIds||[]).includes(actor.id) ||
-          (m.role==='assistant' && m.speakerId===actor.id)).slice(-40);
+        const visibleSources=s.messages.filter(m=>m.id && (
+          (m.witnessIds||[]).includes(actor.id) || (m.role==='assistant' && m.speakerId===actor.id)
+        )).slice(-40);
         const source=el('select');source.id='fact-source';
         for(const m of visibleSources){
           const label=(m.role==='user'?'Player':m.speakerId===actor.id?'Self':'Other NPC')+': '+m.content.slice(0,85);
@@ -934,7 +935,7 @@ ${m.content}`).join('\n\n');
         for(const value of ['belief','promise','relationship','autobiography','observation'])kind.add(new Option(value,value));
         const supersedes=el('select');supersedes.id='fact-supersedes';
         supersedes.add(new Option('No correction — new memory',''));
-        for(const fact of factData.facts.filter(x=>x.status==='active'))
+        for(const fact of factData.facts.filter(x=>x.status==='active' && x.validSource))
           supersedes.add(new Option('Correct: '+fact.text.slice(0,65),fact.id));
         const note=el('textarea');note.id='fact-note';note.rows=3;note.maxLength=700;
         note.placeholder='What does this NPC now remember or believe?';
