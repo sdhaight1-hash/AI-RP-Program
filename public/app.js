@@ -6,6 +6,7 @@ import { getChannel } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
 import { normalizeFrequentPlaces, importedEncounter } from '/character/schema.mjs';
 import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis } from '/character/authoring.mjs';
+import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -1308,8 +1309,14 @@ function renderBuilderAIChanges() {
 function setupBuilderAI() {
   const select = $('builder-ai-target');
   select.add(new Option('✦ Develop up to four missing details', 'full'));
-  for (const key of CHARACTER_FIELDS.filter(x => x !== 'name' && x !== 'tagline')) select.add(new Option(builderLabel(key),key));
-  select.onchange = () => { $('builder-ai-preview').classList.add('hidden'); aiDraftTarget = null; aiDraftRequest=null; };
+  for (const key of CHARACTER_FIELDS.filter(x => x !== 'name')) select.add(new Option(builderLabel(key),key));
+  select.onchange = () => {
+    $('builder-ai-preview').classList.add('hidden'); aiDraftTarget=null; aiDraftRequest=null;
+    const contract=CHARACTER_FIELD_CONTRACTS[select.value];
+    $('builder-ai-reference').textContent=contract
+      ? `Field purpose: ${contract.purpose} Boundary: ${contract.boundary}`
+      : 'Develop four currently empty fields. Each receives its own rules and uses the established character as context.';
+  };
   $('builder-close').onclick = () => $('character-builder').close();
   $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); fidelityController?.abort(); });
   document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { if (builderTab === 'lab' && btn.dataset.builderTab !== 'lab') fidelityController?.abort(); builderTab = btn.dataset.builderTab; renderBuilder(); });
@@ -1358,7 +1365,7 @@ async function generateBuilderDraft() {
   try{request=makeCharacterDraftRequest({character:c,target,guidance,worldLibrary,worldId:activeWorldId,lore:state.lore});}
   catch(err){$('builder-ai-status').textContent=err.message;return;}
   aiDraftRequest=request;
-  $('builder-ai-reference').textContent=`Context supplied: ${worldLibrary.worlds.find(x=>x.id===activeWorldId)?.name||'world'} · ${request.referenceSummary.locations} places · ${request.referenceSummary.entities} entities · ${request.referenceSummary.relationships} direct social ties · ${request.referenceSummary.lore} lore records. Suggestions are not canon until approved.`;
+  $('builder-ai-reference').textContent=`Context supplied: ${worldLibrary.worlds.find(x=>x.id===activeWorldId)?.name||'world'} · ${request.referenceSummary.locations} places · ${request.referenceSummary.entities} entities · ${request.referenceSummary.relationships} direct social ties · ${request.referenceSummary.lore} lore records · ${request.referenceSummary.filledFields} established fields · ${request.referenceSummary.focusedFields} expanded references. Each requested field has its own purpose; nothing becomes canon until approved.`;
   const aiController = new AbortController(); aiDraftController = aiController;
   $('builder-ai-generate').disabled = true;
   $('builder-ai-stop').classList.remove('hidden');
