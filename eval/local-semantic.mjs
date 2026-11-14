@@ -16,7 +16,12 @@ export async function evaluateLocalSemanticModel(semantic) {
       {id:'routine-source',role:'user',content:'I file old shipping receipts on Sunday mornings.',
         witnessIds:[actor.id],sentAt:1002},
       {id:'garden-source',role:'user',content:'The herb garden is behind the stone wall.',
-        witnessIds:[actor.id],sentAt:1003}
+        witnessIds:[actor.id],sentAt:1003},
+      // This is a long-term recall probe, not a search for the very last
+      // observed turn already present in the active conversation.
+      ...Array.from({length:12},(_,i)=>({id:'later-'+i,role:'user',
+        content:'Ordinary shipping schedule update '+i+'.',
+        witnessIds:[actor.id],sentAt:2000+i}))
     ];
     store.save(state,0);
     const saved=store.load().state.sessions[0],timelineId=saved.timelineId;
