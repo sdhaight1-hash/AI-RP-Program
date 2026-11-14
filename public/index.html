@@ -23,12 +23,14 @@
         </button>
       </div>
       <nav class="workspace-nav" aria-label="Primary workspaces">
-        <div class="rail-kicker">WORKSPACES</div>
-        <button class="workspace-link" data-workspace="world" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◈</span><span class="workspace-copy"><strong>World & canon</strong><small>Atlas, timelines, relationships</small></span></button>
-        <button class="workspace-link" data-workspace="characters" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">♧</span><span class="workspace-copy"><strong>Characters</strong><small>Identity, behavior, co-authoring</small></span></button>
-        <button class="workspace-link active" data-workspace="story" aria-pressed="true"><span class="workspace-icon" aria-hidden="true">≋</span><span class="workspace-copy"><strong>Story room</strong><small>Conversations & scene direction</small></span></button>
-        <button class="workspace-link" data-workspace="memory" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◇</span><span class="workspace-copy"><strong>Memory & review</strong><small>Actor evidence, lore, events</small></span></button>
-        <button class="workspace-link" data-workspace="tools" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">⚙</span><span class="workspace-copy"><strong>Models & lab</strong><small>Local inference, evaluations</small></span></button>
+        <div class="rail-kicker">CREATE YOUR WORLD</div>
+        <button class="workspace-link" data-workspace="world" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◈</span><span class="workspace-copy"><strong>World</strong><small>Setting, places and timelines</small></span></button>
+        <button class="workspace-link" data-workspace="characters" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">♧</span><span class="workspace-copy"><strong>Characters</strong><small>People and their histories</small></span></button>
+        <button class="workspace-link" data-workspace="encounters" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">▣</span><span class="workspace-copy"><strong>Encounters</strong><small>Starting situations and media</small></span></button>
+        <div class="rail-kicker">PLAY & MANAGE</div>
+        <button class="workspace-link active" data-workspace="story" aria-pressed="true"><span class="workspace-icon" aria-hidden="true">≋</span><span class="workspace-copy"><strong>Play</strong><small>Scenes and conversations</small></span></button>
+        <button class="workspace-link" data-workspace="memory" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◇</span><span class="workspace-copy"><strong>Knowledge</strong><small>Lore, memory and review</small></span></button>
+        <button class="workspace-link" data-workspace="tools" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">⚙</span><span class="workspace-copy"><strong>Settings & tools</strong><small>Models, visuals and Trash</small></span></button>
       </nav>
       <section class="rail-section rail-collection" aria-label="Recent scenes">
         <div class="section-head"><span>SCENES</span><button id="new-session" class="icon-button" title="Start a new scene" aria-label="Start a new scene">＋</button></div>
@@ -72,7 +74,7 @@
         <div id="workspace-content" class="workspace-content"></div>
       </section>
       <div class="composer-area">
-        <div class="channel-toolbar"><label for="channel-select">CHANNEL</label><select id="channel-select" aria-label="Interaction medium"><option value="in_person">◉ In person</option><option value="phone_call">☎ Phone call</option><option value="text_message">✉ Text messages</option></select><span id="channel-description">Face-to-face dialogue and observable actions</span></div>
+        <div class="channel-toolbar"><label for="channel-select">COMMUNICATION</label><select id="channel-select" aria-label="Interaction medium"></select><span id="channel-description">The medium controls what characters can see, hear or read.</span></div>
         <div id="lore-active" class="lore-active"></div>
         <section id="npc-reply-review" class="reply-review hidden" aria-live="polite"></section>
         <div class="composer"><textarea id="message-input" rows="3" placeholder="Your character's dialogue or actions… (Enter to send, Shift+Enter for newline)"></textarea><div class="composer-footer"><div class="muted">You direct your character. The world responds.</div><div class="composer-actions"><button id="continue" class="subtle-button" title="Continue the scene without a new player action">✧ Continue</button><button id="regenerate" class="subtle-button" title="Generate another character reply without losing the existing one">↺ Retry</button><button id="stop" class="subtle-button hidden">Stop</button><button id="send" class="primary-button">Send <span aria-hidden="true">↗</span></button></div></div></div>
@@ -97,7 +99,10 @@
   <dialog id="new-scene-dialog" class="new-scene-dialog" aria-labelledby="new-scene-title">
     <h2 id="new-scene-title">Start an interaction</h2><p class="help">Choose an optional encounter template or start an unscripted conversation.</p>
     <label class="field-label" for="new-scene-character">Character</label><select id="new-scene-character"></select>
-    <label class="field-label" for="new-scene-encounter">Encounter template</label><select id="new-scene-encounter"></select>
+    <label class="field-label" for="new-scene-encounter">Starting situation</label><select id="new-scene-encounter"></select>
+    <label class="field-label" for="new-scene-channel">Communication medium</label><select id="new-scene-channel"></select>
+    <p id="new-scene-channel-hint" class="help">Choose how participants communicate. Saved templates select their own medium.</p>
+    <button id="new-scene-manage-encounters" class="subtle-button">Manage encounter templates</button>
     <div class="inline-actions"><button id="new-scene-confirm" class="primary-button">Start scene</button><button id="new-scene-cancel" class="subtle-button">Cancel</button></div>
   </dialog>
   <dialog id="character-builder" class="builder-dialog" aria-labelledby="builder-title">
