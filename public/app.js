@@ -207,7 +207,12 @@ async function bootstrapStorage() {
   refreshModels();
   void refreshWorldLibrary().then(() => {renderWorldLauncher(); if(activeWorldId && !sessionStorage.getItem('ai-rp-world-opened')) $('world-launcher').showModal();});
 }
-const showError = (message = '') => { $('error').textContent = message; $('error').classList.toggle('hidden', !message); };
+const showError = (message = '') => {
+  for(const id of ['error','detail-error']){
+    const node=$(id);
+    if(node){node.textContent=message;node.classList.toggle('hidden',!message);}
+  }
+};
 
 function startSession(char = activeCharacter(), encounter = null,channelId=null) {
   if (!char) return;
