@@ -16,7 +16,7 @@ const percentile=(times,q)=>{
 const vector=text=>{
   const x=String(text).toLocaleLowerCase();
   if(/space elevator|unrelated moon colony/.test(x))return [0.5,0.5,0.5,0.5];
-  if(/jewelry|rain|opal locket|glass medallion/.test(x))return [1,0,0,0];
+  if(/jewelry|rain|opal locket|glass medallion|glass ornament/.test(x))return [1,0,0,0];
   if(/sundial|bronze clock/.test(x))return [0,1,0,0];
   if(/scarf|neckwear/.test(x))return [0,0,1,0];
   return [0,0,0,1];
