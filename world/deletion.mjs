@@ -49,6 +49,16 @@ export function reconcileCharacterRecords(db, state, worldId) {
   return {removedCharacters:deleted};
 }
 
+export function purgeSceneSourceRecords(db,sceneId) {
+  if(!db.isTransaction)throw new Error('Scene purge requires a transaction');
+  if(typeof sceneId!=='string'||!sceneId)throw new Error('Scene ID required');
+  db.prepare('DELETE FROM actor_memories WHERE scene_id=?').run(sceneId);
+  db.prepare('DELETE FROM actor_facts WHERE scene_id=?').run(sceneId);
+  // Accepted events are separately committed world canon and retain their
+  // own timeline semantics. A full actor purge explicitly erases its events.
+  db.prepare("DELETE FROM event_proposals WHERE scene_id=? AND status!='accepted'").run(sceneId);
+}
+
 export function reconcileRemovedSceneSources(db,state) {
   if(!db.isTransaction)throw new Error('Scene reconciliation requires a transaction');
   if(!state||!Array.isArray(state.sessions))throw new Error('A valid scene snapshot is required');
@@ -65,9 +75,7 @@ export function reconcileRemovedSceneSources(db,state) {
     // Only forgotten sources are removed. Forks with a live descendant scene
     // are blocked from parent removal by purgeArchived. Accepted events are
     // still independently committed world canon, not dialogue memories.
-    db.prepare('DELETE FROM actor_memories WHERE scene_id=?').run(sceneId);
-    db.prepare('DELETE FROM actor_facts WHERE scene_id=?').run(sceneId);
-    db.prepare("DELETE FROM event_proposals WHERE scene_id=? AND status!='accepted'").run(sceneId);
+    purgeSceneSourceRecords(db,sceneId);
   }
   return {removedScenes:removed};
 }
