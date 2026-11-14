@@ -15,7 +15,7 @@ export const THEMES = Object.freeze([
   { id: 'sepia', name: 'Sepia', accent: '#cdb18a' },
   { id: 'parchment', name: 'Parchment', accent: '#795b9f' },
 ]);
-export const DEFAULT_SETTINGS = Object.freeze({ model: '', temperature: 0.95, max_tokens: 450, readingMode: false, theme: 'nocturne', customAccent: '' });
+export const DEFAULT_SETTINGS = Object.freeze({ model: '', temperature: 0.95, max_tokens: 450, contextWindow: 4096, readingMode: false, theme: 'nocturne', customAccent: '' });
 export const CHARACTER_FIELDS = CHARACTER_V2_FIELDS;
 export const PORTRAIT_PATH = /^\/portraits\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:webp|jpg)$/i;
 
