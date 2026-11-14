@@ -78,7 +78,7 @@ test('HTTP delta append requires correct world, scene, cast and current revision
     const wrong=await post({...original,worldId:'unknown-world'});
     assert.equal(wrong.status,404);
     const foreign=await post({...original,worldId:f.otherId});
-    assert.equal(foreign.status,422);
+    assert.equal(foreign.status,409,'foreign world revision is rejected before scene details are exposed');
     const forged=await post({...original,message:{...original.message,
       witnessIds:['different-actor']}});
     assert.equal(forged.status,422);
