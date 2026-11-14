@@ -78,8 +78,12 @@ export function listActorFacts(store,{timelineId,actorId}){
 
 export function snapshotFactsForFork(db,parentId,childId){
   const rows=db.prepare("SELECT * FROM actor_facts WHERE timeline_id=? AND status='active'").all(parentId);
+  const saved=db.prepare('SELECT document FROM studio_state WHERE id=1').get()?.document;
+  const scenes=new Map((saved?JSON.parse(saved).sessions:[]).map(scene=>[scene.id,scene]));
   const insert=db.prepare("INSERT OR IGNORE INTO actor_facts(id,timeline_id,actor_id,scene_id,source_message_id,source_hash,kind,text,status,origin,supersedes_id,created_at) VALUES(?,?,?,?,?,?,?,?, 'active','inherited',NULL,?)");
   for(const row of rows){
+    // Exclude unsupported/stale direct memories before freezing them into a fork.
+    if(!hasCurrentSource(row,scenes,row.actor_id))continue;
     const id=stableId([childId,row.id,'inherited']);
     insert.run(id,childId,row.actor_id,row.scene_id,row.source_message_id,row.source_hash,row.kind,row.text,row.created_at);
   }
