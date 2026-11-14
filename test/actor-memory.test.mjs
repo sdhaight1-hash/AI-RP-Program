@@ -176,3 +176,19 @@ test('backend context discovery honors allocated KoboldCpp context and native to
   assert.equal(counted.metadata.promptTokens,123);
   assert.equal(counted.metadata.countMethod,'exact');
 });
+
+
+test('incoming secret social relationships are not inferred as actor knowledge',()=>{
+  const f=makeFixture();
+  try {
+    const worldId=f.store.worlds.list().timelines.find(t=>t.id===f.scene.timelineId).worldId;
+    const a=f.store.worlds.createEntity({worldId,name:f.a.name,kind:'character',sourceCharacterId:f.a.id});
+    const b=f.store.worlds.createEntity({worldId,name:f.b.name,kind:'character',sourceCharacterId:f.b.id});
+    f.store.worlds.createRelationship({worldId,fromId:b.id,toId:a.id,kind:'secretly_admires'});
+    const result=buildActorContext({store:f.store,worldId,sceneId:f.scene.id,actorId:f.a.id});
+    assert.doesNotMatch(result.messages.map(m=>m.content).join(' '),/secretly_admires/);
+    f.store.worlds.createRelationship({worldId,fromId:a.id,toId:b.id,kind:'trusted_colleague'});
+    const updated=buildActorContext({store:f.store,worldId,sceneId:f.scene.id,actorId:f.a.id});
+    assert.match(updated.messages[0].content,/trusted_colleague/);
+  }finally{f.store.close();}
+});
