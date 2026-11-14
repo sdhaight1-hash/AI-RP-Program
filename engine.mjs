@@ -1,5 +1,6 @@
 import { CHARACTER_V2_FIELDS, normalizeCharacterV2, importedEncounter, normalizeEncounters } from './character/schema.mjs';
 import { normalizeScene, canKnowLore } from './harness.mjs';
+import {getChannel} from './interactions/channels.mjs';
 import { createMind,normalizeMind,normalizeDisposition,DEFAULT_DISPOSITION } from './psychology.mjs';
 // Pure roleplay prompt and persistence helpers; no browser dependencies.
 export const STORAGE_KEY = 'ai-rp-studio:v1';
@@ -75,12 +76,17 @@ export function createCharacter(name = 'New character') {
 }
 
 export function createSession(character, encounter = null) {
+  const channel=getChannel(encounter?.channelId);
+  const castIds=[...new Set([character.id,...(encounter?.characterIds||[])]
+    .filter(id=>typeof id==='string'))];
+  const witnesses=channel.audience==='cast'?[...castIds]:[character.id];
   return {
-    id: crypto.randomUUID(), characterId: character.id, title: `With ${character.name}`,
-    messages: encounter?.opening ? [{id:crypto.randomUUID(),role:'assistant',content:encounter.opening,speakerId:character.id,witnessIds:[character.id],channelId:encounter.channelId||'in_person'}] : [],
+    id: crypto.randomUUID(), characterId: character.id, title: encounter?.title||`With ${character.name}`,
+    messages: encounter?.opening ? [{id:crypto.randomUUID(),role:'assistant',content:encounter.opening,speakerId:character.id,witnessIds:witnesses,channelId:channel.id}] : [],
     summary: '', publicSummary: '', authorNote: '', emotion: { ...DEFAULT_EMOTION }, emotionByActor: {}, emotionEvents: [],
-    castIds: [character.id], speakerId: character.id, speakerMode: 'natural', channelId: encounter?.channelId||'in_person', location: '', worldTime: '', atmosphere: '', direction: encounter?.premise || '', encounterId: encounter?.id || null, sceneEvents: [],
-    psychologyByActor:{[character.id]:createMind()},director:{mode:'collaborative',pace:.5,tension:.5,initiative:.5,narration:.5},timeHoursElapsed:0, updatedAt: Date.now(),
+    castIds, speakerId: character.id, speakerMode: 'natural', channelId:channel.id, location: '', worldTime: '', atmosphere: '', direction: encounter?.premise || '', encounterId: encounter?.id || null, sceneEvents: [],
+    psychologyByActor:Object.fromEntries(castIds.map(id=>[id,createMind()])),
+    director:{mode:'collaborative',pace:.5,tension:.5,initiative:.5,narration:.5},timeHoursElapsed:0, updatedAt: Date.now(),
   };
 }
 
