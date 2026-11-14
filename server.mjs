@@ -13,6 +13,7 @@ import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mj
 import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 import { purgeArchived } from './harness.mjs';
+import {assertExplicitPurges,DeletionConflictError} from './world/conflict-guards.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
 import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
@@ -46,6 +47,15 @@ const ALLOWED = new Map([
 const json = (res, status, data) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
+};
+
+// Detect world canon/clock/actor-knowledge changes that do not increment the
+// story snapshot revision. total_changes catches writes on this connection;
+// data_version catches commits by another connection to the same world file.
+const worldMutationStamp=store=>{
+  const db=store.db;
+  return db.prepare('SELECT total_changes() AS n').get().n+':'+
+    db.prepare('PRAGMA data_version').get().data_version;
 };
 
 async function readBinary(req, limit = 1_500_000) {
@@ -289,7 +299,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try{
           purgeArchived(next,input.kind,input.id);
           const saved=store.save(next,input.revision,{
-            worldId:input.worldId,purgedSceneId:input.kind==='scene'?input.id:null
+            worldId:input.worldId,
+            purgedSceneId:input.kind==='scene'?input.id:null,
+            purgedCharacterId:input.kind==='character'?input.id:null
           });
           if(!saved)return json(res,409,{error:'Story changed before permanent deletion'});
           return json(res,200,{...saved,worldId:input.worldId,state:store.load().state});
@@ -313,9 +325,18 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           return json(res, 400, { error: 'Invalid story document or revision' });
         }
         try {
+          // Even the legacy single-file backend must not allow a normal PUT
+          // to bypass explicit archival/dependency checks. Partitioned stores
+          // revalidate under their SQLite write lock as well.
+          if(typeof baseStore.forWorld!=='function'){
+            const before=store.load();
+            if(before.revision===payload.revision)
+              assertExplicitPurges(before.state,payload.state);
+          }
           const result = store.save(payload.state, payload.revision, { worldId: payload.worldId });
           return result ? json(res, 200, result) : json(res, 409, { error: 'Story was changed in another tab; export local changes before reloading.' });
         } catch(err) {
+          if(err instanceof DeletionConflictError)return json(res,409,{error:err.message});
           if (/World changed;/.test(err.message)) return json(res,409,{error:err.message});
           if (/belongs to another world|not a location in this world|not in this world/.test(err.message))return json(res,422,{error:err.message});
           throw err;
@@ -368,6 +389,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const data=await readJson(req,2500);
         requireWorldScope(data.worldId);
         const startingRevision=store.load().revision;
+        const startingMutation=worldMutationStamp(store);
         if(!Number.isSafeInteger(data.revision) || data.revision!==startingRevision)
           return json(res,409,{error:'Save the current scene before suggesting memories'});
         let suggestions;
@@ -378,8 +400,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           });
         }catch(error){return json(res,422,{error:error.message});}
         requireWorldScope(data.worldId);
-        if(store.load().revision!==startingRevision)
-          return json(res,409,{error:'The scene changed while suggesting memories; try again'});
+        if(store.load().revision!==startingRevision||
+          worldMutationStamp(store)!==startingMutation)
+          return json(res,409,{error:'The scene or world knowledge changed while suggesting memories; try again'});
         // Suggestions are not persisted and do not become world canon.
         return json(res,200,{suggestions});
       }
@@ -417,6 +440,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           mode:data.mode||'normal',contextWindow:Math.min(contextRequested,backend.contextWindow||contextRequested),
           maxOutput:responseTokens};
         const startingRevision=store.load().revision;
+        const startingMutation=worldMutationStamp(store);
         let prompt,semanticEvidence=[],semanticStatus=semantic?'no-match':'disabled';
         try {
           prompt=buildActorContext(contextArgs);
@@ -434,8 +458,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             }
             // Asynchronous embedding can outlive a scene edit or world switch.
             requireWorldScope(data.worldId);
-            if(store.load().revision!==startingRevision)
-              return json(res,409,{error:'The scene changed during memory retrieval; retry'});
+            if(store.load().revision!==startingRevision||
+              worldMutationStamp(store)!==startingMutation)
+              return json(res,409,{error:'The scene or world knowledge changed during memory retrieval; retry'});
             if(semanticEvidence.length)prompt=buildActorContext({...contextArgs,semanticEvidence});
           }
           prompt=await enforceTokenBudget(prompt,backend);
@@ -446,8 +471,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         // Native token counting and embeddings may await local models. Reject
         // stale world/revision after those awaits before exposing any context.
         requireWorldScope(data.worldId);
-        if(store.load().revision!==startingRevision)
-          return json(res,409,{error:'The scene changed during context assembly; retry'});
+        if(store.load().revision!==startingRevision||
+          worldMutationStamp(store)!==startingMutation)
+          return json(res,409,{error:'The scene or world knowledge changed during context assembly; retry'});
         if (path === '/api/actor/context') return json(res,200,prompt);
         if (typeof data.model !== 'string' || !data.model || data.model.length>250 ||
             !Number.isFinite(data.temperature) || data.temperature<0 || data.temperature>2)

@@ -2,7 +2,9 @@
 // by the active world store: an operation can never reach another world's DB.
 // Do not delete a creator-approved world entity merely because its original
 // character biography was removed; it has independent world-canon status.
-export function reconcileCharacterRecords(db, state, worldId) {
+export function reconcileCharacterRecords(db, state, worldId,{
+  repairOrphans=false,removedCharacterId=null
+}={}) {
   if (!db.isTransaction) throw new Error('Character reconciliation requires a transaction');
   if (!state || !Array.isArray(state.characters)) throw new Error('A valid world snapshot is required');
   const present = new Set(state.characters.map(x => x.id));
@@ -11,8 +13,27 @@ export function reconcileCharacterRecords(db, state, worldId) {
     ...db.prepare(`SELECT DISTINCT a.character_id AS id FROM timeline_actors a
       JOIN timelines t ON t.id=a.timeline_id WHERE t.world_id=? AND a.character_id IS NOT NULL`).all(worldId).map(x=>x.id),
     ...db.prepare('SELECT DISTINCT character_id AS id FROM character_world_sources WHERE world_id=?').all(worldId).map(x=>x.id),
-    ...db.prepare('SELECT DISTINCT character_id AS id FROM character_world_relationship_sources WHERE world_id=?').all(worldId).map(x=>x.id)
+    ...db.prepare('SELECT DISTINCT character_id AS id FROM character_world_relationship_sources WHERE world_id=?').all(worldId).map(x=>x.id),
+    ...(removedCharacterId?[removedCharacterId]:[])
   ]);
+  if(repairOrphans) {
+    // Legacy builds sometimes deleted the world-person mirror and timeline
+    // membership independently, leaving orphaned memories or accepted events.
+    // Only do this historical sweep when opening a world, not on every save.
+    const reserved=db.prepare(`SELECT 1 FROM timeline_actors
+      WHERE actor_id=? AND controller IN ('player','system') LIMIT 1`);
+    // Actor-owned dialogue, facts and authored NPC events have a clear source
+    // identity. Locations and observed events alone do not: an otherwise
+    // unprofiled system actor is allowed to hold a position/observe an event.
+    for(const table of ['actor_memories','actor_facts','event_proposals',
+      'timeline_events']){
+      const rows=db.prepare(`SELECT DISTINCT actor_id AS id FROM ${table}
+        WHERE timeline_id IN (SELECT id FROM timelines WHERE world_id=?)`).all(worldId);
+      for(const row of rows){
+        if(!row.id.startsWith('player:')&&!reserved.get(row.id))known.add(row.id);
+      }
+    }
+  }
   let deleted=0;
   for (const id of known) {
     if (present.has(id)) continue; // Archive keeps its profile, knowledge and projection.
@@ -105,8 +126,15 @@ export function deleteWorldRecord(store,{worldId,kind,id}) {
     if(!record)throw new Error('World entry not found');
     if(kind==='entity') {
       if(record.source_character_id &&
-        store.load().state?.characters?.some(x=>x.id===record.source_character_id))
-        throw new Error('This person is linked to a character profile. Archive and permanently delete that character first.');
+        store.load().state?.characters?.some(x=>x.id===record.source_character_id)) {
+        const copies=db.prepare(`SELECT count(*) AS n FROM world_entities
+          WHERE world_id=? AND source_character_id=?`)
+          .get(worldId,record.source_character_id).n;
+        if(copies<2)
+          throw new Error('This is the only world entity for a character profile. Archive and permanently delete the character first.');
+        // An old legacy duplicate can be removed explicitly, with its own
+        // relationship dependencies, while a valid mirror still remains.
+      }
       removeEntityRelations(db,worldId,id);
       db.prepare("DELETE FROM character_world_sources WHERE world_id=? AND entry_type='entity' AND entry_id=?").run(worldId,id);
     }

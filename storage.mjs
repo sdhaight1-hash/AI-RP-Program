@@ -10,7 +10,24 @@ import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } fro
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
 import { initializeFactSchema } from './memory/facts.mjs';
-import { projectionEnabled,projectionPrimary,readPrimaryStory,compactPrimaryDocument,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
+import { inspectStoryProjectionInput,projectionEnabled,projectionPrimary,readPrimaryStory,compactPrimaryDocument,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
+
+function assertPersistedStoryShape(raw) {
+  // normalizeState intentionally repairs loosely structured browser imports.
+  // Do not use that fallback when reading a durable SQLite revision: it can
+  // silently replace a damaged world with demo data or discard invalid scenes.
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)||
+    !Array.isArray(raw.characters)||!Array.isArray(raw.sessions))
+    throw new Error('Stored story document is malformed; restore a verified world backup instead of overwriting it');
+  if(raw.characters.some(c=>!c||typeof c.id!=='string'||!c.id||
+    typeof c.name!=='string'))
+    throw new Error('Stored story contains a malformed character; restore a verified backup');
+  if(raw.sessions.some(scene=>!scene||typeof scene.id!=='string'||!scene.id||
+    typeof scene.characterId!=='string'||!scene.characterId||
+    !Array.isArray(scene.messages)||scene.messages.some(m=>
+      !m||!['user','assistant'].includes(m.role)||typeof m.content!=='string')))
+    throw new Error('Stored story contains a malformed scene or message; restore a verified backup');
+}
 
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
@@ -43,7 +60,13 @@ export class StudioStore {
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS lore_fts USING fts5(id UNINDEXED, title, body, keywords, tokenize='unicode61')`);
     // Existing SQLite snapshots from earlier versions acquire a search index on first load.
-    const persisted = this.load().state;
+    let persisted;
+    try { persisted=this.load().state; }
+    catch(error) {
+      // Do not leak a write connection holding a Windows file lock when
+      // corrupt persisted data is deliberately rejected.
+      this.db.close();throw error;
+    }
     initializeWorldSchema(this.db, persisted, this.scopeWorldId);
     initializeEventLedger(this.db);
     initializeMemorySchema(this.db);
@@ -64,8 +87,10 @@ export class StudioStore {
     const state=projectionPrimary(this.db)
       ?readPrimaryStory(this.db,{revision:row.revision,document:row.document})
       :JSON.parse(row.document);
-    return {revision:row.revision,updatedAt:row.updated_at,
-      state:bindTimelineIds(normalizeState(state))};
+    assertPersistedStoryShape(state);
+    const normalized=bindTimelineIds(normalizeState(state));
+    inspectStoryProjectionInput(normalized);
+    return {revision:row.revision,updatedAt:row.updated_at,state:normalized};
   }
 
   rebuildLoreIndex(entries) {
@@ -96,9 +121,12 @@ export class StudioStore {
     return candidates.map(hit => allowed.get(hit.id)).filter(Boolean);
   }
 
-  save(state, expectedRevision, { beforeCommit } = {}) {
+  save(state, expectedRevision, { beforeCommit, beforeReplace } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new TypeError('Invalid revision');
     const validated = bindTimelineIds(normalizeState(state));
+    // Stable, non-colliding source IDs are required by event locks, memories
+    // and timeline forks even in legacy snapshot mode with no projection.
+    inspectStoryProjectionInput(validated);
     const fullPayload=JSON.stringify(validated);
     const primary=projectionPrimary(this.db);
     const payload=primary?JSON.stringify(compactPrimaryDocument(validated)):fullPayload;
@@ -114,13 +142,18 @@ export class StudioStore {
       // A previously opted-in normalized shadow may never silently diverge
       // from the canonical snapshot. Validate before changing either copy.
       const projectionActive=projectionEnabled(this.db);
+      // Compare against the old canonical state AFTER BEGIN IMMEDIATE, before
+      // publishing the new revision. The same snapshot serves the projection
+      // consistency check, avoiding a redundant primary-story reconstruction.
+      const previous=projectionActive||beforeReplace?this.load():null;
       if(projectionActive) {
-        const current=this.load();
         // readPrimaryStory already validates revision, fingerprint and the
         // compact metadata. Reconstructing the whole projection again here
         // doubled every primary save's preflight cost with no additional gate.
-        if(!primary)verifyStoryProjection(this.db,current);
+        if(!primary)verifyStoryProjection(this.db,previous);
       }
+      if(beforeReplace&&previous?.revision===expectedRevision)
+        beforeReplace(previous.state,validated);
       // Accepted world events depend on their precise source response. Never
       // overwrite its wording, speaker, channel or witnesses via Retry/swipes.
       const accepted=this.db.prepare(`SELECT p.scene_id AS sceneId,p.timeline_id AS timelineId,

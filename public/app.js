@@ -48,6 +48,7 @@ const builderCharacter = () => state.characters.find(c => c.id === builderCharac
 const builderLabel = key => Object.values(BUILDER_SECTIONS).flat().find(row => row[0] === key)?.[1] || key;
 
 let running = false;
+let destructiveActionInFlight = false;
 let controller = null;
 let streamingReply = null; // Never saved: a provisional model response.
 let pendingReply = null; // Held for explicit review if it violates channel/agency expectations.
@@ -400,6 +401,7 @@ async function refreshWorldLibrary() {
 async function switchWorld(worldId) {
   if (worldId === activeWorldId) { $('world-launcher')?.close();return; }
   if(switchingWorld)throw new Error('Another world switch is already in progress.');
+  if(destructiveActionInFlight)throw new Error('Finish the permanent deletion before switching worlds.');
   if (running || aiDraftController || fidelityController || localEvalController || worldEntryController) throw new Error('Finish or cancel generation before switching worlds.');
   if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
   if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
@@ -459,6 +461,16 @@ const postWorld = async (endpoint,data)=>{
   const value=await response.json();if(!response.ok)throw Error(value.error||`World service returned ${response.status}`);
   await refreshWorldLibrary();return value;
 };
+async function withDestructiveUiLock(work) {
+  if(destructiveActionInFlight)throw Error('Another permanent deletion is in progress.');
+  destructiveActionInFlight=true;
+  // The confirmation has already happened. Block pointer, keyboard, and
+  // assistive-tech editing until the authoritative server reply is applied.
+  const wasInert=document.body.inert;
+  document.body.inert=true;
+  try{return await work();}
+  finally{document.body.inert=wasInert;destructiveActionInFlight=false;}
+}
 async function permanentlyDeleteWorldEntry(kind,entry,worldId=activeWorldId) {
   if(running)return showError('Finish the current generation before deleting world entries.');
   if(worldId!==activeWorldId)return showError('Open that world before deleting its entries.');
@@ -466,37 +478,46 @@ async function permanentlyDeleteWorldEntry(kind,entry,worldId=activeWorldId) {
     kind==='location'?' Connected routes will also be removed; occupied places cannot be deleted.':'';
   if(!confirm(`Permanently delete "${entry.name||entry.kind||entry.id}" from this world?${impact} This cannot be undone. Back up first.`))return;
   try{
-    await requireSavedStory();
-    const targetWorld=activeWorldId;
-    await postWorld('/api/worlds/entries/delete',{worldId:targetWorld,kind,id:entry.id});
-    if(activeWorldId!==targetWorld)return;
-    renderInspector();renderWorkspace();showError();
+    await withDestructiveUiLock(async()=>{
+      await requireSavedStory();
+      if(activeWorldId!==worldId)throw Error('World changed during deletion; retry.');
+      await postWorld('/api/worlds/entries/delete',{worldId,kind,id:entry.id});
+      if(activeWorldId!==worldId)return;
+      renderInspector();renderWorkspace();showError();
+    });
   }catch(error){showError(error.message);}
 }
 async function permanentlyPurgeLibraryItem(type,item) {
   if(running)return showError('Finish the current generation before deleting library entries.');
+  const requestedWorld=activeWorldId;
   const name=item.name||item.title,kind=type==='Scene'?'scene':'character';
   const impact=kind==='character'
     ?' This also removes the character’s mirrored world person, related relationships, reviewed source quotes, and actor-owned memories. Independently accepted world entries remain.'
     :' Associated source memories may be removed. Committed world events are managed separately.';
   if(!confirm(`Permanently delete ${name}?${impact} This cannot be undone; back up first.`))return;
   try{
-    await requireSavedStory();
-    const requestedWorld=activeWorldId;
-    const response=await fetch('/api/library/purge',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({worldId:requestedWorld,revision,kind,id:item.id})});
-    const result=await response.json();
-    if(!response.ok)throw Error(result.error||'Permanent deletion failed');
-    if(requestedWorld!==activeWorldId)return;
-    revision=result.revision;state=normalizeState(result.state);
-    clearTimeout(writeTimer);pendingSnapshot=null;
-    try{
-      localStorage.setItem(backupStateKey(),JSON.stringify(state));
-      localStorage.removeItem(pendingBackupKey());
-    }catch{/* Canonical SQLite deletion has already committed. */}
-    await refreshWorldLibrary();
-    render();showError();
+    await withDestructiveUiLock(async()=>{
+      await requireSavedStory();
+      if(activeWorldId!==requestedWorld)throw Error('World changed during deletion; retry.');
+      const response=await fetch('/api/library/purge',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({worldId:requestedWorld,revision,kind,id:item.id})});
+      const result=await response.json();
+      if(!response.ok)throw Error(result.error||'Permanent deletion failed');
+      if(requestedWorld!==activeWorldId)throw Error('World changed during deletion; reload.');
+      if(pendingSnapshot!==null){
+        serverStorage=false;
+        throw Error('Browser edits raced with the deletion. SQLite committed; export this browser copy before reloading to avoid losing other changes.');
+      }
+      revision=result.revision;state=normalizeState(result.state);
+      clearTimeout(writeTimer);pendingSnapshot=null;
+      try{
+        localStorage.setItem(backupStateKey(),JSON.stringify(state));
+        localStorage.removeItem(pendingBackupKey());
+      }catch{/* Canonical SQLite deletion has already committed. */}
+      await refreshWorldLibrary();
+      render();showError();
+    });
   }catch(error){showError(error.message);}
 }
 

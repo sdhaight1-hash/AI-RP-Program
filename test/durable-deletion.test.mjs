@@ -53,7 +53,7 @@ test('archive preserves a person, but permanent purge removes projected entity a
     assert.ok(f.scoped.worlds.list().entities.some(x=>x.id===entity.id));
     const purge=f.scoped.load().state;
     purgeArchived(purge,'character',character.id);
-    save(f.scoped,f.worldId,purge);
+    save(f.scoped,f.worldId,purge,{purgedCharacterId:character.id});
     const library=f.scoped.worlds.list();
     assert.ok(!library.entities.some(x=>x.id===entity.id));
     assert.ok(library.entities.some(x=>x.id===other.id),
@@ -106,13 +106,17 @@ test('reconciliation failure rolls back both story revision and actor-derived cl
   try{
     const actor=createCharacter('Trigger Test'),state=makeEmptyWorldState();
     state.characters=[actor];save(f.scoped,f.worldId,state);
+    const archived=f.scoped.load().state;
+    archiveCharacter(archived,actor.id);
+    save(f.scoped,f.worldId,archived);
     const original=f.scoped.load(),entity=f.scoped.worlds.list().entities.find(x=>x.sourceCharacterId===actor.id);
     f.scoped.db.exec(`CREATE TRIGGER block_actor_purge BEFORE DELETE ON world_entities
       BEGIN SELECT RAISE(ABORT,'simulated cleanup disk failure'); END;`);
     const modified=structuredClone(original.state);
-    archiveCharacter(modified,actor.id);
     purgeArchived(modified,'character',actor.id);
-    assert.throws(()=>f.scoped.save(modified,original.revision,{worldId:f.worldId}),
+    assert.throws(()=>f.scoped.save(modified,original.revision,{
+      worldId:f.worldId,purgedCharacterId:actor.id
+    }),
       /simulated cleanup disk failure/);
     assert.equal(f.scoped.load().revision,original.revision);
     assert.ok(f.scoped.load().state.characters.some(x=>x.id===actor.id));
@@ -203,8 +207,10 @@ test('purging a scene removes its derived memories and scoped lore without unsco
       sourceMessageId:'fact-evidence',kind:'observation',
       text:'The red metal star was in the attic.'});
     assert.equal(count(f.scoped.db,'actor_facts','scene_id=?',[scene.id]),1);
+    const archivedScene=f.scoped.load().state;
+    archiveSession(archivedScene,scene.id);
+    save(f.scoped,f.worldId,archivedScene);
     const toPurge=f.scoped.load().state;
-    archiveSession(toPurge,scene.id);
     purgeArchived(toPurge,'scene',scene.id);
     assert.equal(toPurge.lore.length,0,'scope-only lore must not become public world lore');
     save(f.scoped,f.worldId,toPurge,{purgedSceneId:scene.id});
@@ -263,7 +269,7 @@ test('permanently deleting the originating actor removes its accepted events and
       'explicitly accepted world canon survives deleting only the scene');
     const purged=f.scoped.load().state;
     purgeArchived(purged,'character',actor.id);
-    save(f.scoped,f.worldId,purged);
+    save(f.scoped,f.worldId,purged,{purgedCharacterId:actor.id});
     assert.equal(count(f.scoped.db,'timeline_events','actor_id=?',[actor.id]),0);
     assert.equal(count(f.scoped.db,'event_proposals','actor_id=?',[actor.id]),0);
     assert.equal(count(f.scoped.db,'timeline_event_observers','actor_id=?',[actor.id]),0);
@@ -288,7 +294,7 @@ test('character purge also removes normalized-primary rows and cannot reappear o
     const archived=f.scoped.load().state;archiveCharacter(archived,character.id);
     save(f.scoped,worldId,archived);
     const purged=f.scoped.load().state;purgeArchived(purged,'character',character.id);
-    save(f.scoped,worldId,purged);
+    save(f.scoped,worldId,purged,{purgedCharacterId:character.id});
     assert.equal(count(db,'story_projection_characters','character_id=?',[character.id]),0);
     assert.equal(count(db,'world_entities','source_character_id=?',[character.id]),0);
     assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0);
