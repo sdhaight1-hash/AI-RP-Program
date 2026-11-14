@@ -37,6 +37,7 @@ const portraitSrc = path => typeof path === 'string' && path.startsWith('/portra
 let builderCharacterId = null;
 let builderTab = 'identity';
 let encounterEditingId=null;
+let encounterReturnToTrash=false;
 let aiDraftTarget = null;
 let aiDraftRequest = null;
 let aiDraftController = null;
@@ -437,7 +438,7 @@ async function switchWorld(worldId) {
   revision=result.revision;
   serverStorage=true;
   try {localStorage.setItem(backupStateKey(),JSON.stringify(state));sessionStorage.setItem('ai-rp-world-opened','1');} catch {}
-  currentTab='worlds';worldLibrary=null;encounterEditingId=null;
+  currentTab='worlds';worldLibrary=null;encounterEditingId=null;encounterReturnToTrash=false;
   $('world-launcher')?.close();
   applyTheme();render();await refreshWorldLibrary();renderWorldLauncher();showError();
   } finally {switchingWorld=false;}
@@ -915,7 +916,7 @@ function renderInspector() {
         dependency.append(el('strong',`${linked.length} encounter template(s) blocking deletion`),
           el('p',linked.map(e=>e.title).join(' · '),'help'));
         dependency.append(el('button','Manage linked encounters','subtle-button'));
-        dependency.querySelector('button').onclick=()=>openEncounterManager(linked[0].id);
+        dependency.querySelector('button').onclick=()=>openEncounterManager(linked[0].id,true);
         row.append(dependency);
       }
       const remove=el('button','Permanently delete','mini-action');
@@ -1192,8 +1193,9 @@ function setDetailDeskOpen(isOpen){
   $('expand-inspector').setAttribute('aria-pressed',String(document.body.classList.contains('detail-focus')));
   for(const id of ['open-inspector','open-workspace-inspector'])$(id)?.setAttribute('aria-expanded',String(Boolean(isOpen)));
 }
-function openEncounterManager(templateId=null){
+function openEncounterManager(templateId=null,returnToTrash=false){
   encounterEditingId=templateId;
+  encounterReturnToTrash=returnToTrash;
   setWorkspace('encounters');
   $('encounter-title')?.focus();
 }
@@ -1326,6 +1328,7 @@ function renderWorkspace(){
       state,worldLibrary,worldId:activeWorldId,selectedId:encounterEditingId,
       onSelect:id=>{encounterEditingId=id;renderWorkspace();$('encounter-title')?.focus();},
       onCharacters:()=>setWorkspace('characters'),
+      onBackToTrash:encounterReturnToTrash?()=>{encounterReturnToTrash=false;setWorkspace('tools');openDetailDesk('library');}:null,
       onSave:(entry,error)=>{
         if(error)return showError(error);
         if(running||destructiveActionInFlight)return showError('Finish the active operation before editing templates.');
