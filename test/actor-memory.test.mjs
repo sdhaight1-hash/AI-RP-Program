@@ -209,3 +209,19 @@ test('pinned moments remain retrievable after many later turns without leaking t
     assert.equal(b.some(m=>m.text.includes('violet-cinder')),false);
   }finally{f.store.close();}
 });
+
+
+test('compact acting context preserves messaging rules and emotional state',()=>{
+  const f=makeFixture();
+  try{
+    const state=f.store.load().state;
+    state.sessions[0].channelId='text_message';
+    state.sessions[0].emotion={valence:-0.6,arousal:0.8,trust:-0.8};
+    f.store.save(state,1);
+    const worldId=f.store.worlds.list().timelines.find(t=>t.id===f.scene.timelineId).worldId;
+    const built=buildActorContext({store:f.store,worldId,sceneId:f.scene.id,actorId:f.a.id,contextWindow:2048,maxOutput:300});
+    assert.match(built.messages[0].content,/Write ONLY the exact message text/);
+    assert.match(built.messages[0].content,/guarded toward the player/);
+    assert.match(built.messages[0].content,/highly alert/);
+  }finally{f.store.close();}
+});
