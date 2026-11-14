@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectionEnabled,verifyStoryProjection } from '../storage/normalized.mjs';
+import { projectionEnabled,projectionPrimary,readPrimaryStory,verifyStoryProjection } from '../storage/normalized.mjs';
 import { normalizeState } from '../engine.mjs';
 import { bindTimelineIds } from '../world/canon.mjs';
 
@@ -51,7 +51,11 @@ export function inspectWorldStorage(dataDir) {
         if(!state){fail('Missing story snapshot');continue;}
         entry.revision=state.revision;
         let parsed;
-        try{parsed=JSON.parse(state.document);}catch{fail('Story snapshot is invalid JSON');continue;}
+        try {
+          parsed=projectionPrimary(db)
+            ?readPrimaryStory(db,{revision:state.revision,document:state.document})
+            :JSON.parse(state.document);
+        }catch(error){fail('Could not reconstruct story: '+error.message);continue;}
         if(!Array.isArray(parsed.characters)||!Array.isArray(parsed.sessions)){
           fail('Story snapshot lacks character or scene arrays');continue;
         }
