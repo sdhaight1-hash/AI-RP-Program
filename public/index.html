@@ -4,24 +4,94 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
-  <title>AI RP Studio — Local Stories</title>
+  <title>AI RP Studio · Worlds, Characters & Stories</title>
   <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/studio-shell.css" />
 </head>
-<body>
-  <div class="shell">
-    <aside class="rail">
-      <div class="brand"><div class="brand-mark">✦</div><div><strong>AI RP <span>STUDIO</span></strong><small>LOCAL STORY ENGINE</small></div></div>
-      <div class="rail-section"><button id="world-home" class="subtle-button world-home" title="Choose a world">◉ Worlds</button><div id="world-label" class="world-label"></div></div>
-      <div class="rail-section"><div class="section-head"><span>SESSIONS</span><button id="new-session" class="icon-button" title="Start new scene">＋</button></div><div id="session-list" class="session-list"></div></div>
-      <div class="rail-section character-section"><div class="section-head"><span>CHARACTERS</span><button id="new-character" class="icon-button" title="Create character">＋</button></div><div id="character-list"></div></div>
-      <div class="rail-bottom"><div id="connection" class="connection"><i></i><span>Checking model server…</span></div><div class="rail-hint">Private, local sessions · export your backups</div></div>
+<body data-workspace="story">
+  <div class="shell" id="studio-shell">
+    <aside class="rail" aria-label="Studio navigation">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">✧</div>
+        <div class="brand-copy"><strong>AI RP <span>STUDIO</span></strong><small>YOUR LOCAL STORY UNIVERSE</small></div>
+      </div>
+      <div class="rail-world">
+        <span class="rail-kicker">CURRENT UNIVERSE</span>
+        <button id="world-home" class="world-home" title="Switch between independent worlds">
+          <span class="world-icon" aria-hidden="true">◈</span>
+          <span class="world-home-copy"><strong id="world-label" class="world-label">Loading world…</strong><small>Switch world <span aria-hidden="true">↗</span></small></span>
+        </button>
+      </div>
+      <nav class="workspace-nav" aria-label="Primary workspaces">
+        <div class="rail-kicker">WORKSPACES</div>
+        <button class="workspace-link" data-workspace="world" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◈</span><span class="workspace-copy"><strong>World & canon</strong><small>Atlas, timelines, relationships</small></span></button>
+        <button class="workspace-link" data-workspace="characters" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">♧</span><span class="workspace-copy"><strong>Characters</strong><small>Identity, behavior, co-authoring</small></span></button>
+        <button class="workspace-link active" data-workspace="story" aria-pressed="true"><span class="workspace-icon" aria-hidden="true">≋</span><span class="workspace-copy"><strong>Story room</strong><small>Conversations & scene direction</small></span></button>
+        <button class="workspace-link" data-workspace="memory" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◇</span><span class="workspace-copy"><strong>Memory & review</strong><small>Actor evidence, lore, events</small></span></button>
+        <button class="workspace-link" data-workspace="tools" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">⚙</span><span class="workspace-copy"><strong>Models & lab</strong><small>Local inference, evaluations</small></span></button>
+      </nav>
+      <section class="rail-section rail-collection" aria-label="Recent scenes">
+        <div class="section-head"><span>SCENES</span><button id="new-session" class="icon-button" title="Start a new scene" aria-label="Start a new scene">＋</button></div>
+        <div id="session-list" class="session-list"></div>
+      </section>
+      <section class="rail-section rail-collection character-section" aria-label="Your characters">
+        <div class="section-head"><span>CHARACTERS</span><button id="new-character" class="icon-button" title="Create a character" aria-label="Create a character">＋</button></div>
+        <div id="character-list"></div>
+      </section>
+      <div class="rail-bottom">
+        <div id="connection" class="connection" role="status"><i aria-hidden="true"></i><span>Checking local inference…</span></div>
+        <div class="rail-hint">Local-first · world-isolated · creator-approved canon</div>
+      </div>
     </aside>
-    <main class="conversation">
-      <div class="conversation-head"><div><div class="eyebrow">CURRENT SCENE</div><h1 id="scene-title">The Harbor Bookshop</h1><div id="scene-meta" class="muted"></div></div><div class="head-actions"><button id="reading-toggle" class="subtle-button" aria-pressed="false" title="Switch between Character Chat and Story Reading views">◫ Story view</button><button id="open-inspector" class="subtle-button">Scene notes</button><label class="head-theme" for="quick-theme">Theme <select id="quick-theme" aria-label="Interface color scheme"></select></label><button id="open-builder" class="subtle-button">✦ Character studio</button><button id="export-data" class="subtle-button">Export backup</button><button id="import-data" class="subtle-button">Import backup</button><input id="import-data-file" type="file" accept="application/json,.json" hidden /></div></div>
+
+    <main class="conversation" id="main-workspace">
+      <header class="studio-topbar">
+        <div class="studio-breadcrumb"><span class="topbar-micro">OPEN WORLD</span><strong id="top-world-name">Loading…</strong><span class="breadcrumb-divider" aria-hidden="true">/</span><span id="top-workspace-name">Story room</span></div>
+        <div class="topbar-actions"><span class="topbar-private"><span aria-hidden="true">●</span> Private workspace</span><button id="open-workspace-inspector" class="subtle-button" aria-controls="inspector" aria-expanded="false">Detail desk <span aria-hidden="true">☰</span></button></div>
+      </header>
+      <div class="conversation-head">
+        <div class="scene-heading"><div class="eyebrow">ACTIVE TIMELINE · STORY ROOM</div><h1 id="scene-title">The Harbor Bookshop</h1><div id="scene-meta" class="muted"></div></div>
+        <div class="head-actions">
+          <button id="reading-toggle" class="subtle-button" aria-pressed="false" title="Toggle between Character Chat and Story Reading views">◫ Story view</button>
+          <button id="open-inspector" class="subtle-button" aria-controls="inspector" aria-expanded="false">Scene details</button>
+          <button id="open-builder" class="primary-button">✧ Character Studio</button>
+          <details class="project-actions">
+            <summary class="subtle-button" aria-label="Open scene tools">More <span aria-hidden="true">···</span></summary>
+            <div class="project-menu">
+              <label class="head-theme" for="quick-theme">Appearance <select id="quick-theme" aria-label="Interface color scheme"></select></label>
+              <button id="export-data" class="subtle-button">Export backup</button>
+              <button id="import-data" class="subtle-button">Import backup</button>
+              <input id="import-data-file" type="file" accept="application/json,.json" hidden />
+            </div>
+          </details>
+        </div>
+      </div>
       <div id="messages" class="messages" aria-live="polite"></div>
-      <div class="composer-area"><div class="channel-toolbar"><label for="channel-select">Interaction</label><select id="channel-select" aria-label="Interaction medium"><option value="in_person">◉ In person</option><option value="phone_call">☎ Phone call</option><option value="text_message">✉ Text messages</option></select><span id="channel-description">Face-to-face dialogue and observable actions</span></div><div id="lore-active" class="lore-active"></div><section id="npc-reply-review" class="reply-review hidden" aria-live="polite"></section><div class="composer"><textarea id="message-input" rows="3" placeholder="Your character's dialogue or actions… (Enter to send, Shift+Enter for newline)"></textarea><div class="composer-footer"><div class="muted">You control your character. The world responds.</div><div class="composer-actions"><button id="continue" class="subtle-button" title="Continue the scene without a new player action">✧ Continue</button><button id="regenerate" class="subtle-button" title="Generate another character reply without losing the existing one">↺ Retry</button><button id="stop" class="subtle-button hidden">Stop</button><button id="send" class="primary-button">Send ↗</button></div></div></div><div id="error" role="alert" class="error hidden"></div></div>
+      <section id="workspace-overview" class="workspace-overview hidden" aria-labelledby="workspace-title">
+        <header class="workspace-heading"><div id="workspace-kicker" class="eyebrow">YOUR UNIVERSE</div><h1 id="workspace-title">World overview</h1><p id="workspace-summary" class="workspace-summary"></p></header>
+        <div id="workspace-content" class="workspace-content"></div>
+      </section>
+      <div class="composer-area">
+        <div class="channel-toolbar"><label for="channel-select">CHANNEL</label><select id="channel-select" aria-label="Interaction medium"><option value="in_person">◉ In person</option><option value="phone_call">☎ Phone call</option><option value="text_message">✉ Text messages</option></select><span id="channel-description">Face-to-face dialogue and observable actions</span></div>
+        <div id="lore-active" class="lore-active"></div>
+        <section id="npc-reply-review" class="reply-review hidden" aria-live="polite"></section>
+        <div class="composer"><textarea id="message-input" rows="3" placeholder="Your character's dialogue or actions… (Enter to send, Shift+Enter for newline)"></textarea><div class="composer-footer"><div class="muted">You direct your character. The world responds.</div><div class="composer-actions"><button id="continue" class="subtle-button" title="Continue the scene without a new player action">✧ Continue</button><button id="regenerate" class="subtle-button" title="Generate another character reply without losing the existing one">↺ Retry</button><button id="stop" class="subtle-button hidden">Stop</button><button id="send" class="primary-button">Send <span aria-hidden="true">↗</span></button></div></div></div>
+        <div id="error" role="alert" class="error hidden"></div>
+      </div>
     </main>
-    <aside class="inspector" id="inspector"><div class="stage"><canvas id="scene-canvas" aria-label="Animated WebGL atmosphere preview"></canvas><img id="stage-portrait" class="stage-portrait hidden" alt="" /><div class="stage-label">WEBGL · ATMOSPHERE PREVIEW</div><div class="stage-caption"><div class="stage-avatar" id="stage-avatar">M</div><div><strong id="stage-name">Mara Vale</strong><small>ACTIVE CHARACTER</small></div></div></div><div class="tabs" role="tablist"><button data-tab="character" class="active" role="tab">Character</button><button data-tab="cast" role="tab">Cast</button><button data-tab="worlds" role="tab">Worlds</button><button data-tab="atlas" role="tab">Atlas</button><button data-tab="relations" role="tab">Relations</button><button data-tab="scene" role="tab">Scene</button><button data-tab="lore" role="tab">Lore</button><button data-tab="memory" role="tab">Story</button><button data-tab="emotion" role="tab">Emotion</button><button data-tab="context" role="tab">Context</button><button data-tab="gallery" role="tab">Visuals</button><button data-tab="library" role="tab">Library</button><button data-tab="setup" role="tab">Setup</button></div><div id="inspector-content" class="inspector-body"></div></aside>
+
+    <button id="inspector-scrim" class="inspector-scrim hidden" aria-label="Close detail desk"></button>
+    <aside class="inspector" id="inspector" aria-label="Contextual detail desk">
+      <div class="inspector-top"><div><span class="eyebrow">DETAIL DESK</span><strong id="inspector-heading">Character</strong></div><button id="close-inspector" class="inspector-close subtle-button" aria-label="Close detail desk">✕</button></div>
+      <div class="stage"><canvas id="scene-canvas" aria-label="Animated WebGL atmosphere preview"></canvas><img id="stage-portrait" class="stage-portrait hidden" alt="" /><div class="stage-label">ATMOSPHERE · WORLD</div><div class="stage-caption"><div class="stage-avatar" id="stage-avatar">M</div><div><strong id="stage-name">Mara Vale</strong><small>ACTIVE SCENE CHARACTER</small></div></div></div>
+      <nav class="inspector-tabs" aria-label="Detail desk sections">
+        <div class="tab-group"><span class="tab-group-label">WORLD</span><div class="tab-group-items"><button data-tab="worlds" role="tab">Overview</button><button data-tab="atlas" role="tab">Atlas</button><button data-tab="relations" role="tab">Relations</button></div></div>
+        <div class="tab-group"><span class="tab-group-label">PEOPLE</span><div class="tab-group-items"><button data-tab="character" class="active" role="tab">Character</button><button data-tab="cast" role="tab">Cast</button><button data-tab="emotion" role="tab">Emotion</button></div></div>
+        <div class="tab-group"><span class="tab-group-label">STORY</span><div class="tab-group-items"><button data-tab="scene" role="tab">Scene</button><button data-tab="lore" role="tab">Lore</button><button data-tab="memory" role="tab">Journal</button></div></div>
+        <div class="tab-group"><span class="tab-group-label">SYSTEM</span><div class="tab-group-items"><button data-tab="context" role="tab">Memory trace</button><button data-tab="gallery" role="tab">Visuals</button><button data-tab="library" role="tab">Library</button><button data-tab="setup" role="tab">Setup</button></div></div>
+      </nav>
+      <div id="inspector-content" class="inspector-body"></div>
+    </aside>
   </div>
   <dialog id="world-launcher" class="world-launcher" aria-labelledby="world-launcher-title"><div class="world-launcher-head"><h2 id="world-launcher-title">Your Worlds</h2><button id="world-launcher-close" class="subtle-button">Close</button></div><p class="help">Each world contains an independent cast, canon, history and simulation.</p><div id="world-launcher-list" class="world-launcher-list"></div><button id="world-launcher-create" class="primary-button">Create a New World</button></dialog>
   <dialog id="new-scene-dialog" class="new-scene-dialog" aria-labelledby="new-scene-title">
