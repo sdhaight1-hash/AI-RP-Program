@@ -128,6 +128,10 @@ test('old orphan actor-owned memories and accepted events are removed even if mi
       scoped.db.prepare('DELETE FROM world_relationships WHERE from_id=? OR to_id=?').run(entity.id,entity.id);
       scoped.db.prepare('DELETE FROM world_entities WHERE id=?').run(entity.id);
     }
+    const audit=inspectWorldStorage(temp);
+    assert.equal(audit.ok,true,'warnings must not prevent making a safety backup');
+    assert.equal(audit.worlds[0].orphanedActorRecords,1);
+    assert.equal(audit.worlds[0].orphanedSceneSources,1);
     store.close();
     store=new WorldPartitionStore(temp);
     try{
