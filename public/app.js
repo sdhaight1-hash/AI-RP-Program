@@ -2,7 +2,7 @@ import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normaliz
 import { initAtmosphere } from '/scene.js';
 import { chooseSpeaker, archiveCharacter, archiveSession, duplicateSession, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
-import { getChannel } from '/interactions/channels.mjs';
+import { getChannel,CHANNEL_OPTIONS,channelAudience } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
 import { normalizeFrequentPlaces, importedEncounter, CHARACTER_V2_FIELDS } from '/character/schema.mjs';
 import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis, characterDraftVersion, worldDraftVersion } from '/character/authoring.mjs';
@@ -13,7 +13,9 @@ import { BUILDER_SECTIONS } from '/character/sections.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
 import { worldPath,loadWorldSnapshot,loadWorldCatalog } from '/world-client.mjs';
-import { WORKSPACE_META,searchStudioCommands } from '/studio-navigation.mjs';
+import { WORKSPACE_META,visibleDetailTabs,searchStudioCommands } from '/studio-navigation.mjs';
+import { removeEncounterTemplate,encounterDependencies } from '/encounters/library.mjs';
+import { renderEncounterStudio } from '/encounter-studio.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -21,7 +23,7 @@ const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&am
 const text = (s) => String(s ?? '');
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch { state = makeInitialState(); }
-let currentTab = 'character';
+let currentTab = 'scene';
 let activeWorkspace = 'story';
 let worldLibrary = null;
 let worldLibraryRequest = 0;
@@ -34,6 +36,7 @@ const scopedUrl = path => worldPath(path,activeWorldId);
 const portraitSrc = path => typeof path === 'string' && path.startsWith('/portraits/') ? scopedUrl(path) : path;
 let builderCharacterId = null;
 let builderTab = 'identity';
+let encounterEditingId=null;
 let aiDraftTarget = null;
 let aiDraftRequest = null;
 let aiDraftController = null;
@@ -205,10 +208,11 @@ async function bootstrapStorage() {
 }
 const showError = (message = '') => { $('error').textContent = message; $('error').classList.toggle('hidden', !message); };
 
-function startSession(char = activeCharacter(), encounter = null) {
+function startSession(char = activeCharacter(), encounter = null,channelId=null) {
   if (!char) return;
   const session = createSession(char,encounter);
-  if(encounter?.locationId)session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
+  if(!encounter&&channelId)session.channelId=getChannel(channelId).id;
+  if(encounter?.locationId && getChannel(encounter.channelId).id==='in_person')session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
   state.sessions.unshift(session);
   state.activeSessionId = session.id;
   activeWorkspace='story';
@@ -227,8 +231,18 @@ function openNewSceneDialog() {
     const template=$('new-scene-encounter');template.replaceChildren();
     template.add(new Option('Unscripted scene (no opening template)',''));
     for(const encounter of state.encounters||[]){
-      if(encounter.characterIds?.includes(chosen.value))template.add(new Option(encounter.title,encounter.id));
+      if(encounter.characterIds?.includes(chosen.value))template.add(new Option(`${encounter.title} · ${getChannel(encounter.channelId).label}`,encounter.id));
     }
+    const selected=$('new-scene-channel');
+    selected.value='in_person';
+    const showMedium=()=>{
+      const item=(state.encounters||[]).find(e=>e.id===template.value);
+      selected.disabled=Boolean(item);
+      if(item)selected.value=getChannel(item.channelId).id;
+      $('new-scene-channel-hint').textContent=getChannel(selected.value).description + (item?' · Set by the template.':' · Change this for an unscripted scene.');
+    };
+    template.onchange=showMedium;selected.onchange=showMedium;
+    showMedium();
   };
   chosen.onchange=refresh;refresh();$('new-scene-dialog').showModal();
 }
@@ -353,11 +367,11 @@ function renderHeader() {
   const s = activeSession(); const c = activeCharacter();
   const channel=getChannel(s?.channelId);
   $('channel-select').value=channel.id;
-  $('channel-description').textContent=channel.id==='in_person'?'Shared place · spoken and visible interaction':channel.id==='phone_call'?'Audio-only · no remote visual cues':'Private one-to-one text · no scene narration';
-  $('message-input').placeholder=channel.id==='in_person'?'Your character’s dialogue or actions…':channel.id==='phone_call'?'Say something on the call…':'Write a message…';
+  $('channel-description').textContent=channel.description;
+  $('message-input').placeholder=channel.placeholder;
   $('scene-title').textContent = s?.title || 'New story';
   const displayTime=timelineClockLabel(s) || s?.worldTime;
-  $('scene-meta').textContent = s ? [(channel.id==='in_person'?(s.location||'Location unspecified'):(channel.id==='phone_call'?'Audio-only call · separate locations':'Text conversation · separate locations')),displayTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
+  $('scene-meta').textContent = s ? [channel.id==='in_person'?(s.location||'Location unspecified'):channel.description,displayTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
   $('stage-name').textContent = c?.name || 'Unknown';
   $('stage-avatar').replaceChildren(portraitNode(c?.name, c, 'avatar-internal'));
   const stageImage = $('stage-portrait');
@@ -421,7 +435,7 @@ async function switchWorld(worldId) {
   revision=result.revision;
   serverStorage=true;
   try {localStorage.setItem(backupStateKey(),JSON.stringify(state));sessionStorage.setItem('ai-rp-world-opened','1');} catch {}
-  currentTab='worlds';worldLibrary=null;
+  currentTab='worlds';worldLibrary=null;encounterEditingId=null;
   $('world-launcher')?.close();
   applyTheme();render();await refreshWorldLibrary();renderWorldLauncher();showError();
   } finally {switchingWorld=false;}
@@ -2176,7 +2190,7 @@ async function generate(mode = 'normal') {
   let assistantText='';let errorMessage='';let succeeded=false;let issues=[];
   const message={id:retry?previous.id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,
     channelId:retry?getChannel(previous.channelId).id:getChannel(session.channelId).id,sentAt:Date.now(),
-    witnessIds:retry?[...(previous.witnessIds||[])]:getChannel(session.channelId).id==='in_person'?[...session.castIds]:[actorId],provisional:true};
+    witnessIds:retry?[...(previous.witnessIds||[])]:channelAudience(session.channelId)==='cast'?[...session.castIds]:[actorId],provisional:true};
   try {
     // Acting context is resolved from authoritative SQLite state on the server.
     await requireSavedStory();
@@ -2230,7 +2244,7 @@ function send() {
   if(!activeSession()){showError('Create or restore a scene first.');return;}
   const session=activeSession();const channel=getChannel(session.channelId);
   const target=sceneActor({...session,messages:[...session.messages,{role:'user',content:message}]});
-  const recipients=channel.id==='in_person'?[...session.castIds]:target?[target.id]:[];
+  const recipients=channelAudience(channel.id)==='cast'?[...session.castIds]:target?[target.id]:[];
   session.messages.push({id:crypto.randomUUID(),role:'user',channelId:channel.id,content:message,sentAt:Date.now(),witnessIds:recipients});$('message-input').value='';session.updatedAt=Date.now();save();renderLists();renderMessages();generate();
 }
 
