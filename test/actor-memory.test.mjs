@@ -192,3 +192,20 @@ test('incoming secret social relationships are not inferred as actor knowledge',
     assert.match(updated.messages[0].content,/trusted_colleague/);
   }finally{f.store.close();}
 });
+
+
+test('pinned moments remain retrievable after many later turns without leaking to non-witnesses',()=>{
+  const f=makeFixture();
+  try{
+    const state=f.store.load().state;
+    state.sessions[0].messages[0].pinned=true;
+    for(let i=0;i<30;i++)state.sessions[0].messages.push({
+      id:'later-'+i,role:'user',content:'Ordinary small talk '+i,witnessIds:[f.a.id],sentAt:5000+i
+    });
+    f.store.save(state,1);
+    const a=retrieveActorMemories(f.store.db,{timelineId:f.scene.timelineId,actorId:f.a.id,query:'unrelated topic',limit:8});
+    const b=retrieveActorMemories(f.store.db,{timelineId:f.scene.timelineId,actorId:f.b.id,query:'unrelated topic',limit:8});
+    assert.ok(a.some(m=>m.text.includes('violet-cinder') && m.pinned));
+    assert.equal(b.some(m=>m.text.includes('violet-cinder')),false);
+  }finally{f.store.close();}
+});
