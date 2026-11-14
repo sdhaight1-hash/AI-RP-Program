@@ -7,6 +7,7 @@ import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/
 import { normalizeFrequentPlaces, importedEncounter } from '/character/schema.mjs';
 import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis, characterDraftVersion, worldDraftVersion } from '/character/authoring.mjs';
 import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/character/world-bridge.mjs';
+import { proposedRelationshipKinds } from '/character/relationship-bridge.mjs';
 import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
@@ -1073,6 +1074,7 @@ function openBuilder(c) {
   $('builder-ai-guidance').value = '';
   worldEntryController?.abort(); worldEntryRequest=null;
   $('builder-world-items').replaceChildren();$('builder-world-status').textContent='';
+  $('builder-world-links').replaceChildren();
   if (fidelityDraft?.characterId !== c.id) fidelityDraft = null;
   renderBuilder();
   if (!$('character-builder').open) $('character-builder').showModal();
@@ -1473,6 +1475,7 @@ function setupBuilderAI() {
   $('builder-ai-generate').onclick = generateBuilderDraft;
   $('builder-world-suggest').onclick = generateCharacterWorldEntries;
   $('builder-world-stop').onclick = () => worldEntryController?.abort();
+  $('builder-world-links-refresh').onclick = () => void renderApprovedWorldRelationships();
   $('builder-ai-result').addEventListener('input',()=>renderBuilderAIChanges());
   $('builder-ai-stop').onclick = () => aiDraftController?.abort();
   $('builder-ai-apply').onclick = () => {
@@ -1537,6 +1540,7 @@ function renderCharacterWorldCandidates(items,request,version) {
         worldEntryRequest=null;host.replaceChildren();
         $('builder-world-status').textContent=`Added ${outcome.entry.name} to World Atlas from a reviewed ${outcome.sourceField} quote. Regenerate for further entries; no scene or current location was changed.`;
         await refreshWorldLibrary();
+        await renderApprovedWorldRelationships();
         if(builderTab==='life')renderBuilder();
       }catch(err){status.textContent=err.message;approve.disabled=false;}
     };
@@ -1546,6 +1550,68 @@ function renderCharacterWorldCandidates(items,request,version) {
       description,sourceNote,approve,status);
     host.append(box);
   }
+}
+
+async function renderApprovedWorldRelationships() {
+  const host=$('builder-world-links'),character=builderCharacter();
+  if(!host||!character||!activeWorldId)return;
+  const charId=character.id,worldId=activeWorldId;
+  host.replaceChildren(el('p','Checking approved people…','help'));
+  try {
+    await requireSavedStory();
+    const request=await fetch(scopedUrl('/api/character/world-entries/sources')+
+      '&characterId='+encodeURIComponent(charId));
+    const data=await request.json();
+    if(!request.ok)throw new Error(data.error||'Cannot read approved character-world sources');
+    if(builderCharacter()?.id!==charId||activeWorldId!==worldId)return;
+    host.replaceChildren();
+    const available=(data.sources||[]).filter(x=>
+      x.type==='entity'&&x.entityKind==='character'&&x.entryName&&
+      proposedRelationshipKinds(x.sourceQuote).length);
+    if(!available.length){
+      host.append(el('p','No source-backed relationship candidates yet. First approve a named person from the character biography.','help'));
+      return;
+    }
+    for(const source of available){
+      const card=el('section','','lore-card reviewed-link');
+      const kindOptions=proposedRelationshipKinds(source.sourceQuote);
+      card.append(el('strong',source.relationshipId?'Linked · '+source.entryName:'Review · '+source.entryName),
+        el('p',`Approved ${source.sourceField} source: “${source.sourceQuote}”`,'help'));
+      if(source.relationshipId){
+        card.append(el('p','Already connected in the directed World Relations graph.','help'));
+      }else{
+        const pick=document.createElement('select');
+        pick.setAttribute('aria-label','Relationship of '+source.entryName+' to '+character.name);
+        for(const kind of kindOptions)pick.add(new Option(kind,kind));
+        const preview=el('p','','help');
+        pick.onchange=()=>preview.textContent=`${source.entryName} → ${character.name}: ${pick.value} (directed relationship)`;
+        pick.onchange();
+        const approve=el('button','Approve directed relationship','subtle-button');
+        const note=el('p','','help');
+        approve.onclick=async()=>{
+          if(!confirm(`Add ${source.entryName} → ${character.name} (${pick.value}) as an authored world relationship? This does not create a scene event or change the NPC's feelings.`))return;
+          approve.disabled=true;
+          try{
+            await requireSavedStory();
+            const library={...worldLibrary,activeWorldId:worldId};
+            const body={approval:'approve',worldId,characterId:charId,entryId:source.entryId,
+              kind:pick.value,revision,profileVersion:characterDraftVersion(character),
+              worldVersion:worldDraftVersion(library)};
+            const response=await fetch('/api/character/world-relationships/approve',{
+              method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
+            });
+            const result=await response.json();
+            if(!response.ok)throw new Error(result.error||'Relationship approval rejected');
+            await refreshWorldLibrary();
+            await renderApprovedWorldRelationships();
+            $('builder-world-status').textContent=`Relationship approved: ${result.sourceName} → ${result.characterName} (${result.relationship.kind}). No timeline or mood changed.`;
+          }catch(error){note.textContent=error.message;approve.disabled=false;}
+        };
+        card.append(pick,preview,approve,note);
+      }
+      host.append(card);
+    }
+  }catch(error){if(builderCharacter()?.id===charId)host.replaceChildren(el('p',error.message,'help'));}
 }
 
 async function generateCharacterWorldEntries() {
