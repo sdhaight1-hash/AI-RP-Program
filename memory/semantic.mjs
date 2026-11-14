@@ -3,6 +3,7 @@
 // sent to the explicitly configured loopback embeddings service.
 import { createHash } from 'node:crypto';
 import { listActorFacts } from './facts.mjs';
+import { retrieveActorMemories } from './store.mjs';
 
 const cap=(x,min,max)=>Math.min(max,Math.max(min,x));
 const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -74,13 +75,39 @@ export function createLocalSemanticRetriever({
           text:'Reviewed personal '+x.kind+' (subjective, not world canon): '+x.text,
           embeddingText:x.text}));
       const room=Math.max(0,bound-facts.length);
-      const mem=store.db.prepare(
-        'SELECT id,source_message_id,text,source_hash FROM actor_memories WHERE timeline_id=? AND actor_id=? ORDER BY pinned DESC,occurred_at DESC,rowid DESC LIMIT ?'
-      ).all(timelineId,actorId,room).map(x=>({
-        kind:'dialogue',id:x.id,sourceMessageId:x.source_message_id,
-        text:'Previously heard: '+x.text,
-        embeddingText:x.text.replace(/^(?:Player|You|Another character) said:\s*/u,'')
-      }));
+      // Pure recency loses every old unpinned memory once an actor has enough
+      // turns. Reserve bounded candidate slots for lexical cues, pinned items
+      // and the earliest experiences; spend the remainder on recent dialogue.
+      // This is not a complete vector index: intermediate uncued memories can
+      // still be missed, and the evaluation must measure that limitation.
+      const lexicalCap=Math.min(room,Math.max(1,Math.floor(room*0.15)));
+      const pinnedCap=Math.min(room,Math.max(1,Math.floor(room*0.15)));
+      const recentCap=Math.min(room,Math.floor(room*0.45));
+      const earlyCap=Math.max(0,room-lexicalCap-pinnedCap-recentCap);
+      const lexical=room?retrieveActorMemories(store.db,{
+        timelineId,actorId,query,limit:lexicalCap
+      }).map(x=>({id:x.id,source_message_id:x.sourceMessageId,text:x.text})):[];
+      const pinned=store.db.prepare(
+        'SELECT id,source_message_id,text FROM actor_memories WHERE timeline_id=? AND actor_id=? AND pinned=1 ORDER BY occurred_at DESC,rowid DESC LIMIT ?'
+      ).all(timelineId,actorId,pinnedCap);
+      const recent=store.db.prepare(
+        'SELECT id,source_message_id,text FROM actor_memories WHERE timeline_id=? AND actor_id=? ORDER BY occurred_at DESC,rowid DESC LIMIT ?'
+      ).all(timelineId,actorId,room);
+      const early=store.db.prepare(
+        'SELECT id,source_message_id,text FROM actor_memories WHERE timeline_id=? AND actor_id=? ORDER BY occurred_at ASC,rowid ASC LIMIT ?'
+      ).all(timelineId,actorId,earlyCap);
+      const mem=[],seen=new Set();
+      const add=rows=>{for(const x of rows)if(mem.length<room&&!seen.has(x.id)){
+        seen.add(x.id);
+        mem.push({kind:'dialogue',id:x.id,sourceMessageId:x.source_message_id,
+          text:'Previously heard: '+x.text,
+          embeddingText:x.text.replace(/^(?:Player|You|Another character) said:\s*/u,'')});
+      }};
+      add(lexical.slice(0,lexicalCap));
+      add(pinned.slice(0,pinnedCap));
+      add(recent.slice(0,recentCap));
+      add(early.slice(0,earlyCap));
+      add(recent); // Fill any unused slots caused by overlapping candidates.
       const candidates=[...facts,...mem];
       if(!candidates.length)return [];
       const queryVector=(await embed([query.slice(0,480)]))[0];
