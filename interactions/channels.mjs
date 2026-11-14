@@ -23,7 +23,7 @@ export const CHANNELS = Object.freeze({
     audience:'directed',kind:'written',description:'Private text · only transmitted message content',
     placeholder:'Write a private text message…',
     perceptible:['delivered_text'],voiceField:'textStyle',
-    direction:'This is a private text-message conversation. Write ONLY the exact text the character sends, naturally in their established texting style. No scene narration, action paragraphs, speaker labels, timestamps, metadata or untransmitted private thoughts. Do not invent messages from the player or other accounts.' }),
+    direction:'This is a private text-message conversation. Write ONLY the exact message text the character sends, naturally in their established texting style. No scene narration, action paragraphs, speaker labels, timestamps, metadata or untransmitted private thoughts. Do not invent messages from the player or other accounts.' }),
   social_dm: Object.freeze({ id:'social_dm',label:'Social media DM',icon:'＠',
     audience:'directed',kind:'written',description:'Private direct message · handles, replies and shared posts',
     placeholder:'Write a direct message…',
