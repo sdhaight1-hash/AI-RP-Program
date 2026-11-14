@@ -36,14 +36,24 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const worldTime=clock ? new Date(clock.instantMs).toISOString()+' ('+clock.timeZone+')' : scene.worldTime;
   const entity=worldLibrary.entities?.find(e=>e.sourceCharacterId===actorId);
   const relevantCast=new Set([actorId,...(scene.castIds||[])]);
-  // Only the actor's authored outgoing ties may be treated as their own
-  // social knowledge. Incoming ties can encode another NPC's private feelings.
-  const socialTies=entity ? (worldLibrary.relationships||[]).filter(r=>r.fromId===entity.id)
-    .map(r=>{
-      const other=worldLibrary.entities?.find(e=>e.id===(r.fromId===entity.id?r.toId:r.fromId));
-      if(!other || (other.sourceCharacterId && !relevantCast.has(other.sourceCharacterId)))return null;
-      return other.name+': '+r.kind;
-    }).filter(Boolean).slice(0,5).join('; ') : '';
+  // Ordinary incoming ties may describe another NPC's private feelings.
+  // The one exception is a reviewed character-origin relationship: its
+  // evidence comes from this actor's own authored biography, so they know it.
+  const approvedIncoming=entity ? store.db.prepare(`SELECT r.from_id AS otherId,r.kind
+    FROM character_world_relationship_sources p
+    JOIN world_relationships r ON r.id=p.relationship_id
+    WHERE p.world_id=? AND p.character_id=? AND r.world_id=?
+      AND r.to_id=? AND r.from_id=p.source_entry_id`)
+    .all(worldId,actorId,worldId,entity.id) : [];
+  const socialTies=entity ? [
+    ...(worldLibrary.relationships||[]).filter(r=>r.fromId===entity.id)
+      .map(r=>({otherId:r.toId,kind:r.kind})),
+    ...approvedIncoming
+  ].map(r=>{
+    const other=worldLibrary.entities?.find(e=>e.id===r.otherId);
+    if(!other || (other.sourceCharacterId && !relevantCast.has(other.sourceCharacterId)))return null;
+    return other.name+': '+r.kind;
+  }).filter(Boolean).slice(0,5).join('; ') : '';
   // Reuse existing witnessed-history and channel rules instead of rebuilding
   // privacy logic in a second prompt implementation.
   const visible=createActorContext({
