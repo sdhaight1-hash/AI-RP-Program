@@ -34,7 +34,7 @@ const action=(name,onClick,className='subtle-button')=>{
 const active=c=>!c.trashedAt;
 
 export function renderEncounterStudio(host,{state,worldLibrary,worldId,selectedId=null,
-  onSelect,onSave,onDelete,onStart,onCharacters}){
+  onSelect,onSave,onDelete,onStart,onCharacters,onBackToTrash=null}){
   const templates=state.encounters||[];
   const available=state.characters.filter(active);
   const selected=templates.find(e=>e.id===selectedId)||null;
@@ -43,8 +43,13 @@ export function renderEncounterStudio(host,{state,worldLibrary,worldId,selectedI
   const heading=el('div');
   heading.append(el('h2','Encounter templates'),el('p',
     'Reusable starting situations for this world. Templates are not character traits. Deleting one does not delete scenes already played.','help'));
-  header.append(heading,action('＋ New template',()=>onSelect(null),'primary-button'));
-  host.append(header);
+  const controls=el('div','','encounter-header-actions');
+  if(onBackToTrash){
+    const back=action('← Back to Trash',onBackToTrash);
+    back.id='encounter-return-trash';controls.append(back);
+  }
+  controls.append(action('＋ New template',()=>onSelect(null),'primary-button'));
+  header.append(heading,controls);host.append(header);
   if(!available.length)host.append(el('p',
     'Create a character first. Existing archived-character templates remain visible below so you can remove their deletion blockers.','help'));
   const layout=el('div','','encounter-layout');
