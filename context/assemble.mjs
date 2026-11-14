@@ -1,6 +1,7 @@
 // Deterministic, actor-perspective context assembly for small local models.
 // This module never lets a browser-provided prompt define actor knowledge.
 import { createActorContext } from '../harness.mjs';
+import { describeEmotion } from '../engine.mjs';
 import { characterPlaceContext } from '../character/context.mjs';
 import { selectCharacterDetails } from '../character/relevance.mjs';
 import { retrieveActorMemories } from '../memory/store.mjs';
@@ -90,10 +91,11 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const instructions='You portray exactly one fictional NPC. Remain faithful to identity and character agency. Other participants speak only on their own turns. Never control the player character, invent their thoughts, or claim unseen knowledge. Quotes from previous dialogue are recollections of speech, NOT proof that claims were true. World and timeline facts override contradictory dialogue. Recollection does not require explicitly mentioning the memory.';
   const base=[
     instructions,
+    'Active communication rules: '+shorten(visible.styleInstruction,500),
     profile,
     'Current situation (only witnessed details):\n'+shorten(visible.sceneNotes,950),
     presentLocation?'Current actor location (world engine): '+shorten(presentLocation.name,150):'',
-    'Character state:\n'+shorten(visible.psychologyNotes,400),
+    'Character state:\n'+shorten(visible.psychologyNotes||describeEmotion(visible.emotion),400),
     'Player persona:\n'+shorten(visible.persona?.name,80)+' '+shorten(visible.persona?.description,220),
     visible.authorNote?'Author pacing guidance (not canon): '+shorten(visible.authorNote,300):''
   ].filter(Boolean);
@@ -112,7 +114,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const asMessages=()=>[{role:'system',content:system},...recent];
   if(estimateTokens(asMessages())>budget) {
     // Truncation is a last-resort safety measure, never unbounded prompt growth.
-    const minimal=[instructions,'Identity: '+shorten(actor.name,120),shorten(actor.personality,250),shorten(visible.sceneNotes,500)];
+    const minimal=[instructions,'Active communication rules: '+shorten(visible.styleInstruction,350),'Identity: '+shorten(actor.name,120),shorten(actor.personality,250),shorten(visible.sceneNotes,450)];
     systemParts.length=0;systemParts.push(...minimal);
     system=systemParts.join('\n\n');
   }
