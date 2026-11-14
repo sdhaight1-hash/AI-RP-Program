@@ -11,6 +11,7 @@ import { proposedRelationshipKinds } from '/character/relationship-bridge.mjs';
 import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
+import { worldPath,loadWorldSnapshot,loadWorldCatalog } from '/world-client.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -22,11 +23,12 @@ let currentTab = 'character';
 let activeWorkspace = 'story';
 let worldLibrary = null;
 let loadingWorlds = false;
+let switchingWorld = false;
 let selectedWorldId = null;
 let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
 // The selected world belongs to this browser tab. Every stateful request
 // carries its world ID, regardless of other tabs' selections.
-const scopedUrl = path => activeWorldId ? `${path}${path.includes('?') ? '&' : '?'}worldId=${encodeURIComponent(activeWorldId)}` : path;
+const scopedUrl = path => worldPath(path,activeWorldId);
 const portraitSrc = path => typeof path === 'string' && path.startsWith('/portraits/') ? scopedUrl(path) : path;
 let builderCharacterId = null;
 let builderTab = 'identity';
@@ -184,9 +186,17 @@ async function requireSavedStory() {
 
 async function bootstrapStorage() {
   try {
-    const response = await fetch(scopedUrl('/api/state'));
-    if (!response.ok) throw new Error(`Story database returned ${response.status}`);
-    const result = await response.json();
+    let result;
+    try {result=await loadWorldSnapshot(fetch,activeWorldId);}
+    catch(error) {
+      // A world may have been deleted or moved since this tab last opened.
+      // Fall back to the local default, never silently load another world under
+      // the old world ID.
+      if(!activeWorldId || error.status!==404)throw error;
+      activeWorldId=null;
+      sessionStorage.removeItem('ai-rp-selected-world');
+      result=await loadWorldSnapshot(fetch,null);
+    }
     revision = result.revision;
     activeWorldId = result.worldId || null;
     if(activeWorldId)sessionStorage.setItem('ai-rp-selected-world',activeWorldId);
@@ -417,9 +427,9 @@ async function refreshWorldLibrary() {
   if (loadingWorlds) return;
   loadingWorlds = true;
   try {
-    const response=await fetch(scopedUrl('/api/worlds'));
-    if(!response.ok)throw Error(`World Library unavailable (${response.status})`);
-    const received=await response.json();
+    const requestedWorldId=activeWorldId;
+    const received=await loadWorldCatalog(fetch,requestedWorldId);
+    if(requestedWorldId!==activeWorldId)return; // A switch finished during fetch.
     worldLibrary=received;
     selectedWorldId=activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
     if(!activeWorldId && worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
@@ -436,13 +446,14 @@ async function refreshWorldLibrary() {
 // backup, or stale per-world state is allowed to cross it.
 async function switchWorld(worldId) {
   if (worldId === activeWorldId) { $('world-launcher')?.close();return; }
+  if(switchingWorld)throw new Error('Another world switch is already in progress.');
   if (running || aiDraftController || fidelityController || localEvalController || worldEntryController) throw new Error('Finish or cancel generation before switching worlds.');
   if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
   if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
+  switchingWorld=true;
+  try {
   await requireSavedStory();
-  const response=await fetch(`/api/state?worldId=${encodeURIComponent(worldId)}`);
-  const result=await response.json();
-  if (!response.ok) throw new Error(result.error || 'Could not open world');
+  const result=await loadWorldSnapshot(fetch,worldId);
   pendingReply=null;streamingReply=null;pendingSnapshot=null;
   comfyJob=null;comfyImages=[]; // Do not expose another world's generated assets after switching.
   $('message-input').value='';
@@ -458,6 +469,7 @@ async function switchWorld(worldId) {
   currentTab='worlds';worldLibrary=null;
   $('world-launcher')?.close();
   applyTheme();render();await refreshWorldLibrary();renderWorldLauncher();showError();
+  } finally {switchingWorld=false;}
 }
 function renderWorldLauncher() {
   const host=$('world-launcher-list');if(!host)return;
