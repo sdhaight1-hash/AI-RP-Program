@@ -1296,6 +1296,40 @@ function renderWorkspace(){
     activeEntityIds.has(x.fromId)&&activeEntityIds.has(x.toId));
   const timelines=(worldLibrary?.timelines||[]).filter(x=>x.worldId===activeWorldId);
   const scene=activeSession(),character=activeCharacter();
+  if(mode==='encounters'){
+    renderEncounterStudio(host,{
+      state,worldLibrary,worldId:activeWorldId,selectedId:encounterEditingId,
+      onSelect:id=>{encounterEditingId=id;renderWorkspace();$('encounter-title')?.focus();},
+      onCharacters:()=>setWorkspace('characters'),
+      onSave:(entry,error)=>{
+        if(error)return showError(error);
+        if(running||destructiveActionInFlight)return showError('Finish the active operation before editing templates.');
+        if(!entry||!activeWorldId||!serverStorage)return showError('Open a connected world before saving a template.');
+        state.encounters ||= [];
+        const existing=state.encounters.findIndex(e=>e.id===entry.id);
+        if(existing>=0)state.encounters[existing]=entry;
+        else state.encounters.push(entry);
+        encounterEditingId=entry.id;
+        save();renderWorkspace();showError();
+      },
+      onDelete:item=>{
+        if(running||destructiveActionInFlight)return showError('Finish the active operation before deleting a template.');
+        const used=state.sessions.filter(s=>s.encounterId===item.id).length;
+        if(!confirm(`Permanently remove encounter template "${item.title}"?${used?' '+used+' existing scene(s) keep their transcripts and starting circumstances.':''} This cannot be undone; back up first.`))return;
+        removeEncounterTemplate(state,item.id);
+        if(encounterEditingId===item.id)encounterEditingId=null;
+        save();renderWorkspace();renderInspector();showError();
+      },
+      onStart:item=>{
+        const actors=(item.characterIds||[]).map(id=>state.characters.find(c=>c.id===id));
+        if(!actors.length||actors.some(c=>!c||c.trashedAt))
+          return showError('Restore or reassign archived participants before using this template.');
+        if(running)return showError('Finish the current generation first.');
+        startSession(actors[0],item);
+      }
+    });
+    return;
+  }
   const grid=el('div','','workspace-grid');
   if(mode==='world'){
     host.append(workspaceStats([[places.length,'Established places'],[entities.length,'People & entities'],
@@ -1315,10 +1349,11 @@ function renderWorkspace(){
         const from=entities.find(e=>e.id===x.fromId),to=entities.find(e=>e.id===x.toId);
         return [`${from?.name||'?'} → ${to?.name||'?'}`,x.kind];
       }),actions:[['Open relationship graph',()=>openDetailDesk('relations'),true]]}));
-    grid.append(workspaceCard({index:'04 · CREATIVE LOOP',title:'World ⇄ character',
-      description:'Character biography can propose named world entries with exact source quotes. Accepting a place or kinship remains a creator decision—not a model action.',
-      actions:[['Open Character Studio',()=>character&&openBuilder(character),true],
-        ['View world lore',()=>openDetailDesk('lore')]]}));
+    grid.append(workspaceCard({index:'04 · SCENE STARTERS',title:'Encounters & communication',
+      description:'Manage reusable starting situations and choose how characters meet: webcam, social feeds, calls, texts or in person. These are world-scoped templates, not personality fields.',
+      content:workspaceRows(state.encounters||[],x=>[x.title,getChannel(x.channelId).label]),
+      actions:[['Manage encounter templates',()=>setWorkspace('encounters'),true],
+        ['Start a scene',()=>openNewSceneDialog()]]}));
   }else if(mode==='characters'){
     const complete=characters.reduce((total,c)=>total+CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length,0);
     host.append(workspaceStats([[characters.length,'Active characters'],[CHARACTER_V2_FIELDS.length,'Dedicated field contracts'],
