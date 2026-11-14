@@ -22,7 +22,7 @@ try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } c
 let currentTab = 'character';
 let activeWorkspace = 'story';
 let worldLibrary = null;
-let loadingWorlds = false;
+let worldLibraryRequest = 0;
 let switchingWorld = false;
 let selectedWorldId = null;
 let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
@@ -424,12 +424,13 @@ function attachFields(callback) {
   }));
 }
 async function refreshWorldLibrary() {
-  if (loadingWorlds) return;
-  loadingWorlds = true;
+  // The latest request wins. An old fetch may finish after switching worlds;
+  // blocking a new refresh behind it would leave an empty or stale Atlas.
+  const requestId=++worldLibraryRequest;
+  const requestedWorldId=activeWorldId;
   try {
-    const requestedWorldId=activeWorldId;
     const received=await loadWorldCatalog(fetch,requestedWorldId);
-    if(requestedWorldId!==activeWorldId)return; // A switch finished during fetch.
+    if(requestId!==worldLibraryRequest||requestedWorldId!==activeWorldId)return;
     worldLibrary=received;
     selectedWorldId=activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
     if(!activeWorldId && worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
@@ -438,7 +439,6 @@ async function refreshWorldLibrary() {
     renderHeader();
     renderWorkspace();
   } catch(err) { showError(err.message); }
-  finally { loadingWorlds=false; }
 }
 
 
