@@ -939,6 +939,39 @@ ${m.content}`).join('\n\n');
           supersedes.add(new Option('Correct: '+fact.text.slice(0,65),fact.id));
         const note=el('textarea');note.id='fact-note';note.rows=3;note.maxLength=700;
         note.placeholder='What does this NPC now remember or believe?';
+        const suggestFact=el('button','Ask local AI to suggest memories','subtle-button');
+        const suggestionsHost=el('div','','group');
+        suggestFact.disabled=!state.settings.model||!visibleSources.length;
+        suggestFact.onclick=async()=>{
+          suggestFact.disabled=true;
+          suggestFact.textContent='Looking for important moments…';
+          suggestionsHost.replaceChildren();
+          try{
+            await requireSavedStory();
+            const response=await fetch('/api/actor/facts/suggest',{method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({worldId:requestedWorld,sceneId:requestedScene,
+                actorId:actor.id,revision,model:state.settings.model})});
+            const data=await response.json();
+            if(!response.ok)throw Error(data.error||'Memory suggestions failed');
+            if(currentTab!=='context'||activeWorldId!==requestedWorld||activeSession()?.id!==requestedScene)return;
+            if(!data.suggestions.length)suggestionsHost.append(el('p','No significant new memories found in the recent conversation.','help'));
+            for(const proposal of data.suggestions){
+              const row=el('div','','lore-card');
+              row.append(el('strong',proposal.kind),el('p',proposal.text,'help'),
+                el('p','From: “'+proposal.quote+'”','help'));
+              const review=el('button','Review this suggestion','subtle-button');
+              review.onclick=()=>{
+                source.value=proposal.sourceMessageId;
+                kind.value=proposal.kind;
+                note.value=proposal.text;
+                note.focus();
+              };
+              row.append(review);suggestionsHost.append(row);
+            }
+          }catch(error){showError(error.message);}
+          finally{suggestFact.disabled=false;suggestFact.textContent='Ask local AI to suggest memories';}
+        };
         const saveFact=el('button','Remember this detail','primary-button');
         saveFact.disabled=!visibleSources.length;
         saveFact.onclick=async()=>{
@@ -957,7 +990,7 @@ ${m.content}`).join('\n\n');
         section.append(el('label','Source conversation message','field-label'),source,
           el('label','Kind of memory','field-label'),kind,
           el('label','Correct an earlier belief (optional)','field-label'),supersedes,
-          el('label','Subjective memory','field-label'),note,saveFact);
+          el('label','Subjective memory','field-label'),note,saveFact,suggestFact,suggestionsHost);
         if(!visibleSources.length)section.append(el('p','No witnessed source messages in this scene yet.','help'));
         host.append(section);
 
