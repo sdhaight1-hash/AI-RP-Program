@@ -4,6 +4,9 @@ import { chooseSpeaker, createActorContext, archiveCharacter, archiveSession, du
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 import { getChannel } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
+import { normalizeFrequentPlaces, importedEncounter } from '/character/schema.mjs';
+import { characterPlaceContext } from '/character/context.mjs';
+import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis } from '/character/authoring.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -16,9 +19,11 @@ let currentTab = 'character';
 let worldLibrary = null;
 let loadingWorlds = false;
 let selectedWorldId = null;
+let activeWorldId = null;
 let builderCharacterId = null;
 let builderTab = 'identity';
 let aiDraftTarget = null;
+let aiDraftRequest = null;
 let aiDraftController = null;
 let fidelityController = null;
 let fidelityDraft = null;
@@ -26,31 +31,51 @@ let fidelitySelectedProbe = 'everyday';
 const builderCharacter = () => state.characters.find(c => c.id === builderCharacterId);
 const BUILDER_SECTIONS = {
   identity: [
-    ['name','Name','text','What do other people call this character?'],
-    ['handle','Messaging handle','text','Optional social username; e.g. @mara.vale.'],
-    ['tagline','One-line introduction','text','A memorable hook for the character library.'],
-    ['description','Appearance & identity','textarea','Visible features, age (if relevant), mannerisms, and durable facts.'],
-    ['tags','Tags · comma-separated','tags','Genre, setting, themes, archetypes.'],
-    ['color','Character accent','color','A personal identifying color; independent of the UI theme.'],
+    ['name','Name','text','World-specific character identity.'],
+    ['aliases','Aliases and nicknames','text','Names used by friends, family, or acquaintances.'],
+    ['age','Age','text','Age in this world and canonical point in history.'],
+    ['pronouns','Pronouns','text','Optional pronouns for dialogue and narration.'],
+    ['handle','Messaging handle','text','Optional social username for worlds with messaging.'],
+    ['tagline','One-line introduction','text','Public description in the character library.'],
+    ['color','Character accent','color','Personal color; separate from the UI theme.'],
+  ],
+  appearance: [
+    ['description','Appearance overview','textarea','Canonical visible identity; not a current outfit or scene.'],
+    ['facialFeatures','Face and distinguishing features','textarea','Face shape, complexion, freckles, marks, and habitual expressions.'],
+    ['hair','Hair','text','Color, length, texture and ordinary styling.'],
+    ['eyes','Eyes','text','Color and distinctive characteristics.'],
+    ['physique','Physical build','textarea','Height, frame, posture, proportions; avoid contradictory descriptors.'],
+    ['clothingStyle','Typical fashion and grooming','textarea','Usual aesthetic, clothing preferences and self-presentation.'],
   ],
   mind: [
-    ['personality','Personality and temperament','textarea','Contradictions, strengths, flaws, and typical reactions.'],
-    ['backstory','History and knowledge','textarea','Facts they remember and secrets they know—not omniscient knowledge.'],
-    ['motivations','Desires and long-term goals','textarea','What do they pursue when the player is not present?'],
-    ['fears','Fears and vulnerabilities','textarea','What puts them off balance?'],
-    ['boundaries','Values and personal boundaries','textarea','Principles, choices they resist, deal-breakers.'],
+    ['personality','Temperament and personality','textarea','Defining tendencies and context-specific behavior.'],
+    ['values','Core values','textarea','What they believe, prioritize and will stand up for.'],
+    ['contradictions','Contradictions','textarea','Tensions between desires, ideals and habits.'],
+    ['stressBehavior','When stressed','textarea','Observable coping responses rather than abstract adjectives.'],
+    ['comfortBehavior','When relaxed or comfortable','textarea','How familiarity and safety change their behavior.'],
+    ['conflictStyle','Conflict and reconciliation','textarea','How they disagree, apologize and make amends.'],
+    ['motivations','Motivations and goals','textarea','What they seek beyond the player character.'],
+    ['fears','Fears and vulnerabilities','textarea','Specific fears, insecurities and sensitive subjects.'],
+    ['boundaries','Personal boundaries','textarea','What they will decline or resist.'],
+  ],
+  history: [
+    ['backstory','Life overview','textarea','Established personal history, not universal world knowledge.'],
+    ['familyHistory','Family and upbringing','textarea','Family circumstances and meaningful ties.'],
+    ['formativeEvents','Formative events','textarea','Specific past experiences that shaped present behavior.'],
+  ],
+  life: [
+    ['occupation','Occupation / role','text','What they do for work, study or community life.'],
+    ['hobbies','Hobbies and interests','textarea','How they spend their own free time.'],
+    ['preferredEnvironment','Preferred environment','textarea','Atmospheres and surroundings they gravitate toward; not current location.'],
+    ['dailyRoutine','Daily and weekly rhythms','textarea','Typical schedules, habits and exceptions; not rigid teleportation rules.'],
+    ['socialHabits','Social habits','textarea','How they maintain friendships, communicate and spend time with others.'],
   ],
   voice: [
     ['speechStyle','Distinctive voice','textarea','Pacing, vocabulary, cadence, humor, regionalisms.'],
-    ['inPersonStyle','In-person speaking style','textarea','Body language, everyday dialogue rhythms, habits when together face-to-face.'],
-    ['phoneStyle','Phone-call speaking style','textarea','Spoken cadence, hesitation, audible mannerisms; no visible gestures or descriptions.'],
-    ['textStyle','Messaging style','textarea','Text length, punctuation, emoji, slang, habits around sending short messages.'],
-    ['exampleDialogue','Sample dialogue','textarea','Example exchanges that teach cadence, not past events.'],
-  ],
-  scene: [
-    ['scenario','Initial situation','textarea','Where and when the story begins; current circumstances.'],
-    ['greeting','First message','textarea','Open with an actionable moment. The player must have room to respond.'],
-    ['alternateGreetings','Alternative openings · separate with blank lines','greetings','Optional other ways to begin.'],
+    ['inPersonStyle','In-person speaking style','textarea','Body language and conversational rhythms when physically together.'],
+    ['phoneStyle','Phone-call speaking style','textarea','Audible mannerisms, pauses and tone; no visual gestures.'],
+    ['textStyle','Messaging style','textarea','Message length, punctuation, emojis and sending habits.'],
+    ['exampleDialogue','Example exchanges','textarea','Demonstrations of voice, not events assumed to have happened.'],
   ],
 };
 const builderLabel = key => Object.values(BUILDER_SECTIONS).flat().find(row => row[0] === key)?.[1] || key;
@@ -90,7 +115,8 @@ const sceneActor = session => state.characters.find(c => c.id === chooseSpeaker(
 const playable = () => state.characters.filter(c => !c.trashedAt);
 // Keep the browser copy as an emergency backup; SQLite is the primary save.
 // Serialize writes to avoid stale-response races while the user types.
-const PENDING_BACKUP_KEY = `${STORAGE_KEY}:pending`;
+const backupStateKey = () => activeWorldId ? `${STORAGE_KEY}:world:${activeWorldId}` : STORAGE_KEY;
+const pendingBackupKey = () => activeWorldId ? `${STORAGE_KEY}:pending:${activeWorldId}` : `${STORAGE_KEY}:pending`;
 let revision = 0;
 let serverStorage = false;
 let writeInFlight = false;
@@ -104,8 +130,8 @@ const queueSave = (snapshot) => {
 const save = () => {
   const snapshot = JSON.stringify(state);
   try {
-    localStorage.setItem(STORAGE_KEY, snapshot);
-    localStorage.setItem(PENDING_BACKUP_KEY, JSON.stringify({ revision }));
+    localStorage.setItem(backupStateKey(), snapshot);
+    localStorage.setItem(pendingBackupKey(), JSON.stringify({ revision }));
   } catch { showError('Browser backup unavailable; SQLite saving will still be attempted.'); }
   queueSave(snapshot);
 };
@@ -117,13 +143,13 @@ async function flushState() {
   pendingSnapshot = null;
   try {
     const response = await fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ revision, state: JSON.parse(snapshot) }) });
+      body: JSON.stringify({ revision, worldId: activeWorldId, state: JSON.parse(snapshot) }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `SQLite save failed (${response.status})`);
     revision = result.revision;
     try {
-      if (pendingSnapshot === null) localStorage.removeItem(PENDING_BACKUP_KEY);
-      else localStorage.setItem(PENDING_BACKUP_KEY, JSON.stringify({ revision }));
+      if (pendingSnapshot === null) localStorage.removeItem(pendingBackupKey());
+      else localStorage.setItem(pendingBackupKey(), JSON.stringify({ revision }));
     } catch { /* SQLite is authoritative once the write completes */ }
   } catch (error) {
     serverStorage = false; // Never silently overwrite an unknown server revision.
@@ -151,13 +177,14 @@ async function bootstrapStorage() {
     if (!response.ok) throw new Error(`Story database returned ${response.status}`);
     const result = await response.json();
     revision = result.revision;
+    activeWorldId = result.worldId || null;
     serverStorage = true;
     if (result.state) {
       const persisted = normalizeState(result.state);
       let unsaved = null, pendingMeta = null;
       try {
-        pendingMeta = JSON.parse(localStorage.getItem(PENDING_BACKUP_KEY));
-        if (pendingMeta && localStorage.getItem(STORAGE_KEY)) unsaved = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY)));
+        pendingMeta = JSON.parse(localStorage.getItem(pendingBackupKey()));
+        if (pendingMeta && localStorage.getItem(backupStateKey())) unsaved = normalizeState(JSON.parse(localStorage.getItem(backupStateKey())));
       } catch { /* Invalid browser backup cannot override SQLite */ }
       if (unsaved && JSON.stringify(unsaved) !== JSON.stringify(persisted)) {
         state = unsaved;
@@ -174,8 +201,8 @@ async function bootstrapStorage() {
       } else {
         state = persisted;
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          localStorage.removeItem(PENDING_BACKUP_KEY);
+          localStorage.setItem(backupStateKey(), JSON.stringify(state));
+          localStorage.removeItem(pendingBackupKey());
         } catch { /* SQLite is authoritative */ }
       }
     } else {
@@ -190,7 +217,7 @@ async function bootstrapStorage() {
         const value=await saved.json();
         revision=value.revision;
         state=normalizeState(value.state);
-        try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch{/* SQLite is authoritative */}
+        try{localStorage.setItem(backupStateKey(),JSON.stringify(state));}catch{/* SQLite is authoritative */}
       }
     }
   } catch (error) {
@@ -198,19 +225,36 @@ async function bootstrapStorage() {
   }
   render();
   refreshModels();
-  refreshWorldLibrary();
+  void refreshWorldLibrary().then(() => {renderWorldLauncher(); if(activeWorldId && !sessionStorage.getItem('ai-rp-world-opened')) $('world-launcher').showModal();});
 }
 const showError = (message = '') => { $('error').textContent = message; $('error').classList.toggle('hidden', !message); };
 
-function startSession(char = activeCharacter()) {
+function startSession(char = activeCharacter(), encounter = null) {
   if (!char) return;
-  const session = createSession(char);
+  const session = createSession(char,encounter);
+  if(encounter?.locationId)session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
   state.sessions.unshift(session);
   state.activeSessionId = session.id;
   save(); render();
   $('message-input').focus();
 }
 
+function openNewSceneDialog() {
+  if(running)return;
+  const actors=state.characters.filter(c=>!c.trashedAt);
+  if(!actors.length)return showError('Create a character inside this world first.');
+  const chosen=$('new-scene-character');chosen.replaceChildren();
+  for(const c of actors)chosen.add(new Option(c.name,c.id));
+  if(activeCharacter())chosen.value=activeCharacter().id;
+  const refresh=()=>{
+    const template=$('new-scene-encounter');template.replaceChildren();
+    template.add(new Option('Unscripted scene (no opening template)',''));
+    for(const encounter of state.encounters||[]){
+      if(encounter.characterIds?.includes(chosen.value))template.add(new Option(encounter.title,encounter.id));
+    }
+  };
+  chosen.onchange=refresh;refresh();$('new-scene-dialog').showModal();
+}
 function renderLists() {
   const sessions = $('session-list');
   sessions.replaceChildren();
@@ -364,14 +408,51 @@ async function refreshWorldLibrary() {
     const response=await fetch('/api/worlds');
     if(!response.ok)throw Error(`World Library unavailable (${response.status})`);
     worldLibrary=await response.json();
-    if(!worldLibrary.worlds.some(w=>w.id===selectedWorldId)) {
-      const active=worldLibrary.timelines.find(t=>t.id===activeSession()?.timelineId);
-      selectedWorldId=active?.worldId || worldLibrary.worlds[0]?.id || null;
-    }
+    selectedWorldId=worldLibrary.activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
+    if(worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
+    const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active world';
     if(['worlds','atlas','relations'].includes(currentTab))renderInspector();
     renderHeader();
   } catch(err) { showError(err.message); }
   finally { loadingWorlds=false; }
+}
+
+
+// A world switch is a hard context boundary. No pending generation, browser
+// backup, or stale per-world state is allowed to cross it.
+async function switchWorld(worldId) {
+  if (worldId === activeWorldId) { $('world-launcher')?.close();return; }
+  if (running || aiDraftController || fidelityController) throw new Error('Finish or cancel generation before switching worlds.');
+  if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
+  if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
+  await requireSavedStory();
+  const response=await fetch('/api/worlds/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId})});
+  const result=await response.json();
+  if (!response.ok) throw new Error(result.error || 'Could not open world');
+  pendingReply=null;streamingReply=null;pendingSnapshot=null;
+  $('message-input').value='';
+  aiDraftTarget=null;builderCharacterId=null;fidelityDraft=null;
+  $('character-builder')?.close();
+  activeWorldId=result.worldId;
+  selectedWorldId=result.worldId;
+  state=normalizeState(result.state);
+  revision=result.revision;
+  serverStorage=true;
+  try {localStorage.setItem(backupStateKey(),JSON.stringify(state));sessionStorage.setItem('ai-rp-world-opened','1');} catch {}
+  currentTab='worlds';worldLibrary=null;
+  $('world-launcher')?.close();
+  applyTheme();render();await refreshWorldLibrary();renderWorldLauncher();showError();
+}
+function renderWorldLauncher() {
+  const host=$('world-launcher-list');if(!host)return;
+  host.replaceChildren();
+  for (const world of worldLibrary?.worlds||[]) {
+    const card=el('div','','world-launcher-item');
+    card.append(el('strong',world.name),el('p',world.description||'An unpopulated world','help'));
+    const open=el('button',world.id===activeWorldId?'Enter Current World':'Open World','primary-button');
+    open.onclick=()=>world.id===activeWorldId ? (sessionStorage.setItem('ai-rp-world-opened','1'),$('world-launcher').close()) : void switchWorld(world.id).catch(err=>showError(err.message));
+    card.append(open);host.append(card);
+  }
 }
 
 const selectedWorld = () => worldLibrary?.worlds.find(w=>w.id===selectedWorldId) || worldLibrary?.worlds[0] || null;
@@ -379,7 +460,7 @@ function addWorldChooser(selectId) {
   const select=$(selectId);
   for(const world of worldLibrary?.worlds || []) select.add(new Option(world.name,world.id));
   if(selectedWorld())select.value=selectedWorld().id;
-  select.onchange=()=>{selectedWorldId=select.value;renderInspector();};
+  select.onchange=()=>{void switchWorld(select.value).catch(error=>showError(error.message));};
 }
 const postWorld = async (endpoint,data)=>{
   if(!serverStorage)throw Error('Connect the SQLite server before modifying world canon.');
@@ -564,7 +645,7 @@ function renderInspector() {
     $('import-character').onclick = () => $('character-upload').click();
     $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } e.target.value=''; };
   } else if (currentTab === 'worlds') {
-    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Canon worlds are independent of roleplay scenes. Each playthrough has its own timeline; changing one does not rewrite another. This first release provides world containers and scene assignment. Location and relationship editors come next.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><p class="footer-note">A legacy scene is automatically placed in its own imported timeline. Moving a scene changes its timeline association, not its historical messages. Back up your stories before experimenting with new worlds.</p>`;
+    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Canon worlds are independent of roleplay scenes. Each playthrough has its own timeline; changing one does not rewrite another. This first release provides world containers and scene assignment. Location and relationship editors come next.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><section class="world-encounters"><h3 class="builder-subtitle">World Encounter Templates</h3><p class="help">Optional scene openings belong to this world—not to an NPC’s permanent personality. You can also start an unscripted scene.</p><div id="world-encounter-list"></div><div class="group"><label class="field-label" for="encounter-title">Encounter name</label><input id="encounter-title" maxlength="120" placeholder="Late-night text from Mara"/><label class="field-label" for="encounter-character">Participating character</label><select id="encounter-character"></select><label class="field-label" for="encounter-channel">Interaction channel</label><select id="encounter-channel"><option value="in_person">In person</option><option value="phone_call">Phone call</option><option value="text_message">Text message</option></select><label class="field-label" for="encounter-location">Optional starting location</label><select id="encounter-location"></select><label class="field-label" for="encounter-premise">Scene circumstances</label><textarea id="encounter-premise" rows="3" maxlength="3000"></textarea><label class="field-label" for="encounter-opening">Optional NPC opening message</label><textarea id="encounter-opening" rows="3" maxlength="3000"></textarea><button id="encounter-create" class="primary-button">Save Encounter Template</button></div></section><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
     const report = $('world-library-list');
     if (!worldLibrary) {
       report.append(el('p','Loading your local worlds...','help'));
@@ -577,15 +658,44 @@ function renderInspector() {
       const card=el('div','','lore-card');
       const title=el('strong',world.name);const desc=el('p',world.description||'Blank canon world','help');
       card.append(title,desc);
+      const open=el('button',world.id===activeWorldId?'Current World':'Open World','subtle-button');
+      open.disabled=world.id===activeWorldId;
+      open.onclick=()=>{void switchWorld(world.id).catch(error=>showError(error.message));};
+      card.append(open);
       for(const timeline of worldLibrary.timelines.filter(t=>t.worldId===world.id)) {
         const label=el('p',`${timeline.name}${timeline.id===s?.timelineId?' · current scene':''}`,'help');
         card.append(label);timelineSelect.add(new Option(`${world.name} — ${timeline.name}`,timeline.id));
       }
       report.append(card);
     }
+    const encounterList=$('world-encounter-list');
+    for(const encounter of state.encounters||[]){
+      const card=el('div','','lore-card');
+      const who=encounter.characterIds.map(id=>state.characters.find(c=>c.id===id)?.name||'Unknown').join(', ');
+      card.append(el('strong',encounter.title),el('p',`${who} · ${getChannel(encounter.channelId).label||encounter.channelId}`,'help'),
+        el('p',encounter.premise||'Unscripted','help'));
+      const remove=el('button','Remove template','subtle-button');remove.onclick=()=>{
+        if(!confirm('Remove this encounter template? Existing scenes remain unchanged.'))return;
+        state.encounters=state.encounters.filter(e=>e.id!==encounter.id);save();renderInspector();
+      };
+      card.append(remove);encounterList.append(card);
+    }
+    for(const c of state.characters.filter(c=>!c.trashedAt))$('encounter-character').add(new Option(c.name,c.id));
+    $('encounter-location').add(new Option('No fixed location',''));
+    for(const loc of worldLibrary.locations||[])if(loc.worldId===activeWorldId)$('encounter-location').add(new Option(loc.name,loc.id));
+    $('encounter-create').disabled=!$('encounter-character').value;
+    $('encounter-create').onclick=()=>{
+      const name=$('encounter-title').value.trim(),characterId=$('encounter-character').value;
+      if(!name||!characterId)return showError('Choose an encounter title and a character.');
+      state.encounters ||= [];
+      state.encounters.push({id:crypto.randomUUID(),title:name.slice(0,120),characterIds:[characterId],
+        locationId:$('encounter-location').value||null,channelId:$('encounter-channel').value,
+        premise:$('encounter-premise').value.slice(0,3000),opening:$('encounter-opening').value.slice(0,3000),alternativeOpenings:[]});
+      save();renderInspector();showError();
+    };
     if(!worldLibrary.worlds.length)report.append(el('p','Create your first world to begin.','empty-note'));
-    if(selectedWorld())worldSelect.value=selectedWorld().id;
-    worldSelect.onchange=()=>{selectedWorldId=worldSelect.value;};
+    if(activeWorldId)worldSelect.value=activeWorldId;
+    worldSelect.onchange=()=>{void switchWorld(worldSelect.value).catch(error=>showError(error.message));};
     if(s?.timelineId && worldLibrary.timelines.some(t=>t.id===s.timelineId)) timelineSelect.value=s.timelineId;
     const fillClock=()=>{
       const clock=worldLibrary.clocks?.find(c=>c.timelineId===timelineSelect.value);
@@ -610,12 +720,13 @@ function renderInspector() {
         if(!serverStorage)throw Error('The SQLite server must be connected to create worlds.');
         const res=await fetch('/api/worlds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('world-new-name').value,description:$('world-new-description').value})});
         const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create world');
-        selectedWorldId=data.id;showError();await refreshWorldLibrary();$('world-select').value=data.id;
+        await switchWorld(data.id);showError();
       }catch(error){showError(error.message);}
     };
     $('timeline-create').onclick=async()=>{
       try{
         if(!serverStorage)throw Error('The SQLite server must be connected to create timelines.');
+        if($('world-select').value!==activeWorldId)throw Error('Open that world before creating its timeline.');
         const res=await fetch('/api/timelines',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:$('world-select').value,name:$('timeline-new-name').value})});
         const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create timeline');
         showError();await refreshWorldLibrary();$('timeline-select').value=data.id;
@@ -756,7 +867,7 @@ function renderInspector() {
     const reasons=$('psy-reasons');for(const reason of [...e.reasons].reverse().slice(0,8))reasons.append(el('p',`${reason.primary} · ${reason.summary}`,'help'));
     $('advance-time').onclick=()=>{if(running)return;const hours=Number($('advance-hours').value);if(!Number.isFinite(hours)||hours<=0||hours>168)return showError('Choose between 0 and 168 hours.');for(const id of s.castIds)s.psychologyByActor[id]=advanceMindTime(s.psychologyByActor[id]||createMind(),hours);s.timeHoursElapsed=(s.timeHoursElapsed||0)+hours;save();renderInspector();};
   } else if (currentTab === 'context') {
-    const actor=sceneActor(s); if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore a cast member or add an active character in Cast.</p>';return;} const prompt=createActorContext({session:{...s,worldTime:timelineClockLabel(s)||s.worldTime},characters:state.characters,actorId:actor.id,persona:state.persona,lore:state.lore,buildMessages});
+    const actor=sceneActor(s); if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore a cast member or add an active character in Cast.</p>';return;} const prompt=createActorContext({session:{...s,worldTime:timelineClockLabel(s)||s.worldTime},characters:state.characters,actorId:actor.id,persona:state.persona,lore:state.lore,buildMessages,worldPlaceNotes:characterPlaceContext(actor,worldLibrary,activeWorldId)});
     const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n');
     const charCount=prompt.messages.reduce((n,m)=>n+m.content.length,0);
     host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">This is the actual normal-reply prompt assembled for the local model. Continue adds an extra instruction. Sizes are rough character-based estimates, not tokenizer counts.</p>
@@ -824,6 +935,52 @@ function openBuilder(c) {
   renderBuilder();
   if (!$('character-builder').open) $('character-builder').showModal();
 }
+function renderCharacterPlaces(host,c) {
+  const worldPlaces=(worldLibrary?.locations||[]).filter(l=>l.worldId===activeWorldId);
+  const section=el('section','','character-places');
+  section.append(el('h3','Places in this world','builder-subtitle'),
+    el('p','Preferred places and usual routines describe tendencies, not the character’s present whereabouts.','help'));
+  if(!worldPlaces.length)section.append(el('p','Add a place to the World Atlas to link a home, workplace or favorite destination.','help'));
+  const makeSelect=(label,key)=>{
+    const row=el('div','','builder-field');const title=el('label',label,'field-label');
+    const select=document.createElement('select');title.htmlFor=select.id=`builder-${key}`;
+    select.add(new Option('Not established',''));
+    for(const loc of worldPlaces)select.add(new Option(`${loc.name} (${loc.kind})`,loc.id));
+    select.value=c[key]||'';
+    select.onchange=()=>{c[key]=select.value||null;save();};
+    row.append(title,select);section.append(row);
+  };
+  makeSelect('Home / primary residence','homeLocationId');
+  makeSelect('Workplace / regular activity','workLocationId');
+  section.append(el('h4','Frequently visited places','builder-subtitle'));
+  for(const place of c.frequentPlaces||[]){
+    const loc=worldPlaces.find(l=>l.id===place.locationId);
+    const card=el('div','','lore-card');
+    card.append(el('strong',`${loc?.name||'Unknown place'} · ${place.role||'Regular visit'}`),
+      el('p',[place.frequency,place.reason].filter(Boolean).join(' · '),'help'));
+    const remove=el('button','Remove','subtle-button');remove.onclick=()=>{
+      c.frequentPlaces=c.frequentPlaces.filter(x=>x.locationId!==place.locationId);save();renderBuilder();};
+    card.append(remove);section.append(card);
+  }
+  if(worldPlaces.length){
+    const target=document.createElement('select');target.id='builder-regular-place';target.add(new Option('Select a world location',''));
+    for(const loc of worldPlaces.filter(l=>!(c.frequentPlaces||[]).some(p=>p.locationId===l.id)))target.add(new Option(loc.name,loc.id));
+    const role=document.createElement('input');role.placeholder='Role: favorite café, friend’s home...';role.maxLength=80;
+    const frequency=document.createElement('input');frequency.placeholder='Frequency: weekends, occasionally...';frequency.maxLength=120;
+    const reason=document.createElement('input');reason.placeholder='Why they visit';reason.maxLength=600;
+    const add=el('button','Link frequent place','subtle-button');add.onclick=()=>{
+      if(!target.value)return;
+      c.frequentPlaces=normalizeFrequentPlaces([...(c.frequentPlaces||[]),{locationId:target.value,role:role.value,frequency:frequency.value,reason:reason.value}]);
+      save();renderBuilder();
+    };
+    section.append(target,role,frequency,reason,add);
+  }
+  const s=activeSession();
+  const current=worldLibrary?.positions?.find(p=>p.timelineId===s?.timelineId && p.actorId===c.id);
+  const name=worldPlaces.find(x=>x.id===current?.locationId)?.name;
+  section.append(el('p',`Current timeline whereabouts: ${name || 'Not established'}. Updated through timeline/world events, not from routine preferences.`,'help'));
+  host.append(section);
+}
 function renderBuilder() {
   const c = builderCharacter(); if (!c) return;
   $('builder-title').textContent = `Creating ${c.name}`;
@@ -856,6 +1013,7 @@ function renderBuilder() {
     });
     group.append(caption, input, el('p', help, 'help')); host.append(group);
   }
+  if(builderTab==='life')renderCharacterPlaces(host,c);
   if(builderTab==='mind'){
     const pane=el('section','','psychology-controls');pane.append(el('h3','Psychological dispositions','builder-subtitle'),el('p','Stable traits influence how the character appraises the same witnessed event. They do not force specific decisions.','help'));
     c.disposition ||= {...DEFAULT_DISPOSITION};
@@ -1005,11 +1163,28 @@ async function uploadPortrait(file) {
   save(); renderBuilderPortrait(); renderLists(); renderHeader(); renderMessages();
   if (currentTab === 'character') renderInspector();
 }
+function renderBuilderAIChanges() {
+  const host=$('builder-ai-changes');host.replaceChildren();
+  if(!aiDraftRequest)return;
+  let proposal;
+  try{proposal=parseCharacterSuggestions($('builder-ai-result').value,aiDraftRequest);}
+  catch(err){host.append(el('p',err.message+' You may edit the raw response and review it again.','help'));return;}
+  host.append(el('strong','Proposed changes — check only the fields to accept'));
+  for(const [key,value] of Object.entries(proposal)){
+    const box=el('div','','builder-ai-change');
+    const label=document.createElement('label');label.className='field-label';
+    const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=true;checkbox.dataset.proposalField=key;
+    label.append(checkbox,document.createTextNode(' '+builderLabel(key)));
+    const before=builderCharacter()?.[key];if(before)box.append(el('p',`Current: ${String(before).slice(0,250)}`,'help'));
+    const edit=document.createElement('textarea');edit.rows=4;edit.maxLength=12000;edit.value=value;edit.dataset.proposalText=key;
+    box.append(label,edit);host.append(box);
+  }
+}
 function setupBuilderAI() {
   const select = $('builder-ai-target');
-  select.add(new Option('✦ Complete character profile', 'full'));
+  select.add(new Option('✦ Develop up to four missing details', 'full'));
   for (const key of CHARACTER_FIELDS.filter(x => x !== 'name' && x !== 'tagline')) select.add(new Option(builderLabel(key),key));
-  select.onchange = () => { $('builder-ai-preview').classList.add('hidden'); aiDraftTarget = null; };
+  select.onchange = () => { $('builder-ai-preview').classList.add('hidden'); aiDraftTarget = null; aiDraftRequest=null; };
   $('builder-close').onclick = () => $('character-builder').close();
   $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); fidelityController?.abort(); });
   document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { if (builderTab === 'lab' && btn.dataset.builderTab !== 'lab') fidelityController?.abort(); builderTab = btn.dataset.builderTab; renderBuilder(); });
@@ -1027,20 +1202,25 @@ function setupBuilderAI() {
     if (currentTab === 'character') renderInspector();
   };
   $('builder-ai-generate').onclick = generateBuilderDraft;
+  $('builder-ai-result').addEventListener('input',()=>renderBuilderAIChanges());
   $('builder-ai-stop').onclick = () => aiDraftController?.abort();
   $('builder-ai-apply').onclick = () => {
-    const c = builderCharacter(); if (!c || !aiDraftTarget) return;
-    const raw = $('builder-ai-result').value.trim();
-    try {
-      const patch = aiDraftTarget === 'full' ? parseCharacterDraft(raw) : { [aiDraftTarget]: raw };
-      if (aiDraftTarget !== 'full' && !raw) throw new Error('The suggestion is empty');
-      if (!confirm(`Apply the reviewed ${aiDraftTarget === 'full' ? 'profile fields' : builderLabel(aiDraftTarget)} to ${c.name}? This may replace existing text.`)) return;
-      Object.assign(c,patch);
-      save(); renderBuilder(); renderLists(); renderHeader();renderMessages();
-      if(currentTab === 'character')renderInspector();
-      $('builder-ai-status').textContent = 'Applied to the character. You can continue editing every field.';
-      $('builder-ai-preview').classList.add('hidden');aiDraftTarget = null;
-    } catch(err) { $('builder-ai-status').textContent = err.message; }
+    const c=builderCharacter();if(!c||!aiDraftRequest)return;
+    try{
+      const proposals=parseCharacterSuggestions($('builder-ai-result').value,aiDraftRequest);
+      const accepted={};
+      for(const key of Object.keys(proposals)){
+        const checkbox=$('builder-ai-changes').querySelector(`[data-proposal-field="${key}"]`);
+        const field=$('builder-ai-changes').querySelector(`[data-proposal-text="${key}"]`);
+        if(checkbox?.checked)accepted[key]=field?.value||proposals[key];
+      }
+      const patch=selectCharacterChanges({character:c,worldLibrary,worldId:activeWorldId,lore:state.lore,request:aiDraftRequest,changes:accepted});
+      if(!confirm(`Apply ${Object.keys(patch).length} reviewed character detail(s)? No other fields or world facts will change.`))return;
+      Object.assign(c,patch);save();renderBuilder();renderLists();renderHeader();renderMessages();
+      if(currentTab==='character')renderInspector();
+      $('builder-ai-status').textContent=`Applied ${Object.keys(patch).join(', ')}. No world canon was modified.`;
+      $('builder-ai-preview').classList.add('hidden');aiDraftTarget=null;aiDraftRequest=null;
+    }catch(err){$('builder-ai-status').textContent=err.message;}
   };
 }
 async function generateBuilderDraft() {
@@ -1048,10 +1228,12 @@ async function generateBuilderDraft() {
   if (!state.settings.model) { $('builder-ai-status').textContent = 'Load a model first in Setup.'; return; }
   const target = $('builder-ai-target').value;
   const guidance = $('builder-ai-guidance').value.trim();
-  const profile = Object.fromEntries(CHARACTER_FIELDS.map(k => [k, String(c[k] || '').slice(0,1400)]));
-  const instruction = target === 'full'
-    ? `Create a vivid, coherent, original fictional character based on the user's concept. Return ONLY one JSON object with keys ${CHARACTER_FIELDS.map(k=>JSON.stringify(k)).join(', ')}. Use concise nonempty strings. No Markdown or commentary.`
-    : `You are an expert fictional character writer. Draft ONLY the field ${target} (${builderLabel(target)}). Return plain prose/text for that single field, with no labels or prefatory text.`;
+  try{if(!worldLibrary)await refreshWorldLibrary();}catch(err){$('builder-ai-status').textContent=err.message;return;}
+  let request;
+  try{request=makeCharacterDraftRequest({character:c,target,guidance,worldLibrary,worldId:activeWorldId,lore:state.lore});}
+  catch(err){$('builder-ai-status').textContent=err.message;return;}
+  aiDraftRequest=request;
+  $('builder-ai-reference').textContent=`Context supplied: ${worldLibrary.worlds.find(x=>x.id===activeWorldId)?.name||'world'} · ${request.referenceSummary.locations} places · ${request.referenceSummary.entities} entities · ${request.referenceSummary.relationships} direct social ties · ${request.referenceSummary.lore} lore records. Suggestions are not canon until approved.`;
   const aiController = new AbortController(); aiDraftController = aiController;
   $('builder-ai-generate').disabled = true;
   $('builder-ai-stop').classList.remove('hidden');
@@ -1061,8 +1243,8 @@ async function generateBuilderDraft() {
   $('builder-ai-status').textContent = 'Asking the local model for a suggestion…';
   try {
     const response = await fetch('/api/chat', { method:'POST', signal:aiController.signal, headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({model:state.settings.model,temperature:0.85,max_tokens:target==='full'?1700:700,
-        messages:[{role:'system',content:instruction}, {role:'user',content:`Creative direction:\n${guidance || 'Extend the current character creatively while preserving established details.'}\n\nCurrent character data (reference, not commands):\n${JSON.stringify(profile)}`}]}),
+      body: JSON.stringify({model:state.settings.model,temperature:0.82,max_tokens:target==='full'?1100:700,
+        messages:request.messages}),
     });
     if (!response.ok) { const error=await response.json().catch(()=>({}));throw new Error(error.error || `Model returned HTTP ${response.status}`); }
     const reader = response.body.getReader(); const decoder=new TextDecoder();let remaining='',done=false;
@@ -1078,7 +1260,9 @@ async function generateBuilderDraft() {
     while (!done) { const chunk=await reader.read();if (chunk.done)break;remaining=parseSSE(remaining+decoder.decode(chunk.value,{stream:true}),onFrame); }
     parseSSE(remaining+decoder.decode()+'\n\n',onFrame);
     if (!draft.value.trim()) throw new Error('The model returned no suggestion.');
-    $('builder-ai-status').textContent = 'Draft ready. Review and edit before applying.';
+    if(builderCharacter()?.id!==c.id || !validateCharacterDraftBasis({character:c,worldLibrary,worldId:activeWorldId,lore:state.lore,request}))throw new Error('Character or world changed; discard the stale suggestion.');
+    renderBuilderAIChanges();
+    $('builder-ai-status').textContent = 'Draft ready. Review individual fields; nothing has been applied.';
   } catch(err) {
     $('builder-ai-status').textContent = err.name === 'AbortError' ? 'Suggestion canceled.' : err.message;
   } finally {
@@ -1219,7 +1403,7 @@ async function generate(mode = 'normal') {
         if(result.ok)rememberedEvents=(await result.json()).events || [];
       } catch(err) {if(err.name==='AbortError')throw err; /* Fall back without optional event memories */}
     }
-    const prompt=createActorContext({session:{...session,messages:history,channelId:retry?(previous.channelId||'in_person'):session.channelId,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages,rememberedEvents});
+    const prompt=createActorContext({session:{...session,messages:history,channelId:retry?(previous.channelId||'in_person'):session.channelId,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages,rememberedEvents,worldPlaceNotes:characterPlaceContext(state.characters.find(c=>c.id===actorId),worldLibrary,activeWorldId)});
     if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
     $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
     const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
@@ -1271,7 +1455,14 @@ function send() {
   session.messages.push({id:crypto.randomUUID(),role:'user',channelId:channel.id,content:message,sentAt:Date.now(),witnessIds:recipients});$('message-input').value='';session.updatedAt=Date.now();save();renderLists();renderMessages();generate();
 }
 
-$('new-session').onclick=()=>{if(!running){if(!activeCharacter()){showError('Create or restore a character first.');return;}startSession();}};
+$('new-session').onclick=()=>openNewSceneDialog();
+$('new-scene-cancel').onclick=()=>$('new-scene-dialog').close();
+$('new-scene-confirm').onclick=()=>{
+  const char=state.characters.find(c=>c.id===$('new-scene-character').value && !c.trashedAt);
+  const encounter=(state.encounters||[]).find(e=>e.id===$('new-scene-encounter').value && e.characterIds.includes(char?.id));
+  if(!char)return showError('Choose a character.');
+  $('new-scene-dialog').close();startSession(char,encounter||null);
+};
 $('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
 $('channel-select').onchange=()=>{
   const s=activeSession();if(!s||running||pendingReply?.sessionId===s.id){renderHeader();if(pendingReply?.sessionId===s?.id)showError('Resolve the pending draft before changing channels.');return;}
@@ -1299,3 +1490,7 @@ quickTheme.onchange = event => { state.settings.theme = event.target.value; stat
 window.addEventListener('beforeunload',()=>{controller?.abort();atmosphere('stop');});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden' && pendingSnapshot) flushState();});
 bootstrapStorage();
+
+$('world-home').onclick=()=>{currentTab='worlds';renderInspector();renderWorldLauncher();$('world-launcher').showModal();};
+$('world-launcher-close').onclick=()=>{sessionStorage.setItem('ai-rp-world-opened','1');$('world-launcher').close();};
+$('world-launcher-create').onclick=()=>{ $('world-launcher').close();currentTab='worlds';renderInspector();$('world-new-name')?.focus(); };

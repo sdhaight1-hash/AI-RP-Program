@@ -29,19 +29,23 @@ function addLegacyWorld(db) {
 
 // Called INSIDE the same SQLite transaction as the original story save.
 // New scenes without an explicit timeline receive isolated imported timelines.
-export function synchronizeSceneTimelines(db, state) {
+export function synchronizeSceneTimelines(db, state, scopeWorldId = null) {
   const scenes = state?.sessions || [];
   if (!scenes.length) return;
-  if (scenes.some(scene => !scene.timelineId || scene.timelineId === legacyTimelineId(scene.id))) addLegacyWorld(db);
+  if (!scopeWorldId && scenes.some(scene => !scene.timelineId || scene.timelineId === legacyTimelineId(scene.id))) addLegacyWorld(db);
   const validCharacters = new Set((state.characters || []).map(c => c.id));
   for (const scene of scenes) {
     const defaultId = legacyTimelineId(scene.id);
     const timelineId = scene.timelineId || defaultId;
     const timeline = db.prepare('SELECT id,world_id AS worldId FROM timelines WHERE id=?').get(timelineId);
+    if (timeline && scopeWorldId && timeline.worldId !== scopeWorldId) throw new Error('Scene timeline belongs to another world');
     if (!timeline) {
       if (timelineId !== defaultId) throw new Error('Unknown timeline; create it in World Library first');
+      const worldId = scopeWorldId || LEGACY_WORLD_ID;
+      const canonId = scopeWorldId ? db.prepare('SELECT id FROM world_revisions WHERE world_id=? ORDER BY version DESC LIMIT 1').get(worldId)?.id : LEGACY_CANON_ID;
+      if (!canonId) throw new Error('Active world has no canon revision');
       db.prepare(`INSERT INTO timelines(id,world_id,canon_id,name,parent_timeline_id,created_at)
-        VALUES (?,?,?,?,NULL,?)`).run(timelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID, String(scene.title || 'Imported scene').slice(0,120), now());
+        VALUES (?,?,?,?,NULL,?)`).run(timelineId, worldId, canonId, String(scene.title || 'Imported scene').slice(0,120), now());
     }
     registerActor(db, timelineId, playerActorId(timelineId), 'player');
     const actorIds = new Set([scene.characterId, ...(scene.castIds || [])]);
@@ -53,7 +57,7 @@ export function synchronizeSceneTimelines(db, state) {
   }
 }
 
-export function initializeWorldSchema(db, state) {
+export function initializeWorldSchema(db, state, scopeWorldId = null) {
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -108,7 +112,7 @@ export function initializeWorldSchema(db, state) {
       PRIMARY KEY(timeline_id,actor_id),
       FOREIGN KEY(timeline_id,actor_id) REFERENCES timeline_actors(timeline_id,actor_id)
     );`);
-    synchronizeSceneTimelines(db,state);
+    synchronizeSceneTimelines(db,state,scopeWorldId);
     db.prepare('INSERT OR IGNORE INTO timeline_clocks(timeline_id,instant_ms,time_zone) SELECT id, ?, ? FROM timelines').run(now(),'UTC');
     for(const version of [1,2])db.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (?,?)').run(version,now());
     db.exec('COMMIT');
@@ -127,7 +131,8 @@ export class WorldRepository {
     const relationships=this.db.prepare('SELECT id,world_id AS worldId,from_id AS fromId,to_id AS toId,kind,notes FROM world_relationships ORDER BY created_at').all();
     const clocks=this.db.prepare('SELECT timeline_id AS timelineId,instant_ms AS instantMs,time_zone AS timeZone,is_explicit AS isExplicit FROM timeline_clocks').all();
     const connections=this.db.prepare('SELECT id,world_id AS worldId,from_id AS fromId,to_id AS toId,kind,travel_minutes AS travelMinutes FROM location_connections').all();
-    return { worlds, revisions, timelines, locations, entities, relationships, connections, clocks };
+    const positions=this.db.prepare('SELECT timeline_id AS timelineId,actor_id AS actorId,location_id AS locationId,updated_at AS updatedAt FROM timeline_positions').all();
+    return { worlds, revisions, timelines, locations, entities, relationships, connections, clocks, positions };
   }
 
   createWorld(input) {

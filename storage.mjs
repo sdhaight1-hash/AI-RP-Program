@@ -10,17 +10,18 @@ import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } fro
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 
 export class StudioStore {
-  constructor(filename = join(process.cwd(), '.data', 'studio.sqlite')) {
+  constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
+    this.scopeWorldId = scopeWorldId;
     if (filename !== ':memory:') {
       mkdirSync(dirname(filename), { recursive: true });
       // Keep one pre-upgrade backup of the original single-document database.
-      if (existsSync(filename) && !existsSync(`${filename}.before-world-v1.bak`))
+      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v1.bak`))
         copyFileSync(filename, `${filename}.before-world-v1.bak`);
-      if (existsSync(filename) && !existsSync(`${filename}.before-world-v2.bak`))
+      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v2.bak`))
         copyFileSync(filename, `${filename}.before-world-v2.bak`);
-      if (existsSync(filename) && !existsSync(`${filename}.before-world-v3.bak`))
+      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v3.bak`))
         copyFileSync(filename, `${filename}.before-world-v3.bak`);
-      if (existsSync(filename) && !existsSync(`${filename}.before-world-v4.bak`))
+      if (!this.scopeWorldId && existsSync(filename) && !existsSync(`${filename}.before-world-v4.bak`))
         copyFileSync(filename, `${filename}.before-world-v4.bak`);
     }
     this.db = new DatabaseSync(filename);
@@ -33,7 +34,7 @@ export class StudioStore {
     CREATE VIRTUAL TABLE IF NOT EXISTS lore_fts USING fts5(id UNINDEXED, title, body, keywords, tokenize='unicode61')`);
     // Existing SQLite snapshots from earlier versions acquire a search index on first load.
     const persisted = this.load().state;
-    initializeWorldSchema(this.db, persisted);
+    initializeWorldSchema(this.db, persisted, this.scopeWorldId);
     initializeEventLedger(this.db);
     this.worlds = new WorldRepository(this.db);
     this.events = new EventLedger(this);
@@ -127,7 +128,7 @@ export class StudioStore {
         result = this.db.prepare('UPDATE studio_state SET revision = revision + 1, updated_at = ?, document = ? WHERE id = 1 AND revision = ?').run(updatedAt, payload, expectedRevision);
       }
       if (!result.changes) { this.db.exec('ROLLBACK'); return null; }
-      synchronizeSceneTimelines(this.db,validated);
+      synchronizeSceneTimelines(this.db,validated,this.scopeWorldId);
       // Timeline IDs are stable and part of the persisted scene snapshot.
       // synchronizeSceneTimelines may add metadata, so update the same revision document.
       this.db.prepare('UPDATE studio_state SET document = ? WHERE id = 1').run(JSON.stringify(validated));

@@ -104,7 +104,7 @@ export function duplicateSession(state, sessionId) {
   return copy;
 }
 
-export function createActorContext({ session, characters, actorId, persona, lore, buildMessages, rememberedEvents = [] }) {
+export function createActorContext({ session, characters, actorId, persona, lore, buildMessages, rememberedEvents = [], worldPlaceNotes = '' }) {
   const actor = characters.find(c => c.id === actorId && !c.trashedAt);
   if (!actor || !(session.castIds || [session.characterId]).includes(actor.id)) throw new Error('Actor is not eligible for this scene');
   const history = actorVisibleHistory(session, actorId, characters);
@@ -127,7 +127,7 @@ export function createActorContext({ session, characters, actorId, persona, lore
   const summary = inPerson ? ((session.castIds || []).length > 1 ? session.publicSummary : (session.summary || '')) : ''; // Do not inject unseen shared-scene narration in remote channels.
   const assembled = buildMessages({ character: actingCharacter, persona, summary, authorNote: session.authorNote,
     emotion: session.emotionByActor?.[actorId] || session.emotion,
-    lore: candidateLore, history, sceneNotes, styleInstruction: channel.direction, channelVoice: getChannelVoice(actor,channel.id),
+    lore: candidateLore, history, sceneNotes, styleInstruction: channel.direction, channelVoice: getChannelVoice(actor,channel.id), worldPlaceNotes,
     psychologyNotes: session.psychologyByActor?.[actorId] ? describeMind(session.psychologyByActor[actorId],actor.name) : '' });
   assembled.actorId = actorId;
   return assembled;
