@@ -146,6 +146,7 @@ async function main(){
     assert.equal(await script("return document.querySelector('#workspace-title').textContent"),'People with lives beyond the scene');
     await screenshot('04-character-workspace');
 
+    const sceneCountBeforeCharacter=(await(await fetch(base+'/api/state')).json()).state.sessions.length;
     await script(`
       document.querySelector('button[data-workspace="story"]').click();
       document.querySelector('#new-character').click();
@@ -158,6 +159,12 @@ async function main(){
     await script("document.querySelector('#builder-close').click();return true");
     assert.equal(await script("return document.body.dataset.workspace"),'characters',
       'Creating a profile must not automatically create an unrelated scene');
+    await until(async()=>{
+      const snapshot=(await(await fetch(base+'/api/state')).json()).state;
+      return snapshot.characters.length>=2;
+    },'profile saved independently of any new scene');
+    assert.equal((await(await fetch(base+'/api/state')).json()).state.sessions.length,
+      sceneCountBeforeCharacter,'creating character must not create a scene in SQLite');
     await screenshot('06-character-created-without-auto-scene');
     await script("document.querySelector('button[data-workspace=story]').click();return true");
     const previousTheme=await script("return document.querySelector('#quick-theme').value");
