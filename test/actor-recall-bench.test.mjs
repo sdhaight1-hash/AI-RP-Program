@@ -73,9 +73,12 @@ test('uncued continuity retains more recent dialogue than a topic-cued memory re
     next.state.sessions[0].messages.at(-1).content='What did the harbor inventory report say?';
     store.save(next.state,next.revision);
     const cued=build();
+    assert.equal(uncued.metadata.evidenceHeadroomReserved,0,
+      'ordinary small talk must not reserve memory headroom due to a Player: label');
+    assert.ok(cued.metadata.evidenceHeadroomReserved>0,
+      'cued older memories should receive space in the small context');
     assert.ok(uncued.metadata.recentMessages>cued.metadata.recentMessages,
-      'uncued small talk should preserve more immediately recent context: '+
-      JSON.stringify({uncued:uncued.metadata,cued:cued.metadata}));
+      'uncued small talk should preserve more immediately recent context');
     assert.ok(cued.metadata.evidence.some(x=>x.kind==='dialogue'),
       'topic-cued history should make room for source-linked recall');
     assert.match(cued.messages.at(-1).content,/harbor inventory report/);
