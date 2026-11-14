@@ -33,6 +33,9 @@ The browser sends world/scene/actor/model/mode, current revision, output tokens,
 - For LM Studio the native model list can provide the loaded instance's configured context length. Where native token counting is unavailable, the UI reports an estimate, never falsely labels it exact.
 - The generation reserve and safety margin are excluded from the input prompt budget. Oldest dialogue is dropped before the latest message; lower-ranked evidence is skipped if it does not fit.
 - The model backend may have a smaller capacity than configured. For backends without reliable capacity reporting, configure the actual loaded context window, not the model's theoretical maximum.
+- The exact-token backend can remove previously packed source evidence. Context previews report **post-trim selected source IDs** (dialogue, reviewed facts, committed events, lore, character details), not candidates that merely matched retrieval. Each evidence item is removed atomically to avoid misleading half-memories.
+- Native-token overflow sheds oldest unprotected history first, then lower-priority complete evidence. The latest real conversation turn (and continuation cue, where present) are preserved; impossible requests fail explicitly rather than silently dropping the current player input.
+- When model capacity is undiscoverable, the player's explicitly configured local context value is used instead of silently capping all unknown backends at 4096. Token estimates remain estimates; configure the actual loaded allocation.
 
 ## Persistence and upgrades
 
@@ -43,6 +46,7 @@ No external vector server or npm package is needed for the first milestone. Exis
 ## Test gates
 
 The test suite covers actor witness restrictions, no cross-world memory, frozen fork snapshots, stale write rollback, source replacement, topic-driven biography recall, timeline clock/location, configured prompt budget, native KoboldCpp counting, server streaming, and refusal of fabricated actor context.
+Additional native-budget regression checks verify source-ID provenance after trimming, latest-turn preservation in continuation mode, and explicit errors when a current turn is too large. These are deterministic tests, not claims that a particular local model obeys its instructions.
 
 The existing event-ledger and world-isolation regression suite must remain green.
 

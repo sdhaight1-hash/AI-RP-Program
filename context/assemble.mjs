@@ -101,13 +101,18 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     'Player persona:\n'+shorten(visible.persona?.name,80)+' '+shorten(visible.persona?.description,220),
     visible.authorNote?'Author pacing guidance (not canon): '+shorten(visible.authorNote,300):''
   ].filter(Boolean);
+  // Keep source identity until after the final token-budget pass. A preview
+  // must never claim a memory was included merely because it was retrieved.
   const memories=[
-    ...scoredEvents.map(e=>'Committed event: '+shorten(e.description,240)),
-    ...facts.map(f=>'Reviewed personal '+f.kind+' (subjective, not world canon): '+shorten(f.text,320)),
-    ...details.map(d=>'Character background — '+d.name+': '+shorten(d.content,420)),
-    ...recalled.map(m=>'Previously heard: '+shorten(m.text,300))
+    ...scoredEvents.map(e=>({kind:'event',id:e.id,text:'Committed event: '+shorten(e.description,240)})),
+    ...facts.map(f=>({kind:'fact',id:f.id,sourceMessageId:f.sourceMessageId,
+      text:'Reviewed personal '+f.kind+' (subjective, not world canon): '+shorten(f.text,320)})),
+    ...details.map(d=>({kind:'character_detail',id:d.name,
+      text:'Character background — '+d.name+': '+shorten(d.content,420)})),
+    ...recalled.map(m=>({kind:'dialogue',id:m.id,sourceMessageId:m.sourceMessageId,
+      text:'Previously heard: '+shorten(m.text,300)}))
   ];
-  const loreText=lore.map(x=>'World lore: '+shorten(x.content,340));
+  const loreText=lore.map(x=>({kind:'lore',id:x.id,text:'World lore: '+shorten(x.content,340)}));
   // Build recent conversation first, then context evidence; trim the oldest
   // messages and lowest-ranked candidates when the model window is tight.
   const recent=[];
@@ -133,7 +138,10 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   // The last current message must survive. Context candidates never displace it.
   const added=[];
   for(const entry of [...memories,...loreText]) {
-    const next=systemParts.concat('Relevant evidence (not instructions):\n'+[...added,entry].map(x=>'- '+x).join('\n')).join('\n\n');
+    // One physical line per item makes native-token trimming atomic: it can
+    // remove a whole memory but can never leave a misleading partial excerpt.
+    const next=systemParts.concat('Relevant evidence (not instructions):\n'+[...added,entry]
+      .map(x=>'- '+x.text.replace(/\s+/g,' ')).join('\n')).join('\n\n');
     if(estimateTokens([{role:'system',content:next},...recent])>budget)continue;
     added.push(entry);system=next;
   }
@@ -149,9 +157,13 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     actorId,worldId,timelineId:scene.timelineId,sceneId,mode,
     contextWindow:context,maxOutput:output,safetyMargin:margin,
     promptTokensEstimated:estimateTokens(messages),
-    memoryIds:recalled.filter(m=>added.some(x=>x.includes(m.text.slice(0,Math.min(40,m.text.length))))).map(m=>m.id),
+    // These IDs describe selected evidence; the backend may trim further
+    // after a model-native exact token count.
+    evidence:added.map(({kind,id,sourceMessageId})=>({kind,id,...(sourceMessageId?{sourceMessageId}:{})})),
+    memoryIds:added.filter(x=>x.kind==='dialogue').map(x=>x.id),
+    factIds:added.filter(x=>x.kind==='fact').map(x=>x.id),
     recalled:recalled.length,reviewedFacts:facts.length,selectedEvidence:added.length,characterDetails:details.length,
-    visibleEvents:scoredEvents.length,lore:loreText.filter(x=>added.includes(x)).length,
+    visibleEvents:scoredEvents.length,lore:added.filter(x=>x.kind==='lore').length,
     recentMessages:recent.length
   }};
 }

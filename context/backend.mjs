@@ -25,23 +25,51 @@ export async function discoverBackendContext(baseUrl,model,fetchImpl=fetch) {
 export async function enforceTokenBudget(prompt,backend) {
   const allowed=prompt.metadata.contextWindow-prompt.metadata.maxOutput-prompt.metadata.safetyMargin;
   const messages=prompt.messages.map(x=>({...x}));
+  const evidence=Array.isArray(prompt.metadata.evidence)?[...prompt.metadata.evidence]:null;
   let count=estimateTokens(messages),kind='estimated';
+
   if(backend.exactCounter) {
-    try {const value=await backend.exactCounter(messages);if(value){count=value;kind='exact';}}
-    catch { /* Local backends may disable native counting. */ }
+    try {
+      const actual=await backend.exactCounter(messages);
+      if(integer(actual)){count=actual;kind='exact';}
+    }catch { /* Some local models do not implement native token counts. */ }
   }
+  // "continue" adds a synthetic instruction after the real last turn.
+  // Preserve both that instruction and the latest witnessed utterance.
+  const protectedTail=prompt.metadata.mode==='continue'?2:1;
   while(count>allowed) {
-    // Drop historical turns, never the most recent one.
-    if(messages.length>2) messages.splice(1,1);
-    else {
-      const lines=messages[0].content.split('\n');
-      const evidence=lines.findIndex(x=>x.startsWith('Relevant evidence (not instructions):'));
-      if(evidence<0 || lines.length<evidence+3)
-        throw new Error('Prompt does not fit the loaded model context. Increase context or shorten the scene.');
-      lines.pop();messages[0].content=lines.join('\n');
+    if(messages.length>1+protectedTail) {
+      messages.splice(1,1); // discard the oldest unprotected dialogue turn
+    } else {
+      const separator='\n\nRelevant evidence (not instructions):\n';
+      const index=messages[0].content.lastIndexOf(separator);
+      if(index<0)throw new Error('Prompt does not fit the loaded model context. Increase context or shorten the scene.');
+      const prefix=messages[0].content.slice(0,index);
+      const lines=messages[0].content.slice(index+separator.length).split('\n');
+      if(!lines.length || lines.some(x=>!x.startsWith('- ')))
+        throw new Error('Invalid evidence format; cannot safely trim model context');
+      // Evidence is emitted one source per line. Remove the lowest-priority
+      // whole source, not its last text line or a partial personal memory.
+      lines.pop();
+      if(evidence)evidence.pop();
+      messages[0].content=lines.length?prefix+separator+lines.join('\n'):prefix;
     }
-    count=kind==='exact' ? await backend.exactCounter(messages) : estimateTokens(messages);
-    if(!integer(count)){count=estimateTokens(messages);kind='estimated';}
+    if(kind==='exact') {
+      try {
+        const actual=await backend.exactCounter(messages);
+        if(integer(actual)){count=actual;continue;}
+      }catch { /* Fall back and explicitly report estimation. */ }
+      kind='estimated';
+    }
+    count=estimateTokens(messages);
   }
-  return {...prompt,messages,metadata:{...prompt.metadata,promptTokens:count,countMethod:kind,recentMessages:messages.length-1}};
+  const metadata={...prompt.metadata,promptTokens:count,countMethod:kind,recentMessages:messages.length-1};
+  if(evidence) {
+    metadata.evidence=evidence;
+    metadata.selectedEvidence=evidence.length;
+    metadata.memoryIds=evidence.filter(x=>x.kind==='dialogue').map(x=>x.id);
+    metadata.factIds=evidence.filter(x=>x.kind==='fact').map(x=>x.id);
+    metadata.lore=evidence.filter(x=>x.kind==='lore').length;
+  }
+  return {...prompt,messages,metadata};
 }
