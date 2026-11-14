@@ -2,7 +2,9 @@
 // by the active world store: an operation can never reach another world's DB.
 // Do not delete a creator-approved world entity merely because its original
 // character biography was removed; it has independent world-canon status.
-export function reconcileCharacterRecords(db, state, worldId) {
+export function reconcileCharacterRecords(db, state, worldId,{
+  repairOrphans=false,removedCharacterId=null
+}={}) {
   if (!db.isTransaction) throw new Error('Character reconciliation requires a transaction');
   if (!state || !Array.isArray(state.characters)) throw new Error('A valid world snapshot is required');
   const present = new Set(state.characters.map(x => x.id));
@@ -11,8 +13,24 @@ export function reconcileCharacterRecords(db, state, worldId) {
     ...db.prepare(`SELECT DISTINCT a.character_id AS id FROM timeline_actors a
       JOIN timelines t ON t.id=a.timeline_id WHERE t.world_id=? AND a.character_id IS NOT NULL`).all(worldId).map(x=>x.id),
     ...db.prepare('SELECT DISTINCT character_id AS id FROM character_world_sources WHERE world_id=?').all(worldId).map(x=>x.id),
-    ...db.prepare('SELECT DISTINCT character_id AS id FROM character_world_relationship_sources WHERE world_id=?').all(worldId).map(x=>x.id)
+    ...db.prepare('SELECT DISTINCT character_id AS id FROM character_world_relationship_sources WHERE world_id=?').all(worldId).map(x=>x.id),
+    ...(removedCharacterId?[removedCharacterId]:[])
   ]);
+  if(repairOrphans) {
+    // Legacy builds sometimes deleted the world-person mirror and timeline
+    // membership independently, leaving orphaned memories or accepted events.
+    // Only do this historical sweep when opening a world, not on every save.
+    for(const table of ['actor_memories','actor_facts','event_proposals',
+      'timeline_events','timeline_positions']){
+      const rows=db.prepare(`SELECT DISTINCT actor_id AS id FROM ${table}
+        WHERE timeline_id IN (SELECT id FROM timelines WHERE world_id=?)`).all(worldId);
+      for(const row of rows)if(!row.id.startsWith('player:'))known.add(row.id);
+    }
+    const observed=db.prepare(`SELECT DISTINCT o.actor_id AS id
+      FROM timeline_event_observers o JOIN timeline_events e ON e.id=o.event_id
+      JOIN timelines t ON t.id=e.timeline_id WHERE t.world_id=?`).all(worldId);
+    for(const row of observed)if(!row.id.startsWith('player:'))known.add(row.id);
+  }
   let deleted=0;
   for (const id of known) {
     if (present.has(id)) continue; // Archive keeps its profile, knowledge and projection.
