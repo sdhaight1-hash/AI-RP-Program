@@ -152,11 +152,21 @@ async function main(){
       const view=await script(`
         return {width:window.innerWidth,bodyWidth:document.documentElement.scrollWidth,
           workspaceNav:getComputedStyle(document.querySelector('.workspace-nav')).display,
-          composer:getComputedStyle(document.querySelector('.composer-area')).display};
+          composer:getComputedStyle(document.querySelector('.composer-area')).display,
+          navigation:[...document.querySelectorAll('button[data-workspace]')].map(node=>{
+            const rect=node.getBoundingClientRect();
+            return {left:rect.left,right:rect.right,top:rect.top,visible:getComputedStyle(node).display!=='none'};
+          })};
       `);
       assert.ok(view.bodyWidth<=view.width+8,'Horizontal overflow at '+width+'px: '+JSON.stringify(view));
       assert.notEqual(view.workspaceNav,'none');
       assert.notEqual(view.composer,'none');
+      if(width<=760){
+        assert.equal(view.navigation.length,5);
+        for(const [index,nav] of view.navigation.entries())
+          assert.ok(nav.visible && nav.left>=-2 && nav.right<=view.width+2,
+            'Mobile workspace '+index+' clipped at '+width+'px: '+JSON.stringify(view));
+      }
       await screenshot('07-story-'+width);
       if(width===900){
         const opened=await script(`
