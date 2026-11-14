@@ -9,8 +9,10 @@ import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterCh
 import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/character/world-bridge.mjs';
 import { proposedRelationshipKinds } from '/character/relationship-bridge.mjs';
 import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
+import { BUILDER_SECTIONS } from '/character/sections.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
+import { worldPath,loadWorldSnapshot,loadWorldCatalog } from '/world-client.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -21,12 +23,13 @@ try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } c
 let currentTab = 'character';
 let activeWorkspace = 'story';
 let worldLibrary = null;
-let loadingWorlds = false;
+let worldLibraryRequest = 0;
+let switchingWorld = false;
 let selectedWorldId = null;
-let activeWorldId = null;
-// World scope accompanies every world-dependent request. The process-wide
-// active world may be changed by another browser tab between requests.
-const scopedUrl = path => activeWorldId ? `${path}${path.includes('?') ? '&' : '?'}worldId=${encodeURIComponent(activeWorldId)}` : path;
+let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
+// The selected world belongs to this browser tab. Every stateful request
+// carries its world ID, regardless of other tabs' selections.
+const scopedUrl = path => worldPath(path,activeWorldId);
 const portraitSrc = path => typeof path === 'string' && path.startsWith('/portraits/') ? scopedUrl(path) : path;
 let builderCharacterId = null;
 let builderTab = 'identity';
@@ -41,55 +44,6 @@ let localEvalReport = null;
 let fidelityDraft = null;
 let fidelitySelectedProbe = 'everyday';
 const builderCharacter = () => state.characters.find(c => c.id === builderCharacterId);
-const BUILDER_SECTIONS = {
-  identity: [
-    ['name','Name','text','World-specific character identity.'],
-    ['aliases','Aliases and nicknames','text','Names used by friends, family, or acquaintances.'],
-    ['age','Age','text','Age in this world and canonical point in history.'],
-    ['pronouns','Pronouns','text','Optional pronouns for dialogue and narration.'],
-    ['handle','Messaging handle','text','Optional social username for worlds with messaging.'],
-    ['tagline','One-line introduction','text','Public description in the character library.'],
-    ['color','Character accent','color','Personal color; separate from the UI theme.'],
-  ],
-  appearance: [
-    ['description','Appearance overview','textarea','Canonical visible identity; not a current outfit or scene.'],
-    ['facialFeatures','Face and distinguishing features','textarea','Face shape, complexion, freckles, marks, and habitual expressions.'],
-    ['hair','Hair','text','Color, length, texture and ordinary styling.'],
-    ['eyes','Eyes','text','Color and distinctive characteristics.'],
-    ['physique','Physical build','textarea','Height, frame, posture, proportions; avoid contradictory descriptors.'],
-    ['clothingStyle','Typical fashion and grooming','textarea','Usual aesthetic, clothing preferences and self-presentation.'],
-  ],
-  mind: [
-    ['personality','Temperament and personality','textarea','Defining tendencies and context-specific behavior.'],
-    ['values','Core values','textarea','What they believe, prioritize and will stand up for.'],
-    ['contradictions','Contradictions','textarea','Tensions between desires, ideals and habits.'],
-    ['stressBehavior','When stressed','textarea','Observable coping responses rather than abstract adjectives.'],
-    ['comfortBehavior','When relaxed or comfortable','textarea','How familiarity and safety change their behavior.'],
-    ['conflictStyle','Conflict and reconciliation','textarea','How they disagree, apologize and make amends.'],
-    ['motivations','Motivations and goals','textarea','What they seek beyond the player character.'],
-    ['fears','Fears and vulnerabilities','textarea','Specific fears, insecurities and sensitive subjects.'],
-    ['boundaries','Personal boundaries','textarea','What they will decline or resist.'],
-  ],
-  history: [
-    ['backstory','Life overview','textarea','Established personal history, not universal world knowledge.'],
-    ['familyHistory','Family and upbringing','textarea','Family circumstances and meaningful ties.'],
-    ['formativeEvents','Formative events','textarea','Specific past experiences that shaped present behavior.'],
-  ],
-  life: [
-    ['occupation','Occupation / role','text','What they do for work, study or community life.'],
-    ['hobbies','Hobbies and interests','textarea','How they spend their own free time.'],
-    ['preferredEnvironment','Preferred environment','textarea','Atmospheres and surroundings they gravitate toward; not current location.'],
-    ['dailyRoutine','Daily and weekly rhythms','textarea','Typical schedules, habits and exceptions; not rigid teleportation rules.'],
-    ['socialHabits','Social habits','textarea','How they maintain friendships, communicate and spend time with others.'],
-  ],
-  voice: [
-    ['speechStyle','Distinctive voice','textarea','Pacing, vocabulary, cadence, humor, regionalisms.'],
-    ['inPersonStyle','In-person speaking style','textarea','Body language and conversational rhythms when physically together.'],
-    ['phoneStyle','Phone-call speaking style','textarea','Audible mannerisms, pauses and tone; no visual gestures.'],
-    ['textStyle','Messaging style','textarea','Message length, punctuation, emojis and sending habits.'],
-    ['exampleDialogue','Example exchanges','textarea','Demonstrations of voice, not events assumed to have happened.'],
-  ],
-};
 const builderLabel = key => Object.values(BUILDER_SECTIONS).flat().find(row => row[0] === key)?.[1] || key;
 
 let running = false;
@@ -184,11 +138,20 @@ async function requireSavedStory() {
 
 async function bootstrapStorage() {
   try {
-    const response = await fetch('/api/state');
-    if (!response.ok) throw new Error(`Story database returned ${response.status}`);
-    const result = await response.json();
+    let result;
+    try {result=await loadWorldSnapshot(fetch,activeWorldId);}
+    catch(error) {
+      // A world may have been deleted or moved since this tab last opened.
+      // Fall back to the local default, never silently load another world under
+      // the old world ID.
+      if(!activeWorldId || error.status!==404)throw error;
+      activeWorldId=null;
+      sessionStorage.removeItem('ai-rp-selected-world');
+      result=await loadWorldSnapshot(fetch,null);
+    }
     revision = result.revision;
     activeWorldId = result.worldId || null;
+    if(activeWorldId)sessionStorage.setItem('ai-rp-selected-world',activeWorldId);
     serverStorage = true;
     if (result.state) {
       const persisted = normalizeState(result.state);
@@ -413,25 +376,21 @@ function attachFields(callback) {
   }));
 }
 async function refreshWorldLibrary() {
-  if (loadingWorlds) return;
-  loadingWorlds = true;
+  // The latest request wins. An old fetch may finish after switching worlds;
+  // blocking a new refresh behind it would leave an empty or stale Atlas.
+  const requestId=++worldLibraryRequest;
+  const requestedWorldId=activeWorldId;
   try {
-    const response=await fetch('/api/worlds');
-    if(!response.ok)throw Error(`World Library unavailable (${response.status})`);
-    const received=await response.json();
-    if (activeWorldId && received.activeWorldId !== activeWorldId) {
-      serverStorage=false;
-      throw new Error('Another browser tab opened a different world. Reload this tab before continuing; its local edits are preserved.');
-    }
+    const received=await loadWorldCatalog(fetch,requestedWorldId);
+    if(requestId!==worldLibraryRequest||requestedWorldId!==activeWorldId)return;
     worldLibrary=received;
-    selectedWorldId=worldLibrary.activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
-    if(worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
+    selectedWorldId=activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
+    if(!activeWorldId && worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
     const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active world';
     if(['worlds','atlas','relations'].includes(currentTab))renderInspector();
     renderHeader();
     renderWorkspace();
   } catch(err) { showError(err.message); }
-  finally { loadingWorlds=false; }
 }
 
 
@@ -439,13 +398,14 @@ async function refreshWorldLibrary() {
 // backup, or stale per-world state is allowed to cross it.
 async function switchWorld(worldId) {
   if (worldId === activeWorldId) { $('world-launcher')?.close();return; }
+  if(switchingWorld)throw new Error('Another world switch is already in progress.');
   if (running || aiDraftController || fidelityController || localEvalController || worldEntryController) throw new Error('Finish or cancel generation before switching worlds.');
   if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
   if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
+  switchingWorld=true;
+  try {
   await requireSavedStory();
-  const response=await fetch('/api/worlds/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId})});
-  const result=await response.json();
-  if (!response.ok) throw new Error(result.error || 'Could not open world');
+  const result=await loadWorldSnapshot(fetch,worldId);
   pendingReply=null;streamingReply=null;pendingSnapshot=null;
   comfyJob=null;comfyImages=[]; // Do not expose another world's generated assets after switching.
   $('message-input').value='';
@@ -453,6 +413,7 @@ async function switchWorld(worldId) {
   $('character-builder')?.close();
   activeWorldId=result.worldId;
   selectedWorldId=result.worldId;
+  sessionStorage.setItem('ai-rp-selected-world',activeWorldId);
   state=normalizeState(result.state);
   revision=result.revision;
   serverStorage=true;
@@ -460,6 +421,7 @@ async function switchWorld(worldId) {
   currentTab='worlds';worldLibrary=null;
   $('world-launcher')?.close();
   applyTheme();render();await refreshWorldLibrary();renderWorldLauncher();showError();
+  } finally {switchingWorld=false;}
 }
 function renderWorldLauncher() {
   const host=$('world-launcher-list');if(!host)return;

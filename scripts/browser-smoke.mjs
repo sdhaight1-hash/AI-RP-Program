@@ -172,6 +172,30 @@ async function main(){
       return true;
     `);
 
+    // Real headless browser tabs each retain their own selected world.
+    // This catches browser/sessionStorage regressions that HTTP-only tests miss.
+    const firstHandle=await request('GET','/session/'+sessionId+'/window');
+    const parallel=store.worlds.createWorld({name:'Parallel Browser World'});
+    const secondTab=await request('POST','/session/'+sessionId+'/window/new',{type:'tab'});
+    await request('POST','/session/'+sessionId+'/window',{handle:secondTab.handle});
+    await request('POST','/session/'+sessionId+'/url',{url:base});
+    await until(async()=>script("return !!document.querySelector('#world-label')?.textContent"),'second tab bootstrap');
+    await script("sessionStorage.setItem('ai-rp-selected-world',"+JSON.stringify(parallel.id)+");return true");
+    await request('POST','/session/'+sessionId+'/refresh',{});
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='Parallel Browser World'"),'second tab world load');
+    const secondLabel=await script("return {world:document.querySelector('#world-label')?.textContent,error:document.querySelector('#error')?.textContent}");
+    assert.equal(secondLabel.world,'Parallel Browser World');
+    assert.equal(secondLabel.error,'');
+    await screenshot('06c-second-tab-separate-world');
+    await request('POST','/session/'+sessionId+'/window',{handle:firstHandle});
+    const firstLabel=await script("return document.querySelector('#world-label')?.textContent");
+    assert.notEqual(firstLabel,'Parallel Browser World','the first tab must keep its own world');
+    await request('POST','/session/'+sessionId+'/refresh',{});
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'first tab world reload');
+    await request('POST','/session/'+sessionId+'/window',{handle:secondTab.handle});
+    await request('DELETE','/session/'+sessionId+'/window');
+    await request('POST','/session/'+sessionId+'/window',{handle:firstHandle});
+
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
       await delay(130);
@@ -204,7 +228,7 @@ async function main(){
         await script("document.querySelector('#close-inspector').click();return true");
       }
     }
-    console.log('Browser UI smoke: desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
+    console.log('Browser UI smoke: parallel world tabs, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');

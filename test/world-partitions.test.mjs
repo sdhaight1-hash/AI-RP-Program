@@ -91,7 +91,11 @@ test('scoped HTTP routes switch worlds without permitting stale saves or foreign
     const wrong=await fetch(base+'/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:1,worldId:a,state})});
     assert.equal(wrong.status,409); // A stale tab must not write into the newly opened world.
     assert.deepEqual((await get('/api/state')).state.characters,[]);
-    assert.equal((await post('/api/worlds/locations',{worldId:a,name:'Foreign street',kind:'town'})).status,400);
+    assert.equal((await post('/api/worlds/locations',{worldId:a,name:'A-specific street',kind:'town'})).status,201);
+    assert.equal((await get('/api/worlds?worldId='+b)).locations.length,0,
+      'world B cannot observe world A locations');
+    assert.equal((await get('/api/worlds?worldId='+a)).locations.length,1,
+      'world A remains editable after world B was opened');
     assert.equal((await post('/api/worlds/activate',{worldId:a})).status,200);
     assert.equal((await get('/api/state')).state.characters[0].personality,'Only WORLD_A');
     const list=await get('/api/worlds');assert.deepEqual(list.worlds.map(x=>x.name),['My First World','Town B']);
