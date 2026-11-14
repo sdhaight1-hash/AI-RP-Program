@@ -10,6 +10,7 @@ import { ComfyClient } from './comfy.mjs';
 import { buildActorContext } from './context/assemble.mjs';
 import { discoverBackendContext, enforceTokenBudget } from './context/backend.mjs';
 import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mjs';
+import { suggestActorMemories } from './memory/suggestions.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -255,6 +256,25 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if (!response.ok) throw new Error(`Model server returned ${response.status}`);
         const data = await response.json();
         return json(res, 200, { backend: new URL(lmUrl).host, models: Array.isArray(data.data) ? data.data.map(m => ({ id: m.id })).filter(m => typeof m.id === 'string') : [] });
+      }
+      if (req.method === 'POST' && path === '/api/actor/facts/suggest') {
+        const data=await readJson(req,2500);
+        requireWorldScope(data.worldId);
+        const startingRevision=store.load().revision;
+        if(!Number.isSafeInteger(data.revision) || data.revision!==startingRevision)
+          return json(res,409,{error:'Save the current scene before suggesting memories'});
+        let suggestions;
+        try {
+          suggestions=await suggestActorMemories({
+            store,sceneId:data.sceneId,actorId:data.actorId,model:data.model,
+            lmUrl,fetchImpl
+          });
+        }catch(error){return json(res,422,{error:error.message});}
+        requireWorldScope(data.worldId);
+        if(store.load().revision!==startingRevision)
+          return json(res,409,{error:'The scene changed while suggesting memories; try again'});
+        // Suggestions are not persisted and do not become world canon.
+        return json(res,200,{suggestions});
       }
       if (req.method === 'GET' && path === '/api/actor/facts') {
         requireWorldScope(requestUrl.searchParams.get('worldId'));
