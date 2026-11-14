@@ -44,6 +44,10 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
 
+## Local-model evaluation
+
+The Character Studio **Fidelity Lab** can now run an optional, seven-prompt synthetic assessment against your **actual loaded local chat model**, testing compartmentalized field generation, voice/channel behavior, and source-backed character-to-world extraction. It records local generation latency, format validity, and explicit heuristic warnings; optional configured embeddings are tested with positive and unrelated negative recall cues. Nothing is written to your story or canon. Export the results as JSON for model comparisons. See [in-app local model evaluation](docs/local-model-evaluation.md). These are narrow diagnostics, not validated measures of personality or artistic quality.
+
 ## Character and world co-authoring (2026)
 
 Character Studio's AI co-author now prioritizes the selected world's established setting, the character's linked places, and established world relationships. **Character → World Atlas** can suggest named places and people explicitly stated in the character's saved biography, each tied to an exact source quote. You review and approve each proposal separately; approved entries are added to that world's persistent Atlas with an audit trail. No unapproved model text becomes world canon, and no place entry moves an actor in a live scene. See [the character/world bridge](docs/character-world-bridge.md).
