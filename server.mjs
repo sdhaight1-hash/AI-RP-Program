@@ -23,6 +23,7 @@ const ALLOWED = new Map([
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/scene.js', ['scene.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
+  ['/studio-shell.css', ['studio-shell.css', 'text/css; charset=utf-8']],
   ['/engine.mjs', ['../engine.mjs', 'text/javascript; charset=utf-8']],
   ['/harness.mjs', ['../harness.mjs', 'text/javascript; charset=utf-8']],
   ['/psychology.mjs', ['../psychology.mjs', 'text/javascript; charset=utf-8']],
