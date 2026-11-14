@@ -3,6 +3,7 @@ import { initAtmosphere } from '/scene.js';
 import { chooseSpeaker, createActorContext, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 import { getChannel } from '/interactions/channels.mjs';
+import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -18,6 +19,9 @@ let builderCharacterId = null;
 let builderTab = 'identity';
 let aiDraftTarget = null;
 let aiDraftController = null;
+let fidelityController = null;
+let fidelityDraft = null;
+let fidelitySelectedProbe = 'everyday';
 const builderCharacter = () => state.characters.find(c => c.id === builderCharacterId);
 const BUILDER_SECTIONS = {
   identity: [
@@ -806,6 +810,7 @@ function openBuilder(c) {
   builderCharacterId = c.id; builderTab = 'identity';
   $('builder-ai-preview').classList.add('hidden'); $('builder-ai-status').textContent = '';
   $('builder-ai-guidance').value = '';
+  if (fidelityDraft?.characterId !== c.id) fidelityDraft = null;
   renderBuilder();
   if (!$('character-builder').open) $('character-builder').showModal();
 }
@@ -818,6 +823,7 @@ function renderBuilder() {
     b.setAttribute('aria-selected', String(b.dataset.builderTab === builderTab));
   });
   const host = $('builder-fields'); host.replaceChildren();
+  if (builderTab === 'lab') { renderCharacterLab(host, c); return; }
   for (const [key, label, type, help] of BUILDER_SECTIONS[builderTab]) {
     const group = el('div', '', 'builder-field');
     const caption = el('label', label, 'field-label');
@@ -850,6 +856,118 @@ function renderBuilder() {
     }host.append(pane);
   }
 }
+// A live story is never used as the test substrate. All probe state stays transient
+// until a human deliberately saves the review to the character profile.
+function renderCharacterLab(host, character) {
+  host.append(el('h3','Character fidelity lab','builder-subtitle'),el('p','Generate one isolated test reply at a time. Rate what the character actually said; nothing here enters the story, world ledger, or NPC memory.','help'));
+  const current = FIDELITY_PROBES.find(p => p.id === fidelitySelectedProbe) || FIDELITY_PROBES[0];
+  const label = el('label','Test scenario','field-label');label.htmlFor='fidelity-probe';
+  const select = document.createElement('select'); select.id='fidelity-probe';
+  for (const probe of FIDELITY_PROBES) select.add(new Option(`${probe.label} (${getChannel(probe.channelId).label})`,probe.id));
+  select.value=current.id;
+  select.onchange = () => { fidelityController?.abort();fidelitySelectedProbe=select.value;fidelityDraft=null;renderBuilder(); };
+  const prompt = el('p',`Player says: “${current.playerMessage}”`,'fidelity-prompt');
+  const objective = el('p',current.objective,'help');
+  const actions=el('div','','inline-actions');
+  const run=el('button','✧ Generate test reply','primary-button');run.id='fidelity-run';
+  const stop=el('button','Stop','subtle-button');stop.id='fidelity-stop';stop.classList.toggle('hidden',!fidelityController);
+  run.disabled=!!fidelityController || !!aiDraftController || running;
+  run.onclick=()=>runFidelityProbe();stop.onclick=()=>fidelityController?.abort();actions.append(run,stop);
+  const status=el('p',fidelityController?'Model is generating…':'Each run tests the currently saved profile. Comparisons are qualitative, not scientific personality scores.','builder-note');status.id='fidelity-status';
+  host.append(label,select,prompt,objective,actions,status);
+  const draft=fidelityDraft?.characterId===character.id && fidelityDraft?.probeId===current.id ? fidelityDraft : null;
+  if (draft) {
+    host.append(el('h4','Test reply','builder-subtitle'));
+    const output=el('div',draft.reply,'fidelity-reply');output.id='fidelity-reply';host.append(output);
+    if(draft.warnings.length){
+      const notice=el('div','','fidelity-warnings');notice.append(el('strong','Possible issues (heuristics, not guarantees):'));
+      for(const warning of draft.warnings)notice.append(el('p',warning));host.append(notice);
+    }
+    const rubric=el('div','','fidelity-rubric');rubric.append(el('h4','Human review (1 = poor, 5 = excellent)','builder-subtitle'));
+    for(const key of FIDELITY_RATINGS){
+      const row=el('label','','fidelity-rating');row.append(el('span',key[0].toUpperCase()+key.slice(1)));
+      const rating=document.createElement('select');rating.id=`fidelity-rating-${key}`;
+      rating.add(new Option('Not rated',''));
+      for(let n=1;n<=5;n++)rating.add(new Option(String(n),String(n)));
+      row.append(rating);rubric.append(row);
+    }
+    const notesLabel=el('label','Reviewer notes','field-label');notesLabel.htmlFor='fidelity-notes';
+    const notes=document.createElement('textarea');notes.id='fidelity-notes';notes.rows=3;notes.maxLength=1800;
+    notes.placeholder='What sounded in-character? Where did the model miss the voice, boundaries, or medium?';
+    const saveReview=el('button','Save reviewed result','primary-button');saveReview.id='fidelity-save';
+    saveReview.onclick=()=>{
+      if(!fidelityDraft || fidelityDraft !== draft || builderCharacter()?.id!==character.id)return;
+      const ratings=Object.fromEntries(FIDELITY_RATINGS.map(key=>[key,Number($(`fidelity-rating-${key}`).value)||null]));
+      if(!Object.values(ratings).some(Number.isInteger)){status.textContent='Rate at least one dimension to save this review.';return;}
+      const record={id:crypto.randomUUID(),probeId:draft.probeId,reply:draft.reply,model:draft.model,
+        profileFingerprint:draft.profileFingerprint,reviewedAt:Date.now(),ratings,notes:notes.value};
+      character.fidelityReviews=normalizeFidelityReviews([...(character.fidelityReviews||[]),record]);
+      fidelityDraft=null;save();renderBuilder();
+    };
+    host.append(rubric,notesLabel,notes,saveReview);
+  }
+  const reviews=normalizeFidelityReviews(character.fidelityReviews);
+  const past=el('section','','fidelity-history');past.append(el('h4',`Saved reviews (${reviews.length})`,'builder-subtitle'));
+  for(const review of [...reviews].reverse().slice(0,8)){
+    const record=el('div','','fidelity-history-item');
+    const scenario=FIDELITY_PROBES.find(p=>p.id===review.probeId)?.label || review.probeId;
+    const summary=Object.entries(review.ratings).filter(([,v])=>v!==null).map(([k,v])=>`${k}: ${v}/5`).join(' · ');
+    record.append(el('strong',`${scenario} · ${review.model || 'local model'}`),el('p',summary||'Not rated'),el('p',review.reply.length>220?review.reply.slice(0,220)+'…':review.reply));
+    if(review.notes)record.append(el('p',review.notes));
+    if(review.profileFingerprint!==makeFidelityProbe({character,probeId:review.probeId}).profileFingerprint){
+      record.append(el('p','Character profile changed since this test.','fidelity-stale'));
+    }
+    past.append(record);
+  }
+  host.append(past);
+}
+
+async function runFidelityProbe() {
+  const c=builderCharacter();
+  if (!c || fidelityController || aiDraftController || running) return;
+  if(!state.settings.model){$('fidelity-status').textContent='Load a local model in Setup before running a test.';return;}
+  const charId=c.id;
+  const {probe,messages,profileFingerprint}=makeFidelityProbe({character:structuredClone(c),probeId:fidelitySelectedProbe,
+    persona:{name:state.persona.name||'Player',description:state.persona.description||''}});
+  const ctrl=new AbortController();fidelityController=ctrl;fidelityDraft=null;renderBuilder();
+  let generated='';let partial='';let done=false;
+  try {
+    const response=await fetch('/api/chat',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      model:state.settings.model,temperature:state.settings.temperature,max_tokens:Math.min(600,state.settings.max_tokens),messages
+    })});
+    if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||`Model returned HTTP ${response.status}`);}
+    if(!response.body)throw new Error('Model returned no response stream');
+    const reader=response.body.getReader();const decoder=new TextDecoder();
+    const onFrame=frame=>{
+      const data=frame.split('\n').filter(x=>x.startsWith('data:')).map(x=>x.slice(5).trim()).join('\n');
+      if(data==='[DONE]'){done=true;return;}if(!data)return;
+      let parsed;try{parsed=JSON.parse(data);}catch{return;}
+      if(parsed.error)throw new Error(String(parsed.error));
+      if(typeof parsed.choices?.[0]?.delta?.content==='string'){
+        generated+=parsed.choices[0].delta.content;
+        const output=$('fidelity-status');if(output)output.textContent=`Receiving test reply… ${generated.length} characters`;
+      }
+    };
+    while(!done){const {value,done:ended}=await reader.read();if(ended)break;partial=parseSSE(partial+decoder.decode(value,{stream:true}),onFrame);}
+    parseSSE(partial+decoder.decode()+'\n\n',onFrame);
+    if(ctrl.signal.aborted)throw new DOMException('Aborted','AbortError');
+    if(!generated.trim())throw new Error('Model returned an empty test reply');
+    // A changed/closed profile must not silently attach the result to another character.
+    if(builderCharacter()?.id!==charId || builderTab!=='lab')return;
+    fidelityDraft={characterId:charId,probeId:probe.id,reply:generated.slice(0,5000),model:state.settings.model,
+      profileFingerprint,warnings:inspectFidelityReply(probe.id,generated)};
+  } catch(error) {
+    if(error.name!=='AbortError' && $('fidelity-status'))$('fidelity-status').textContent=error.message;
+  } finally {
+    if(fidelityController===ctrl)fidelityController=null;
+    if(builderCharacter()?.id===charId && builderTab==='lab'){
+      const error=$('fidelity-status')?.textContent;
+      renderBuilder();
+      if(!fidelityDraft && error && !error.includes('Receiving') && !error.includes('generating'))$('fidelity-status').textContent=error;
+    }
+  }
+}
+
 async function uploadPortrait(file) {
   const c = builderCharacter(); if (!file || !c) return;
   if (!file.type.startsWith('image/') || file.size > 20_000_000) throw new Error('Select an image no larger than 20 MB.');
@@ -883,8 +1001,8 @@ function setupBuilderAI() {
   for (const key of CHARACTER_FIELDS.filter(x => x !== 'name' && x !== 'tagline')) select.add(new Option(builderLabel(key),key));
   select.onchange = () => { $('builder-ai-preview').classList.add('hidden'); aiDraftTarget = null; };
   $('builder-close').onclick = () => $('character-builder').close();
-  $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); });
-  document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { builderTab = btn.dataset.builderTab; renderBuilder(); });
+  $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); fidelityController?.abort(); });
+  document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { if (builderTab === 'lab' && btn.dataset.builderTab !== 'lab') fidelityController?.abort(); builderTab = btn.dataset.builderTab; renderBuilder(); });
   $('portrait-upload-button').onclick = () => $('portrait-upload-file').click();
   $('portrait-upload-file').onchange = async event => {
     const file = event.target.files?.[0]; event.target.value='';
