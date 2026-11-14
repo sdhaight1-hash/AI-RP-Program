@@ -156,8 +156,10 @@ async function main(){
       document.querySelector('#builder-world-context').textContent.includes('WORLD CONTEXT')`),true);
     await screenshot('05-character-workshop');
     await script("document.querySelector('#builder-close').click();return true");
-    assert.equal(await script("return document.body.dataset.workspace"),'story');
-    await screenshot('06-story-with-character');
+    assert.equal(await script("return document.body.dataset.workspace"),'characters',
+      'Creating a profile must not automatically create an unrelated scene');
+    await screenshot('06-character-created-without-auto-scene');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
     const previousTheme=await script("return document.querySelector('#quick-theme').value");
     assert.equal(await script(`
       const theme=document.querySelector('#quick-theme');
@@ -306,6 +308,11 @@ async function main(){
       name.value='Browser Full Purge Target';
       name.dispatchEvent(new Event('input',{bubbles:true}));
       document.querySelector('#builder-close').click();
+      const row=[...document.querySelectorAll('#character-list .character-row')]
+        .find(item=>item.querySelector('strong')?.textContent==='Browser Full Purge Target');
+      const start=row?.querySelector('button[title="Start scene with Browser Full Purge Target"]');
+      if(!start)return false;
+      start.click();
       window.confirm=()=>true;
       return true;
     `);
