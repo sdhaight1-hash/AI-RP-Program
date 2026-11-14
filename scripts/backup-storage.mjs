@@ -4,8 +4,8 @@
 // another process is changing the world catalog.
 import { DatabaseSync } from 'node:sqlite';
 import { createHash,randomUUID } from 'node:crypto';
-import { cpSync,existsSync,mkdirSync,readFileSync,renameSync,rmSync,writeFileSync,lstatSync } from 'node:fs';
-import { dirname,join,resolve,relative } from 'node:path';
+import { cpSync,existsSync,mkdirSync,openSync,readSync,closeSync,renameSync,rmSync,writeFileSync,lstatSync } from 'node:fs';
+import { dirname,join,resolve,sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectWorldStorage } from './storage-health.mjs';
 
@@ -30,10 +30,18 @@ function copyAssets(source,target){
     });
   }
 }
-function sha256(file){return createHash('sha256').update(readFileSync(file)).digest('hex');}
+function sha256(file){
+  const hash=createHash('sha256'),fd=openSync(file,'r'),chunk=Buffer.allocUnsafe(1024*1024);
+  try {
+    let size;
+    while((size=readSync(fd,chunk,0,chunk.length,null))>0)
+      hash.update(chunk.subarray(0,size));
+  } finally {closeSync(fd);}
+  return hash.digest('hex');
+}
 export function backupWorldStorage(dataDir,outputDir) {
   const src=resolve(dataDir),dest=resolve(outputDir);
-  if(dest===src||dest.startsWith(src+'/worlds/'))
+  if(dest===src||dest===join(src,'worlds')||dest.startsWith(join(src,'worlds')+sep))
     throw new Error('Backup destination must not replace a world partition');
   if(existsSync(dest))throw new Error('Backup destination already exists; never overwrite existing backups');
   const sourceAudit=inspectWorldStorage(src);
