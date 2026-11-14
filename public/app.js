@@ -1112,12 +1112,18 @@ function openDetailDesk(tab) {
   if(!document.querySelector(`[data-tab="${tab}"]`))return;
   currentTab=tab;
   renderInspector();
-  if(window.matchMedia('(max-width:1100px)').matches)setDetailDeskOpen(true);
+  // Full workspaces open their editor in a focused canvas, not the old
+  // narrow 340px column. Story still retains its lightweight detail desk.
+  const focus=activeWorkspace!=='story';
+  document.body.classList.toggle('detail-focus',focus);
+  if(focus||window.matchMedia('(max-width:1100px)').matches)setDetailDeskOpen(true);
 }
 function setDetailDeskOpen(isOpen){
   const desk=$('inspector'),scrim=$('inspector-scrim');
+  if(!isOpen)document.body.classList.remove('detail-focus');
   desk.classList.toggle('inspector-open',Boolean(isOpen));
   scrim.classList.toggle('hidden',!isOpen);
+  $('expand-inspector').setAttribute('aria-pressed',String(document.body.classList.contains('detail-focus')));
   for(const id of ['open-inspector','open-workspace-inspector'])$(id)?.setAttribute('aria-expanded',String(Boolean(isOpen)));
 }
 function setWorkspace(mode){
@@ -2123,6 +2129,11 @@ $('open-builder').onclick=()=>{if(!running)openBuilder(activeCharacter());};
 $('reading-toggle').onclick=()=>{state.settings.readingMode=!state.settings.readingMode;save();renderReadingMode();};
 $('open-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
 $('open-workspace-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
+$('expand-inspector').onclick=()=>{
+  const focus=!document.body.classList.contains('detail-focus');
+  document.body.classList.toggle('detail-focus',focus);
+  setDetailDeskOpen(focus||window.matchMedia('(max-width:1100px)').matches);
+};
 $('close-inspector').onclick=()=>setDetailDeskOpen(false);
 $('inspector-scrim').onclick=()=>setDetailDeskOpen(false);
 $('message-input').addEventListener('keydown',(ev)=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isComposing){ev.preventDefault();send();}});
