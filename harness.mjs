@@ -139,6 +139,13 @@ export function purgeArchived(state, kind, objectId) {
     if (state.sessions.some(s => s.parentSceneId === objectId))
       throw new Error('Cannot permanently purge a scene while its branches depend on its history. Purge descendant branches first.');
     state.sessions=state.sessions.filter(s=>s.id!==objectId);
+    // Removing the only scoped scene must NOT accidentally turn its private
+    // lore into globally visible world lore (empty sessionIds means unscoped).
+    state.lore=(state.lore||[]).flatMap(entry=>{
+      if(!entry.sessionIds?.includes(objectId))return [entry];
+      const remaining=entry.sessionIds.filter(id=>id!==objectId);
+      return remaining.length?[{...entry,sessionIds:remaining}]:[];
+    });
     if(state.activeSessionId===objectId) state.activeSessionId=state.sessions.find(s=>!s.trashedAt)?.id||null;
     return;
   }
