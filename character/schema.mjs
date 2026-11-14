@@ -1,5 +1,6 @@
 // Durable identity and habits belong to the world; present whereabouts, mood
 // and learned memories are timeline state, never permanent character fields.
+import { getChannel } from '../interactions/channels.mjs';
 const str = (v,n=2500) => typeof v==='string' ? v.slice(0,n) : '';
 export const CHARACTER_V2_FIELDS=Object.freeze([
   'name','handle','tagline','age','pronouns','aliases','occupation',
@@ -52,7 +53,7 @@ export function normalizeEncounters(items,characterIds) {
     if(!participants.length)return [];
     return [{id:e.id,title:str(e.title,120),characterIds:participants,
       locationId:typeof e.locationId==='string'?str(e.locationId,160):null,
-      channelId:['in_person','phone_call','text_message'].includes(e.channelId)?e.channelId:'in_person',
+      channelId:getChannel(e.channelId).id,
       premise:str(e.premise,3000),opening:str(e.opening,3000),
       alternativeOpenings:Array.isArray(e.alternativeOpenings)?e.alternativeOpenings.filter(x=>typeof x==='string').slice(0,12):[],
       imported:Boolean(e.imported)}];
