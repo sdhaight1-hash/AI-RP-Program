@@ -100,14 +100,23 @@ export function writeStoryProjection(db,state,revision) {
   const deleteCharacter=db.prepare('DELETE FROM story_projection_characters WHERE character_id=?');
   for(const row of db.prepare('SELECT character_id FROM story_projection_characters').all())
     if(!keepCharacters.has(row.character_id))deleteCharacter.run(row.character_id);
+  const existingMessages=db.prepare(
+    'SELECT position,message_id AS id,document FROM story_projection_messages WHERE scene_id=?');
+  const trimMessages=db.prepare('DELETE FROM story_projection_messages WHERE scene_id=? AND position>=?');
   for(const [position,scene] of sessions.entries()){
     keepScenes.add(scene.id);
     const {messages,...metadata}=scene;
     upsertScene.run(scene.id,position,encode(metadata));
-    for(const [messagePosition,message] of messages.entries())
-      upsertMessage.run(scene.id,messagePosition,message.id,encode(message));
-    db.prepare('DELETE FROM story_projection_messages WHERE scene_id=? AND position>=?')
-      .run(scene.id,messages.length);
+    // The browser still submits complete histories. Compare against the
+    // transaction's actual database records, not a client-supplied checksum;
+    // only changed or appended messages need SQLite UPSERT statements.
+    const previous=new Map(existingMessages.all(scene.id).map(x=>[x.position,x]));
+    for(const [messagePosition,message] of messages.entries()){
+      const document=encode(message),before=previous.get(messagePosition);
+      if(before?.id===message.id&&before.document===document)continue;
+      upsertMessage.run(scene.id,messagePosition,message.id,document);
+    }
+    if(previous.size>messages.length)trimMessages.run(scene.id,messages.length);
   }
   const current=db.prepare('SELECT scene_id FROM story_projection_scenes').all();
   const deleteScene=db.prepare('DELETE FROM story_projection_scenes WHERE scene_id=?');
