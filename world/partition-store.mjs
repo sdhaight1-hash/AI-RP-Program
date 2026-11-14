@@ -136,7 +136,10 @@ export class WorldPartitionStore {
   get events() {return this.current.events;}
   get db() {return this.current.db;}
   load() {return {...this.current.load(),worldId:this.activeWorldId};}
-  searchLore(query, options) {return this.current.searchLore(query,options);}
+  searchLore(query, options = {}) {
+    this.assertWorld(options.worldId);
+    return this.current.searchLore(query, options);
+  }
   save(state,revision,{worldId}={}) {
     if (worldId !== this.activeWorldId) throw new Error('World changed; this save belongs to another world');
     const scoped=structuredClone(state);
@@ -148,17 +151,37 @@ export class WorldPartitionStore {
       for(const key of ['homeLocationId','workLocationId'])if(c[key] && !locations.has(c[key]))throw new Error(`${key} is not a location in this world`);
       for(const place of c.frequentPlaces||[])if(!locations.has(place.locationId))throw new Error('Frequent place is not a location in this world');
     }
-    for(const encounter of scoped.encounters||[])if(encounter.locationId && !locations.has(encounter.locationId))throw new Error('Encounter location is not in this world');
-    const result=this.current.save(scoped,revision);
-    if(result)this.ensureCharacterEntities();
-    return result;
+    // A world-local snapshot must not accept foreign actors in scene transcripts,
+    // witness lists, or encounter participants. Normalization alone can silently
+    // drop invalid cast IDs; reject the malformed save before that happens.
+    const characterIds = new Set((scoped.characters || []).map(c => c.id));
+    for (const scene of scoped.sessions || []) {
+      if (!characterIds.has(scene.characterId) || (scene.castIds || []).some(id => !characterIds.has(id)))
+        throw new Error('Scene references a character outside this world');
+      for (const message of scene.messages || []) {
+        if (message.role === 'assistant' && !characterIds.has(message.speakerId || scene.characterId))
+          throw new Error('NPC reply references a character outside this world');
+        if ((message.witnessIds || []).some(id => !characterIds.has(id)))
+          throw new Error('Message witness is not a character in this world');
+      }
+    }
+    for(const encounter of scoped.encounters||[]) {
+      if(encounter.locationId && !locations.has(encounter.locationId))throw new Error('Encounter location is not in this world');
+      if((encounter.characterIds||[]).some(id => !characterIds.has(id)))throw new Error('Encounter references a character outside this world');
+    }
+    return this.current.save(scoped, revision, {
+      beforeCommit: validated => this.ensureCharacterEntities(validated.characters),
+    });
   }
-  ensureCharacterEntities() {
-    const characters=this.current.load().state?.characters||[];
-    const find=this.current.db.prepare('SELECT id,name FROM world_entities WHERE world_id=? AND source_character_id=? LIMIT 1');
+  ensureCharacterEntities(characters = this.current.load().state?.characters || []) {
+    // One lookup for the cast rather than a query per character on every
+    // debounced save/streamed reply. Stable character IDs remain authoritative.
+    const knownByCharacter = new Map(this.current.db.prepare(`SELECT id,name,source_character_id AS characterId
+      FROM world_entities WHERE world_id=? AND source_character_id IS NOT NULL`).all(this.activeWorldId)
+      .map(entity => [entity.characterId, entity]));
     const update=this.current.db.prepare('UPDATE world_entities SET name=? WHERE id=?');
     for(const character of characters) {
-      const known=find.get(this.activeWorldId,character.id);
+      const known=knownByCharacter.get(character.id);
       if(known) {if(known.name!==character.name)update.run(character.name,known.id);}
       else this.current.worlds.createEntity({worldId:this.activeWorldId,name:character.name,kind:'character',sourceCharacterId:character.id});
     }
@@ -185,10 +208,18 @@ export class WorldPartitionStore {
     } catch(error) {temporary.close();rmSync(tempDir,{recursive:true,force:true});throw error;}
     temporary.close();
     const finalDir=dirname(this.worldFile(record.id));
-    renameSync(tempDir,finalDir);
-    this.registry.prepare('INSERT INTO world_catalog(id,name,description,created_at) VALUES (?,?,?,?)')
-      .run(record.id,record.name,record.description,record.createdAt);
-    return record;
+    let moved=false;
+    try {
+      renameSync(tempDir,finalDir);
+      moved=true;
+      this.registry.prepare('INSERT INTO world_catalog(id,name,description,created_at) VALUES (?,?,?,?)')
+        .run(record.id,record.name,record.description,record.createdAt);
+      return record;
+    } catch (error) {
+      // Registry failure must not leave a seemingly valid but unlisted world.
+      rmSync(moved ? finalDir : tempDir,{recursive:true,force:true});
+      throw error;
+    }
   }
 
   migrateLegacy() {

@@ -21,8 +21,8 @@ export function prepareWorkflow(apiJson, prompt, negative = '') {
   let replaced=0;
   function walk(x) {
     if(typeof x === 'string') {
-      if(x.includes('__RP_PROMPT__')) {replaced++; return x.replaceAll('__RP_PROMPT__',prompt);}
-      return x.replaceAll('__RP_NEGATIVE__',negative);
+      if(x.includes('__RP_PROMPT__')) replaced++;
+      return x.replaceAll('__RP_PROMPT__',prompt).replaceAll('__RP_NEGATIVE__',negative);
     }
     if(Array.isArray(x)) return x.map(walk);
     if(isObject(x)) return Object.fromEntries(Object.entries(x).map(([k,v])=>[k,walk(v)]));
@@ -61,7 +61,7 @@ export class ComfyClient {
     catch(error){if(error.code==='EEXIST')throw new Error('Template exists. Choose a different name.');throw error;}
     return {id};
   }
-  async submit({templateId,prompt,negative=''}) {
+  async submit({templateId,prompt,negative='',worldId=null}) {
     if(!SAFE_ID.test(templateId||''))throw new Error('Invalid workflow template');
     let source;
     try {source=await readFile(join(this.templateDir,templateId+'.json'),'utf8');}
@@ -72,12 +72,13 @@ export class ComfyClient {
     if(!response.ok)throw new Error(`ComfyUI rejected workflow (${response.status}): ${(await response.text()).slice(0,400)}`);
     const data=await response.json();
     if(!SAFE_JOB.test(data.prompt_id||''))throw new Error('ComfyUI returned an invalid job ID');
-    this.jobs.set(data.prompt_id, {templateId,at:Date.now()});
+    this.jobs.set(data.prompt_id, {templateId,worldId,at:Date.now()});
     while(this.jobs.size>100)this.jobs.delete(this.jobs.keys().next().value);
     return {jobId:data.prompt_id};
   }
-  async history(jobId) {
+  async history(jobId, worldId=null) {
     if(!SAFE_JOB.test(jobId||'') || !this.jobs.has(jobId))throw new Error('Unknown ComfyUI job');
+    if(this.jobs.get(jobId).worldId !== worldId)throw new Error('ComfyUI job belongs to a different world');
     const response=await this.fetch(this.url+'/history/'+jobId,{signal:AbortSignal.timeout(5500)});
     if(!response.ok)throw new Error(`ComfyUI history HTTP ${response.status}`);
     const data=await response.json();const result=data[jobId];
@@ -89,8 +90,8 @@ export class ComfyClient {
     }
     return {jobId,done:Boolean(result),images:images.slice(0,30),error:result?.status?.status_str==='error'};
   }
-  async image(jobId,filename,subfolder='') {
-    const {images}=await this.history(jobId);
+  async image(jobId,filename,subfolder='',worldId=null) {
+    const {images}=await this.history(jobId,worldId);
     if(!images.some(i=>i.filename===filename && i.subfolder===subfolder))throw new Error('Image not part of this completed job');
     const url=this.url+'/view?'+new URLSearchParams({filename,subfolder,type:'output'});
     const response=await this.fetch(url,{signal:AbortSignal.timeout(30000)});

@@ -19,7 +19,7 @@ const ALLOWED = new Map([
   ['/harness.mjs', ['../harness.mjs', 'text/javascript; charset=utf-8']],
   ['/psychology.mjs', ['../psychology.mjs', 'text/javascript; charset=utf-8']],
   ['/fidelity.mjs', ['../fidelity.mjs', 'text/javascript; charset=utf-8']],
-  ['/character/context.mjs', ['character/context.mjs', 'text/javascript; charset=utf-8']],
+  ['/character/context.mjs', ['../character/context.mjs', 'text/javascript; charset=utf-8']],
   ['/character/schema.mjs', ['../character/schema.mjs', 'text/javascript; charset=utf-8']],
   ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
@@ -45,31 +45,42 @@ function verifiedImage(bytes, type) {
   throw new RangeError('Only valid JPEG or WebP portraits are accepted');
 }
 async function readJson(req, limit = 750_000) {
-  let raw = '';
+  // Decode only after collecting complete bytes. Per-chunk Buffer.toString()
+  // corrupts multibyte UTF-8 split across TCP frames, and UTF-16 length is
+  // not a reliable upload-size limit.
+  const chunks = [];
+  let length = 0;
   for await (const chunk of req) {
-    raw += chunk.toString();
-    if (raw.length > limit) throw new Error('Request too large');
+    length += chunk.length;
+    if (length > limit) throw new RangeError('Request too large');
+    chunks.push(chunk);
   }
-  try { return JSON.parse(raw); } catch { throw new Error('Invalid JSON'); }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw new Error('Invalid JSON'); }
 }
 
 export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, store = new WorldPartitionStore(join(root, '.data')), portraitDir = null, comfyUrl = process.env.COMFYUI_URL || 'http://127.0.0.1:8188/', comfyFetchImpl = fetch, comfyTemplateDir = join(root,'.data','comfy-workflows') } = {}) {
   const comfy = new ComfyClient({url:comfyUrl,fetchImpl:comfyFetchImpl,templateDir:comfyTemplateDir});
+  // With world-partitioned storage, a second tab must never change the world
+  // behind another tab's writes, portraits, lore reads, or model requests.
+  const requireWorldScope = worldId => {
+    if (typeof store.activateWorld === 'function') store.assertWorld(worldId);
+  };
   // The server binds localhost by default; this additional check rejects cross-site writes.
   const server = http.createServer(async (req, res) => {
-    const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
-    const path = requestUrl.pathname;
-    const origin = req.headers.origin;
-    if (origin) {
-      try {
-        const u = new URL(origin);
-        if (!['localhost', '127.0.0.1'].includes(u.hostname) || u.host !== req.headers.host) {
-          return json(res, 403, { error: 'Cross-origin requests are blocked' });
-        }
-      } catch { return json(res, 403, { error: 'Invalid origin' }); }
-    }
     try {
+      const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
+      const path = requestUrl.pathname;
+      const origin = req.headers.origin;
+      if (origin) {
+        try {
+          const u = new URL(origin);
+          if (!['localhost', '127.0.0.1'].includes(u.hostname) || u.host !== req.headers.host)
+            return json(res, 403, { error: 'Cross-origin requests are blocked' });
+        } catch { return json(res, 403, { error: 'Invalid origin' }); }
+      }
       if (req.method === 'POST' && path === '/api/portraits') {
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
         const type = (req.headers['content-type'] || '').toLowerCase();
         if (!['image/webp', 'image/jpeg'].includes(type)) return json(res, 415, { error: 'Portrait must be JPEG or WebP' });
         const bytes = await readBinary(req);
@@ -81,6 +92,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         return json(res, 201, { path: `/portraits/${filename}` });
       }
       if (req.method === 'GET' && /^\/portraits\/[a-f0-9-]{36}\.(?:jpg|webp)$/.test(path)) {
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
         try {
           const assetDir = portraitDir || store.assetDir?.('portraits') || join(root,'.data','portraits');
           const image = await readFile(join(assetDir, path.slice('/portraits/'.length)));
@@ -103,7 +115,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       if (req.method === 'POST' && path === '/api/worlds') {
         const data=await readJson(req,5000);
         try { return json(res,201,store.worlds.createWorld(data)); }
-        catch(err) { if(err instanceof TypeError) return json(res,400,{error:err.message}); throw err; }
+        catch(err) { return json(res,400,{error:err.message}); }
       }
       if (req.method === 'POST' && path === '/api/timelines') {
         const data=await readJson(req,3000);
@@ -112,6 +124,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/timelines/fork') {
         const input=await readJson(req,3000);
+        requireWorldScope(input.worldId);
         try{return json(res,201,store.worlds.forkTimeline(input));}
         catch(err){return json(res,400,{error:err.message});}
       }
@@ -137,38 +150,46 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/timelines/clock') {
         const data=await readJson(req,2500);
+        requireWorldScope(data.worldId);
         try {return json(res,200,store.worlds.setClock(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/timelines/positions') {
         const data=await readJson(req,2500);
+        requireWorldScope(data.worldId);
         try {return json(res,200,store.worlds.setActorLocation(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'GET' && path === '/api/timelines/actors') {
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
         const timelineId=requestUrl.searchParams.get('timelineId');
         if(!timelineId || timelineId.length>120) return json(res,400,{error:'Valid timelineId required'});
         return json(res,200,{actors:store.worlds.actors(timelineId)});
       }
       if (req.method === 'POST' && path === '/api/events/proposals') {
         const input=await readJson(req,5000);
+        requireWorldScope(input.worldId);
         try {return json(res,201,store.events.propose(input));}
         catch(err){return json(res,422,{error:err.message});}
       }
       if (req.method === 'GET' && path === '/api/events/proposals') {
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
         try {return json(res,200,{proposals:store.events.list(requestUrl.searchParams.get('sceneId'))});}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/events/decide') {
         const input=await readJson(req,2500);
+        requireWorldScope(input.worldId);
         try {return json(res,200,store.events.decide(input));}
         catch(err){return json(res,409,{error:err.message});}
       }
       if (req.method === 'GET' && path === '/api/events/visible') {
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
         try {return json(res,200,{events:store.events.visible(requestUrl.searchParams.get('timelineId'),requestUrl.searchParams.get('actorId'))});}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'GET' && path === '/api/state') {
+        if (requestUrl.searchParams.has('worldId')) requireWorldScope(requestUrl.searchParams.get('worldId'));
         return json(res, 200, store.load());
       }
       if (req.method === 'PUT' && path === '/api/state') {
@@ -190,12 +211,13 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         }
       }
       if (req.method === 'POST' && path === '/api/search/lore') {
-        const {query,actorId,sessionId}=await readJson(req,4000);
+        const {query,actorId,sessionId,worldId}=await readJson(req,4000);
+        requireWorldScope(worldId);
         if(typeof query !== 'string' || query.length > 500 || typeof actorId !== 'string' || typeof sessionId !== 'string')return json(res,400,{error:'Invalid lore query'});
         const state=store.load().state;
         const session=state?.sessions?.find(s=>s.id===sessionId && !s.trashedAt);
         if(!session || !(session.castIds||[session.characterId]).includes(actorId) || !state.characters.some(c=>c.id===actorId && !c.trashedAt))return json(res,400,{error:'Actor not in this scene'});
-        return json(res,200,{entries:store.searchLore(query,{actorId,sessionId,limit:6})});
+        return json(res,200,{entries:store.searchLore(query,{actorId,sessionId,worldId,limit:6})});
       }
       if (req.method === 'GET' && path === '/api/comfy/status') {
         try{return json(res,200,await comfy.status());}catch(error){return json(res,200,{connected:false,error:error.message});}
@@ -207,15 +229,18 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/comfy/generate') {
         const payload=await readJson(req,8000);
+        requireWorldScope(payload.worldId);
         if(typeof payload.templateId !== 'string' || typeof payload.prompt !== 'string' || payload.prompt.length > 4000 || typeof (payload.negative||'') !== 'string')return json(res,400,{error:'Invalid ComfyUI job'});
         try{return json(res,202,await comfy.submit(payload));}catch(error){return json(res,422,{error:error.message});}
       }
       if (req.method === 'GET' && path === '/api/comfy/history') {
-        try{return json(res,200,await comfy.history(requestUrl.searchParams.get('job')));}catch(error){return json(res,404,{error:error.message});}
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
+        try{return json(res,200,await comfy.history(requestUrl.searchParams.get('job'),requestUrl.searchParams.get('worldId')));}catch(error){return json(res,404,{error:error.message});}
       }
       if (req.method === 'GET' && path === '/api/comfy/image') {
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
         try{
-          const {bytes,type}=await comfy.image(requestUrl.searchParams.get('job'),requestUrl.searchParams.get('filename'),requestUrl.searchParams.get('subfolder')||'');
+          const {bytes,type}=await comfy.image(requestUrl.searchParams.get('job'),requestUrl.searchParams.get('filename'),requestUrl.searchParams.get('subfolder')||'',requestUrl.searchParams.get('worldId'));
           res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'});return res.end(bytes);
         }catch(error){return json(res,404,{error:error.message});}
       }
@@ -230,6 +255,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/chat') {
         const data = await readJson(req);
+        // Legacy standalone inference clients may omit worldId. They cannot
+        // read or write fiction state through this stateless endpoint.
+        if (data.worldId !== undefined) requireWorldScope(data.worldId);
         const valid = typeof data.model === 'string' && data.model.length > 0 && data.model.length < 250 &&
           Array.isArray(data.messages) && data.messages.length > 0 && data.messages.length <= 200 &&
           data.messages.every(m => m && ['system', 'user', 'assistant'].includes(m.role) && typeof m.content === 'string' && m.content.length <= 30_000) &&
@@ -252,7 +280,10 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try {
           for await (const chunk of upstream.body) {
             if (res.destroyed) break;
-            if (!res.write(chunk)) await new Promise(resolve => res.once('drain', resolve));
+            if (!res.write(chunk)) await new Promise(resolve => {
+              const done=()=>{res.off('drain',done);res.off('close',done);resolve();};
+              res.once('drain',done);res.once('close',done);
+            });
           }
         } catch (err) {
           if (!res.destroyed) res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
@@ -268,6 +299,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       return json(res, 404, { error: 'Not found' });
     } catch (err) {
+      if (!res.headersSent && /Open that world before editing it/.test(err.message)) return json(res, 409, { error: 'Another tab opened a different world. Reload this world before continuing.' });
       if (!res.headersSent) json(res, err.message === 'Invalid JSON' || err.message === 'Request too large' || err instanceof RangeError ? 400 : 500, { error: err.message });
       else res.destroy(err);
     }

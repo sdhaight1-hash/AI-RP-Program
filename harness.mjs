@@ -113,7 +113,6 @@ export function createActorContext({ session, characters, actorId, persona, lore
   const channel = getChannel(session.channelId);
   const inPerson = channel.id === 'in_person';
   const seenEvents = inPerson ? actorVisibleEvents(session,actorId) : channelObservations(session.sceneEvents,channel.id,actorId);
-  const actingCharacter = inPerson ? actor : { ...actor, scenario: '' };
   const director=session.director || {mode:'collaborative'};
   const directorNotes=director.mode==='sandbox'?'Sandbox: avoid forcing planned plot turns or conveniently timed interruptions.':director.mode==='directed'?'Directed: favor established scene goals and authored beats when plausible; never force player decisions.':'Collaborative: offer plausible opportunities and balanced pacing without railroading.';
   const sceneNotes = [inPerson ? `Shared location: ${session.location || 'Unspecified'}` : 'Remote communication: participants stay in their own physical locations; do not assume they can see each other.', `Time: ${session.worldTime || 'Unspecified'}`,
@@ -125,7 +124,7 @@ export function createActorContext({ session, characters, actorId, persona, lore
     seenEvents.length && `Events this character actually witnessed:\n${seenEvents.map(e => `- ${e.description}`).join('\n')}`,
     rememberedEvents.length && `Previously committed events this character knows (not necessarily visible through the current channel):\n${rememberedEvents.slice(-12).map(e=>`- ${String(e.description).slice(0,450)}`).join('\n')}`].filter(Boolean).join('\n');
   const summary = inPerson ? ((session.castIds || []).length > 1 ? session.publicSummary : (session.summary || '')) : ''; // Do not inject unseen shared-scene narration in remote channels.
-  const assembled = buildMessages({ character: actingCharacter, persona, summary, authorNote: session.authorNote,
+  const assembled = buildMessages({ character: actor, persona, summary, authorNote: session.authorNote,
     emotion: session.emotionByActor?.[actorId] || session.emotion,
     lore: candidateLore, history, sceneNotes, styleInstruction: channel.direction, channelVoice: getChannelVoice(actor,channel.id), worldPlaceNotes,
     psychologyNotes: session.psychologyByActor?.[actorId] ? describeMind(session.psychologyByActor[actorId],actor.name) : '' });
@@ -137,6 +136,8 @@ export function purgeArchived(state, kind, objectId) {
   if (kind === 'scene') {
     const item=state.sessions.find(s=>s.id===objectId && s.trashedAt);
     if(!item) throw new Error('Archive the scene before permanent removal');
+    if (state.sessions.some(s => s.parentSceneId === objectId))
+      throw new Error('Cannot permanently purge a scene while its branches depend on its history. Purge descendant branches first.');
     state.sessions=state.sessions.filter(s=>s.id!==objectId);
     if(state.activeSessionId===objectId) state.activeSessionId=state.sessions.find(s=>!s.trashedAt)?.id||null;
     return;

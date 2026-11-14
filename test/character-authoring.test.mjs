@@ -35,3 +35,14 @@ test('single-target AI edits are permitted only for the named field',()=>{
   const changed={...library,locations:[...library.locations,{id:'new',worldId:'alpha',name:'New cafe'}]};
   assert.throws(()=>selectCharacterChanges({character:c,worldLibrary:changed,worldId:'alpha',request,changes:{textStyle:'yes'}}),/changed/);
 });
+
+
+test('co-author drafts become stale when familiar-place assignments change',()=>{
+  const c=createCharacter('Mara');c.worldId='alpha';
+  const request=makeCharacterDraftRequest({character:c,target:'personality',worldLibrary:library,worldId:'alpha'});
+  c.homeLocationId='shop';
+  assert.throws(()=>selectCharacterChanges({character:c,worldLibrary:library,worldId:'alpha',request,changes:{personality:'Kind but guarded'}}),/changed/);
+  const next=makeCharacterDraftRequest({character:c,target:'personality',worldLibrary:library,worldId:'alpha'});
+  c.frequentPlaces=[{locationId:'shop',reason:'Reads here'}];
+  assert.throws(()=>selectCharacterChanges({character:c,worldLibrary:library,worldId:'alpha',request:next,changes:{personality:'Calm'}}),/changed/);
+});

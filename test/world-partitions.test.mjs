@@ -22,7 +22,7 @@ test('worlds store independent state, lore, timeline clocks and assets across re
   store.activateWorld(second);
   assert.deepEqual(store.load().state.characters,[]);
   assert.equal(store.load().state.sessions.length,0);
-  assert.deepEqual(store.searchLore('WORLD_ALPHA_SECRET',{actorId:'any'}),[]);
+  assert.deepEqual(store.searchLore('WORLD_ALPHA_SECRET',{actorId:'any',worldId:second}),[]);
   assert.throws(()=>store.save(state,store.load().revision,{worldId:first}),/World changed/);
   assert.throws(()=>store.worlds.createLocation({worldId:first,name:'Foreign'}),/Open that world/);
   const b=createCharacter('Dana');b.personality='WORLD_BETA_SECRET';

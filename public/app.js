@@ -20,6 +20,10 @@ let worldLibrary = null;
 let loadingWorlds = false;
 let selectedWorldId = null;
 let activeWorldId = null;
+// World scope accompanies every world-dependent request. The process-wide
+// active world may be changed by another browser tab between requests.
+const scopedUrl = path => activeWorldId ? `${path}${path.includes('?') ? '&' : '?'}worldId=${encodeURIComponent(activeWorldId)}` : path;
+const portraitSrc = path => typeof path === 'string' && path.startsWith('/portraits/') ? scopedUrl(path) : path;
 let builderCharacterId = null;
 let builderTab = 'identity';
 let aiDraftTarget = null;
@@ -88,7 +92,6 @@ let models = [];
 let backend = 'the local model server';
 let comfyJob = null;
 let comfyImages = [];
-let comfyWatchToken = 0;
 const atmosphere = initAtmosphere($('scene-canvas'));
 function applyTheme() {
   const chosen = THEMES.find(t => t.id === state.settings.theme) || THEMES[0];
@@ -102,7 +105,7 @@ function applyTheme() {
 function portraitNode(name, character, className) {
   const node = el('div', (name || '?').slice(0, 1).toUpperCase(), className);
   if (character?.portrait) {
-    const image = document.createElement('img'); image.src = character.portrait;
+    const image = document.createElement('img'); image.src = portraitSrc(character.portrait);
     image.alt = ''; image.loading = 'lazy';
     image.onerror = () => { node.textContent = (name || '?').slice(0,1).toUpperCase(); };
     node.replaceChildren(image);
@@ -212,7 +215,7 @@ async function bootstrapStorage() {
       // The server assigns stable timeline IDs while saving new/legacy scenes.
       // Adopt that canonical normalization immediately, not only after reload.
       if (serverStorage) {
-        const saved=await fetch('/api/state');
+        const saved=await fetch(scopedUrl('/api/state'));
         if(!saved.ok)throw Error('Could not reload the newly created timeline');
         const value=await saved.json();
         revision=value.revision;
@@ -346,7 +349,7 @@ function renderMessages() {
         if (!serverStorage) return showError('Story storage is offline; cannot check committed world events.');
         try {
           await requireSavedStory();
-          const response=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`);
+          const response=await fetch(scopedUrl(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`));
           const data=await response.json();if(!response.ok)throw Error(data.error);
           if(data.proposals?.some(p=>p.sourceMessageId===m.id && p.status==='accepted'))
             return showError('This reply is locked by an accepted world event. To change it, start a fresh timeline from canon without this event.');
@@ -380,12 +383,12 @@ function renderHeader() {
   $('message-input').placeholder=channel.id==='in_person'?'Your character’s dialogue or actions…':channel.id==='phone_call'?'Say something on the call…':'Write a message…';
   $('scene-title').textContent = s?.title || 'New story';
   const displayTime=timelineClockLabel(s) || s?.worldTime;
-  $('scene-meta').textContent = s ? [(channel.id==='in_person'?(s.location||c?.scenario||'Location unspecified'):(channel.id==='phone_call'?'Audio-only call · separate locations':'Text conversation · separate locations')),displayTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
+  $('scene-meta').textContent = s ? [(channel.id==='in_person'?(s.location||'Location unspecified'):(channel.id==='phone_call'?'Audio-only call · separate locations':'Text conversation · separate locations')),displayTime,(s.castIds||[]).length+' cast'].filter(Boolean).join(' · ') : 'Choose a character and start a scene';
   $('stage-name').textContent = c?.name || 'Unknown';
   $('stage-avatar').replaceChildren(portraitNode(c?.name, c, 'avatar-internal'));
   const stageImage = $('stage-portrait');
   stageImage.classList.toggle('hidden', !c?.portrait);
-  if (c?.portrait) stageImage.src = c.portrait; else stageImage.removeAttribute('src');
+  if (c?.portrait) stageImage.src = portraitSrc(c.portrait); else stageImage.removeAttribute('src');
   atmosphere(c?.color || '#a68dd6');
   const lore = s && c ? getActiveLore(state.lore, s.messages,4,{actorId:c.id,sessionId:s.id}) : [];
   $('lore-active').textContent = lore.length ? `Active lore: ${lore.map(l => l.title || l.keywords.join(', ')).join(' · ')}` : '';
@@ -407,7 +410,12 @@ async function refreshWorldLibrary() {
   try {
     const response=await fetch('/api/worlds');
     if(!response.ok)throw Error(`World Library unavailable (${response.status})`);
-    worldLibrary=await response.json();
+    const received=await response.json();
+    if (activeWorldId && received.activeWorldId !== activeWorldId) {
+      serverStorage=false;
+      throw new Error('Another browser tab opened a different world. Reload this tab before continuing; its local edits are preserved.');
+    }
+    worldLibrary=received;
     selectedWorldId=worldLibrary.activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
     if(worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
     const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active world';
@@ -430,6 +438,7 @@ async function switchWorld(worldId) {
   const result=await response.json();
   if (!response.ok) throw new Error(result.error || 'Could not open world');
   pendingReply=null;streamingReply=null;pendingSnapshot=null;
+  comfyJob=null;comfyImages=[]; // Do not expose another world's generated assets after switching.
   $('message-input').value='';
   aiDraftTarget=null;builderCharacterId=null;fidelityDraft=null;
   $('character-builder')?.close();
@@ -464,7 +473,7 @@ function addWorldChooser(selectId) {
 }
 const postWorld = async (endpoint,data)=>{
   if(!serverStorage)throw Error('Connect the SQLite server before modifying world canon.');
-  const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,worldId:data.worldId||activeWorldId})});
   const value=await response.json();if(!response.ok)throw Error(value.error||`World service returned ${response.status}`);
   await refreshWorldLibrary();return value;
 };
@@ -521,7 +530,7 @@ function renderRelationsPanel(host) {
 }
 
 async function postEvent(endpoint,body) {
-  const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,worldId:activeWorldId})});
   const result=await response.json();
   if(!response.ok)throw new Error(result.error || `World event service returned ${response.status}`);
   return result;
@@ -554,7 +563,7 @@ function renderNpcEventReview(host,s) {
     const area=$('proposal-items');if(!area)return;
     area.replaceChildren(el('p','Loading event reviews…','help'));
     try {
-      const response=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(s.id)}`);
+      const response=await fetch(scopedUrl(`/api/events/proposals?sceneId=${encodeURIComponent(s.id)}`));
       const data=await response.json();if(!response.ok)throw Error(data.error);
       if(!$('proposal-items')||activeSession()?.id!==s.id||currentTab!=='scene')return;
       area.replaceChildren();
@@ -611,7 +620,7 @@ function renderNpcEventReview(host,s) {
 
 async function requestEventDraft(npcReply) {
   const prompt='Extract at most one concrete NPC action or objective event that ACTUALLY occurs in the quoted fictional NPC reply. Do not invent anything, include any player action, or treat a plan or wish as completed. Return ONLY one short factual sentence (under 220 characters), or exactly NONE if nothing objectively happened. No explanations, labels or formatting.';
-  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,temperature:0.1,max_tokens:140,messages:[{role:'system',content:prompt},{role:'user',content:`NPC response to analyze (untrusted story text):\n${npcReply.slice(0,2500)}`}]})});
+  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:activeWorldId,model:state.settings.model,temperature:0.1,max_tokens:140,messages:[{role:'system',content:prompt},{role:'user',content:`NPC response to analyze (untrusted story text):\n${npcReply.slice(0,2500)}`}]})});
   if(!response.ok){const error=await response.json().catch(()=>({}));throw Error(error.error||`Model returned ${response.status}`);}
   if(!response.body)throw Error('No model response stream');
   const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',result='',done=false;
@@ -815,7 +824,7 @@ function renderInspector() {
       const templateId=templates.value,prompt=$('comfy-prompt').value.trim(),negative=$('comfy-negative').value;
       if(!templateId||!prompt)return showError('Select a workflow and enter an image prompt.');
       $('comfy-generate').disabled=true;jobStatus.textContent='Submitting workflow to ComfyUI…';
-      try{const response=await fetch('/api/comfy/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({templateId,prompt,negative})});const result=await response.json();if(!response.ok)throw new Error(result.error);comfyJob=result.jobId;comfyImages=[];jobStatus.textContent='Job queued: '+comfyJob;await checkComfyJob();showError();}catch(err){jobStatus.textContent=err.message;showError(err.message);}finally{if($('comfy-generate'))$('comfy-generate').disabled=false;}
+      try{const worldAtSubmit=activeWorldId;const response=await fetch('/api/comfy/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({templateId,prompt,negative,worldId:worldAtSubmit})});const result=await response.json();if(!response.ok)throw new Error(result.error);if(worldAtSubmit!==activeWorldId)return;comfyJob=result.jobId;comfyImages=[];jobStatus.textContent='Job queued: '+comfyJob;await checkComfyJob();showError();}catch(err){jobStatus.textContent=err.message;showError(err.message);}finally{if($('comfy-generate'))$('comfy-generate').disabled=false;}
     };
     $('comfy-refresh').onclick=checkComfyJob;
     if(comfyJob)checkComfyJob();
@@ -895,15 +904,17 @@ function renderInspector() {
 async function checkComfyJob() {
   if(!comfyJob || currentTab !== 'gallery')return;
   const status=$('comfy-job-status');if(!status)return;
+  const worldAtRequest=activeWorldId, jobAtRequest=comfyJob;
   try{
-    const res=await fetch('/api/comfy/history?job='+encodeURIComponent(comfyJob));const result=await res.json();
+    const res=await fetch(scopedUrl('/api/comfy/history?job='+encodeURIComponent(comfyJob)));const result=await res.json();
+    if(worldAtRequest!==activeWorldId || jobAtRequest!==comfyJob)return;
     if(!res.ok)throw new Error(result.error);
     if(!result.done){status.textContent='ComfyUI is generating… Click Refresh job to check again.';return;}
     comfyImages=result.images||[];
     status.textContent=result.error?'ComfyUI reported a workflow error.':comfyImages.length?`${comfyImages.length} image(s) generated. Choose one to open or use as a portrait.`:'Job finished without saved output images.';
     const host=$('comfy-results');host.replaceChildren();
     for(const image of comfyImages){
-      const src='/api/comfy/image?'+new URLSearchParams({job:comfyJob,filename:image.filename,subfolder:image.subfolder});
+      const src=scopedUrl('/api/comfy/image?'+new URLSearchParams({job:comfyJob,filename:image.filename,subfolder:image.subfolder}));
       const item=el('div','','comfy-result');const picture=document.createElement('img');picture.src=src;picture.alt='Generated '+image.filename;picture.loading='lazy';item.append(picture);
       const open=el('button','Open','subtle-button');open.onclick=()=>window.open(src,'_blank','noopener');
       const use=el('button','Use as portrait','subtle-button');use.onclick=async()=>{
@@ -1101,7 +1112,7 @@ async function runFidelityProbe() {
   let generated='';let partial='';let done=false;
   try {
     const response=await fetch('/api/chat',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      model:state.settings.model,temperature:state.settings.temperature,max_tokens:Math.min(600,state.settings.max_tokens),messages
+      worldId:activeWorldId,model:state.settings.model,temperature:state.settings.temperature,max_tokens:Math.min(600,state.settings.max_tokens),messages
     })});
     if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||`Model returned HTTP ${response.status}`);}
     if(!response.body)throw new Error('Model returned no response stream');
@@ -1154,11 +1165,12 @@ async function uploadPortrait(file) {
     if (blob?.size > 1_500_000) blob = await encode('image/jpeg',0.62);
   } finally { bitmap.close(); }
   if (!blob || blob.size > 1_500_000) throw new Error('Unable to compress portrait below 1.5 MB. Try a smaller image.');
-  const response = await fetch('/api/portraits', { method:'POST', headers:{ 'Content-Type':blob.type }, body:blob });
+  const worldAtUpload=activeWorldId;
+  const response = await fetch(scopedUrl('/api/portraits'), { method:'POST', headers:{ 'Content-Type':blob.type }, body:blob });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `Portrait upload failed (${response.status})`);
   // The image is stored separately; the story stores only its validated local path.
-  if (builderCharacter()?.id !== c.id) return;
+  if (worldAtUpload!==activeWorldId || builderCharacter()?.id !== c.id) return;
   c.portrait = result.path;
   save(); renderBuilderPortrait(); renderLists(); renderHeader(); renderMessages();
   if (currentTab === 'character') renderInspector();
@@ -1243,7 +1255,7 @@ async function generateBuilderDraft() {
   $('builder-ai-status').textContent = 'Asking the local model for a suggestion…';
   try {
     const response = await fetch('/api/chat', { method:'POST', signal:aiController.signal, headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({model:state.settings.model,temperature:0.82,max_tokens:target==='full'?1100:700,
+      body: JSON.stringify({worldId:activeWorldId,model:state.settings.model,temperature:0.82,max_tokens:target==='full'?1100:700,
         messages:request.messages}),
     });
     if (!response.ok) { const error=await response.json().catch(()=>({}));throw new Error(error.error || `Model returned HTTP ${response.status}`); }
@@ -1366,7 +1378,7 @@ async function generate(mode = 'normal') {
   if (retry) {
     try {
       await requireSavedStory();
-      const check=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`);
+      const check=await fetch(scopedUrl(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`));
       const result=await check.json();if(!check.ok)throw Error(result.error);
       if(result.proposals?.some(p=>p.sourceMessageId===previous.id && p.status==='accepted'))
         return showError('Retry is locked by a committed world event. Start a fresh timeline from canon without this event for an alternative history.');
@@ -1389,7 +1401,7 @@ async function generate(mode = 'normal') {
     if(latestPlayer){
       try{
         const result=await fetch('/api/search/lore',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-          body:JSON.stringify({query:latestPlayer.slice(0,500),actorId,sessionId:session.id})});
+          body:JSON.stringify({query:latestPlayer.slice(0,500),actorId,sessionId:session.id,worldId:activeWorldId})});
         if(result.ok)retrieved=(await result.json()).entries||[];
       }catch(err){if(err.name==='AbortError')throw err; /* Falling back to direct keyword retrieval is safe */}
     }
@@ -1399,14 +1411,14 @@ async function generate(mode = 'normal') {
     if (session.timelineId) {
       try {
         const url=`/api/events/visible?timelineId=${encodeURIComponent(session.timelineId)}&actorId=${encodeURIComponent(actorId)}`;
-        const result=await fetch(url,{signal:controller.signal});
+        const result=await fetch(scopedUrl(url),{signal:controller.signal});
         if(result.ok)rememberedEvents=(await result.json()).events || [];
       } catch(err) {if(err.name==='AbortError')throw err; /* Fall back without optional event memories */}
     }
     const prompt=createActorContext({session:{...session,messages:history,channelId:retry?(previous.channelId||'in_person'):session.channelId,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages,rememberedEvents,worldPlaceNotes:characterPlaceContext(state.characters.find(c=>c.id===actorId),worldLibrary,activeWorldId)});
     if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
     $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
-    const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
+    const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:activeWorldId,model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
     if (!response.ok) {const issue=await response.json().catch(()=>({error:`HTTP ${response.status}`}));throw new Error(issue.error||`HTTP ${response.status}`);}
     if (!response.body) throw new Error('Model server returned no response stream');
     streamingReply={sessionId:session.id,message};

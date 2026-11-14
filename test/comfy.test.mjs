@@ -13,6 +13,7 @@ test('ComfyUI rejects remote backends and malformed workflow graphs',()=>{
   assert.throws(()=>prepareWorkflow({'1':{class_type:'KSampler',inputs:{seed:3}}},'test'),/placeholder/);
   assert.deepEqual(prepareWorkflow(TEMPLATE,'a portrait','blurry')['1'].inputs.text,'a portrait');
   assert.equal(TEMPLATE['1'].inputs.text,'__RP_PROMPT__'); // input template stays pristine
+  assert.equal(prepareWorkflow({'1':{class_type:'CLIPTextEncode',inputs:{text:'__RP_PROMPT__ | __RP_NEGATIVE__'}}},'sunny','blur')['1'].inputs.text,'sunny | blur');
 });
 
 test('ComfyUI dispatches only installed local templates, returns own generated images',async()=>{
@@ -37,5 +38,24 @@ test('ComfyUI dispatches only installed local templates, returns own generated i
     await assert.rejects(()=>comfy.image(job,'private.png'),/not part of/);
     await assert.rejects(()=>comfy.history('00000000-0000-4000-8000-000000000000'),/Unknown/);
     await assert.rejects(()=>comfy.submit({templateId:'../secret',prompt:'x'}),/Invalid workflow/);
+  } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('ComfyUI job previews and images are confined to their submitting world',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'rp-comfy-world-'));
+  const job='8c3e81c1-595b-4c5d-91bf-2eb5bed57671';
+  await writeFile(join(dir,'portrait.json'),JSON.stringify(TEMPLATE));
+  const comfy=new ComfyClient({url:'http://127.0.0.1:8188/',templateDir:dir,fetchImpl:async url=>{
+    if(url.endsWith('/prompt'))return Response.json({prompt_id:job});
+    if(url.endsWith('/history/'+job))return Response.json({[job]:{outputs:{'5':{images:[{type:'output',filename:'scene.png',subfolder:''}]}}}});
+    if(url.includes('/view?'))return new Response(new Uint8Array([137,80,78,71]),{headers:{'Content-Type':'image/png'}});
+    return new Response('not found',{status:404});
+  }});
+  try {
+    await comfy.submit({templateId:'portrait',prompt:'Greyhaven',worldId:'world-a'});
+    await assert.rejects(()=>comfy.history(job,'world-b'),/different world/);
+    await assert.rejects(()=>comfy.image(job,'scene.png','','world-b'),/different world/);
+    assert.equal((await comfy.history(job,'world-a')).images.length,1);
+    assert.equal((await comfy.image(job,'scene.png','','world-a')).type,'image/png');
   } finally {await rm(dir,{recursive:true,force:true});}
 });
