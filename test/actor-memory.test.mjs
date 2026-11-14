@@ -131,3 +131,48 @@ test('world change keeps memory queries confined to the selected database',()=>{
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM actor_memories').get().n,0);
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('topic-aware retrieval exposes family detail without bloating permanent identity',()=>{
+  const f=makeFixture();
+  try{
+    const state=f.store.load().state;
+    const character=state.characters.find(c=>c.id===f.a.id);
+    character.familyHistory='She was raised by her aunt in a mountain village.';
+    state.sessions[0].messages.push({id:'family-cue',role:'user',content:'What was your family like growing up?',witnessIds:[f.a.id],sentAt:4000});
+    f.store.save(state,1);
+    const worldId=f.store.worlds.list().timelines.find(t=>t.id===f.scene.timelineId).worldId;
+    const remembered=buildActorContext({store:f.store,worldId,sceneId:f.scene.id,actorId:f.a.id,contextWindow:2048,maxOutput:200});
+    assert.match(remembered.messages[0].content,/mountain village/);
+    assert.ok(remembered.metadata.promptTokensEstimated<2048-200-128);
+    assert.match(remembered.messages.at(-1).content,/family like growing up/);
+  }finally{f.store.close();}
+});
+
+test('current timeline clock and actor location override stale scene hints',()=>{
+  const f=makeFixture();
+  try{
+    const worldId=f.store.worlds.list().timelines.find(t=>t.id===f.scene.timelineId).worldId;
+    const place=f.store.worlds.createLocation({worldId,name:'City Library',kind:'building'});
+    f.store.worlds.setActorLocation({timelineId:f.scene.timelineId,actorId:f.a.id,locationId:place.id});
+    f.store.worlds.setClock({timelineId:f.scene.timelineId,instant:'2004-01-02T03:04:00Z',timeZone:'UTC'});
+    const built=buildActorContext({store:f.store,worldId,sceneId:f.scene.id,actorId:f.a.id});
+    assert.match(built.messages[0].content,/City Library/);
+    assert.match(built.messages[0].content,/2004-01-02T03:04:00/);
+  }finally{f.store.close();}
+});
+
+test('backend context discovery honors allocated KoboldCpp context and native token counter',async()=>{
+  const { discoverBackendContext,enforceTokenBudget }=await import('../context/backend.mjs');
+  const backend=await discoverBackendContext('http://127.0.0.1:5001/v1','test',async url=>{
+    if(url.endsWith('/true_max_context_length'))return Response.json({value:2048});
+    if(url.endsWith('/tokencount'))return Response.json({value:123});
+    throw Error('Unexpected local backend URL');
+  });
+  assert.equal(backend.contextWindow,2048);
+  const prompt={messages:[{role:'system',content:'An actor.'},{role:'user',content:'Hello'}],
+    metadata:{contextWindow:2048,maxOutput:400,safetyMargin:128}};
+  const counted=await enforceTokenBudget(prompt,backend);
+  assert.equal(counted.metadata.promptTokens,123);
+  assert.equal(counted.metadata.countMethod,'exact');
+});
