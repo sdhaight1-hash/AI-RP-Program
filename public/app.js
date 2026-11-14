@@ -287,15 +287,16 @@ function renderLists() {
     const button = el('button', '', `character-item ${c.id === activeCharacter()?.id ? 'active' : ''}`);
     const badge = portraitNode(c.name, c, 'initial'); badge.style.background = c.color;
     const info = el('span', '', 'session-details'); info.append(el('strong', c.name), el('small', c.personality ? c.personality.slice(0,54) : 'Unwritten character'));
-    const edit = el('button', '✎', 'character-edit');
-    edit.type = 'button'; edit.title = `Edit ${c.name}`;
-    edit.onclick = () => { if (!running) openBuilder(c); };
+    const play = el('button', '▶', 'character-edit');
+    play.type = 'button'; play.title = `Start scene with ${c.name}`;
+    play.setAttribute('aria-label',play.title);
+    play.onclick = () => { if (!running) startSession(c); };
     button.append(badge, info);
-    button.title = `Start a scene with ${c.name}`;
-    button.addEventListener('click', () => { if (running) return; startSession(c); });
+    button.title = `Edit ${c.name}'s character profile`;
+    button.addEventListener('click', () => { if (running) return; setWorkspace('characters');openBuilder(c); });
     const archive=el('button','×','character-edit'); archive.type='button'; archive.title=`Move ${c.name} to Trash`;
     archive.onclick=()=>{if(running || !confirm(`Move ${c.name} to Trash? Existing dialogue will remain attributed. Restore the character from Library.`))return;archiveCharacter(state,c.id);save();render();};
-    const row = el('div','','character-row'); row.append(button, edit, archive);
+    const row = el('div','','character-row'); row.append(button, play, archive);
     list.append(row);
   }
 }
@@ -1409,9 +1410,13 @@ function renderWorkspace(){
       actions:[['Edit character',()=>character&&openBuilder(character),true],
         ['View character details',()=>openDetailDesk('character')]]}));
     grid.append(workspaceCard({index:'03 · WORLD PARTICIPATION',title:'Their place in the world',
-      description:'Link homes, workplaces, frequent places and evidence-backed relatives. Reviewed character-origin details can become world canon.',
+      description:'Link homes, workplaces, frequent places and evidence-backed relatives. Reviewed details can become canon only with approval.',
       actions:[['Open relationships',()=>openDetailDesk('relations'),true],
-        ['Open cast',()=>openDetailDesk('cast')]]}));
+        ['Manage encounters',()=>setWorkspace('encounters')]]}));
+    grid.append(workspaceCard({index:'04 · ARCHIVES',title:'Trash & permanent deletion',
+      description:'Archiving keeps a character recoverable. To permanently remove them, clear dependent scenes and encounter templates first, then confirm deletion in Trash.',
+      actions:[['Manage Trash',()=>openDetailDesk('library'),true],
+        ['View encounter templates',()=>setWorkspace('encounters')]]}));
   }else if(mode==='memory'){
     const pinned=(scene?.messages||[]).filter(x=>x.pinned).length;
     host.append(workspaceStats([[scenes.length,'Story timelines / scenes'],[pinned,'Pinned scene moments'],
@@ -2321,7 +2326,14 @@ $('new-scene-manage-encounters').onclick=()=>{
   $('new-scene-dialog').close();
   openEncounterManager(templateId);
 };
-$('new-character').onclick=()=>{if(running)return;const c=createCharacter('New character');state.characters.push(c);startSession(c);currentTab='character';renderInspector();openBuilder(c);};
+$('new-character').onclick=()=>{
+  if(running)return;
+  const c=createCharacter('New character');
+  state.characters.push(c);
+  save();
+  setWorkspace('characters');
+  openBuilder(c);
+};
 $('channel-select').onchange=()=>{
   const s=activeSession();if(!s||running||pendingReply?.sessionId===s.id){renderHeader();if(pendingReply?.sessionId===s?.id)showError('Resolve the pending draft before changing channels.');return;}
   const next=getChannel($('channel-select').value).id;
