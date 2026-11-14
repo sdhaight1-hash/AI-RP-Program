@@ -64,7 +64,7 @@ test('social feed, private DMs and email have distinct audience and no made-up n
     assert.equal(scene.messages[0].channelId,mode);
     assert.deepEqual(scene.messages[0].witnessIds,[actor.id]);
     assert.equal(getChannelVoice(actor,mode),'types in lowercase');
-    assert.match(getChannel(mode).direction,/other accounts|player replies/i);
+    assert.match(getChannel(mode).direction,/other accounts|other users|player replies/i);
     assert.match(inspectNpcReply(mode,'*smiles* hello!',actor.name)[0],/stage directions/i);
     assert.deepEqual(inspectNpcReply(mode,'hello from the studio',actor.name),[]);
   }
@@ -90,11 +90,11 @@ test('template deletion preserves played transcripts and unblocks archived chara
   const template={id:'enc-template-1',title:'An old webcam invitation',characterIds:[actor.id],
     channelId:'video_call',premise:'An invitation',opening:'Are you there?',locationId:null};
   state.characters=[actor];state.encounters=[template];
-  state.sessions=[createSession(actor,template)];
-  const firstMessage=structuredClone(state.sessions[0].messages[0]);
   assert.deepEqual(encounterDependencies(state,actor.id).map(x=>x.title),[template.title]);
   archiveCharacter(state,actor.id);
   assert.throws(()=>purgeArchived(state,'character',actor.id),/An old webcam invitation.*Open Encounters/);
+  state.sessions=[createSession(actor,template)];
+  const firstMessage=structuredClone(state.sessions[0].messages[0]);
   const removed=removeEncounterTemplate(state,template.id);
   assert.equal(removed.id,template.id);
   assert.equal(state.encounters.length,0);
