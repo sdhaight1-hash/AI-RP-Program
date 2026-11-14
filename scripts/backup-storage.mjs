@@ -30,7 +30,7 @@ function copyAssets(source,target){
     });
   }
 }
-function sha256(file){
+export function sha256(file){
   const hash=createHash('sha256'),fd=openSync(file,'r'),chunk=Buffer.allocUnsafe(1024*1024);
   try {
     let size;
