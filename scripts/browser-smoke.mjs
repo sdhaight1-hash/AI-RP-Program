@@ -287,6 +287,26 @@ async function main(){
       purgeTarget={characterId:character.id,sceneId:scene.id,sceneTitle:scene.title};
       return true;
     },'browser disposable character and scene persisted');
+    // Reproduce the real complaint: an archived character cannot be purged
+    // because a hidden world template still references it. Encounters must
+    // expose that template by name and offer a working return to Trash.
+    await script(`
+      document.querySelector('button[data-workspace="encounters"]').click();
+      document.querySelector('#encounter-title').value='Browser Purge Blocker';
+      document.querySelector('#encounter-character').value=${JSON.stringify(purgeTarget.characterId)};
+      document.querySelector('#encounter-channel').value='video_call';
+      document.querySelector('#encounter-premise').value='A camera call begins.';
+      document.querySelector('#encounter-save').click();
+      document.querySelector('button[data-workspace="story"]').click();
+      return true;
+    `);
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      return snapshot.state.encounters.some(e=>e.title==='Browser Purge Blocker'&&
+        e.characterIds.includes(purgeTarget.characterId)&&e.channelId==='video_call');
+    },'blocking video encounter saved to world');
+    await screenshot('06g-encounter-template-visible');
+
     const archivedUi=await script(`
       const archiveScene=document.querySelector('#session-list .session-row button[title="Move scene to Trash"]');
       if(!archiveScene)return false;
@@ -324,6 +344,38 @@ async function main(){
         'Scene: '+${JSON.stringify(purgeTarget.sceneTitle)})
         &&rows.some(row=>row.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
     `),'Library refreshed after scene purge');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#library-trash .trash-row')]
+        .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
+      return !!row?.querySelector('.trash-dependency')?.textContent.includes('Browser Purge Blocker');
+    `),true,'Trash must name the encounter template blocking permanent deletion');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#library-trash .trash-row')]
+        .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
+      row.querySelector('.trash-dependency button').click();
+      return document.body.dataset.workspace==='encounters'&&
+        document.querySelector('#encounter-title')?.value==='Browser Purge Blocker';
+    `),true,'blocked character must link directly into the encounter editor');
+    await screenshot('06h-encounter-blocker-editor');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.encounter-card')]
+        .find(item=>item.querySelector('strong')?.textContent==='Browser Purge Blocker');
+      if(!row)return false;
+      [...row.querySelectorAll('button')].find(btn=>btn.textContent==='Delete').click();
+      return true;
+    `),true,'encounter editor must expose permanent template deletion');
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      return !snapshot.state.encounters.some(e=>e.title==='Browser Purge Blocker');
+    },'blocking encounter removed from world snapshot');
+    assert.equal(await script(`
+      const back=document.querySelector('#encounter-return-trash');
+      if(!back)return false;
+      back.click();
+      return !!document.querySelector('#library-trash') &&
+        document.body.dataset.workspace==='tools';
+    `),true,'one-click return to Trash should be possible after cleanup');
+    await screenshot('06i-deletion-blocker-resolved');
     const characterPurgeClicked=await script(`
       const row=[...document.querySelectorAll('#library-trash .trash-row')]
         .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
@@ -338,7 +390,8 @@ async function main(){
       return !snapshot.state.characters.some(c=>c.id===purgeTarget.characterId)
         &&!catalog.entities.some(e=>e.sourceCharacterId===purgeTarget.characterId);
     },'character and world mirror permanent deletion committed');
-    await screenshot('06g-character-and-scene-after-permanent-purge');
+    await screenshot('06j-character-and-scene-after-permanent-purge');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
 
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
@@ -356,7 +409,7 @@ async function main(){
       assert.notEqual(view.workspaceNav,'none');
       assert.notEqual(view.composer,'none');
       if(width<=760){
-        assert.equal(view.navigation.length,5);
+        assert.equal(view.navigation.length,6);
         for(const [index,nav] of view.navigation.entries())
           assert.ok(nav.visible && nav.left>=-2 && nav.right<=view.width+2,
             'Mobile workspace '+index+' clipped at '+width+'px: '+JSON.stringify(view));
