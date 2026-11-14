@@ -45,7 +45,7 @@ export function gatherCharacterWorldContext({worldLibrary,worldId,character,lore
   const linked=locations.filter(x=>connectedIds.has(x.id));
   const otherPlaces=locations.filter(x=>!connectedIds.has(x.id));
   const lines=[`World: ${world.name}`,`Established setting: ${String(world.description||'').slice(0,900)}`];
-  if(linked.length)lines.push('Established character places (usual associations, NOT their current position):\n'+
+  if(linked.length)lines.push('Established character places (usual associations, NOT current position):\n'+
     linked.slice(0,10).map(x=>`[place:${x.id}] ${x.name} (${x.kind}) — ${String(x.description||'').slice(0,180)}`).join('\n'));
   if(social.length)lines.push('Existing relationships of this character (not automatically another person\'s private thoughts):\n'+
     social.slice(0,12).map(r=>`${byId.get(r.fromId)?.name||r.fromId} → ${byId.get(r.toId)?.name||r.toId}: ${r.kind}; ${String(r.notes||'').slice(0,180)}`).join('\n'));
