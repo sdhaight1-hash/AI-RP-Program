@@ -916,8 +916,17 @@ function renderInspector() {
         const dependency=el('div','','trash-dependency');
         dependency.append(el('strong',`${linked.length} encounter template(s) blocking deletion`),
           el('p',linked.map(e=>e.title).join(' · '),'help'));
-        dependency.append(el('button','Manage linked encounters','subtle-button'));
-        dependency.querySelector('button').onclick=()=>openEncounterManager(linked[0].id,true);
+        const actions=el('div','','inline-actions');
+        const manage=el('button','Manage linked encounters','subtle-button');
+        manage.onclick=()=>openEncounterManager(linked[0].id,true);
+        const clear=el('button',`Delete ${linked.length} linked template(s)`,'encounter-danger');
+        clear.onclick=()=>{
+          if(running||destructiveActionInFlight)return showError('Finish the active operation before deleting templates.');
+          if(!confirm(`Permanently delete these ${linked.length} encounter templates: ${linked.map(e=>e.title).join(', ')}? Some may involve other characters. Existing played scenes keep their transcripts. This cannot be undone.`))return;
+          for(const e of linked)removeEncounterTemplate(state,e.id);
+          save();renderInspector();renderWorkspace();showError();
+        };
+        actions.append(manage,clear);dependency.append(actions);
         row.append(dependency);
       }
       const remove=el('button','Permanently delete','mini-action');
