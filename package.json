@@ -8,7 +8,7 @@
     "start": "node server.mjs",
     "test": "node --test",
     "eval:memory": "node eval/actor-recall.mjs",
-    "test:browser": "node test/browser-smoke.mjs"
+    "test:browser": "node scripts/browser-smoke.mjs"
   },
   "engines": {
     "node": ">=22.13"
