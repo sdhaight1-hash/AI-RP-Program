@@ -8,7 +8,7 @@ The improved flow is explicit:
 
 1. **Characters → Trash** (or Settings & tools → Library) displays archived profiles and scenes.
 2. If a character is referenced by encounters, the Trash row names the **exact blocking templates** and has **Manage linked encounters**.
-3. This opens the **Encounters** workspace with the relevant template selected. Delete it (or edit/reassign active participants). Existing played scenes retain their messages and starting notes; any deleted template link is cleared.
+3. Choose **Manage linked encounters** to open the **Encounters** workspace with that template selected, or use the explicitly confirmed **Delete N linked template(s)** action in Trash to clear every listed blocker at once. Edit/reassign participants or delete the template. Existing played scenes retain their messages and starting notes; any deleted template link is cleared.
 4. Use **Back to Trash**. Purge dependent scenes before finally permanently deleting the character.
 
 Deleting a template is deliberate and undoable only from a prior backup. It does not destroy independently authored world canon. Existing historical scenes are not deleted automatically. Ordinary story saves cannot bypass the confirmed character/scene deletion workflow.
@@ -26,7 +26,7 @@ Deleting a template is deliberate and undoable only from a prior backup. It does
 
 Desktop: the left navigation shows **Create your world** and **Play & manage** sections. The detail desk shows only a small context-relevant set of tools instead of thirteen unrelated tabs; the command palette (`Ctrl+K`) still links to every tool. Mobile: three readable columns in two rows keep all six destinations visible without horizontal scrolling.
 
-**Character creation is no longer scene creation.** Creating a profile opens the character editor; clicking a character in the left roster edits that profile. A separate **▶ Start scene** action begins a new conversation. This prevents accidental extra playthroughs and duplicate test conversations.
+**Character creation is no longer scene creation.** Creating a profile opens the character editor; clicking a character in the left roster edits that profile. The Characters workspace remembers the selected profile independently from the actor in the currently active Play scene. A separate **▶ Start scene** action begins a new conversation. This prevents accidental extra playthroughs and duplicate test conversations. Validation and backend errors are visible globally, including in focused editor mode.
 
 ## Communication media
 
