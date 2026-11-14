@@ -46,6 +46,8 @@ All six negative checks passed after the fix.
 
 **Change:** when conversation cues match eligible evidence (personal recollections, reviewed facts, accepted events, authored details or permitted lore), reserve up to 28% of the available prompt input budget, capped at 440 estimated tokens, while selecting *older* recent turns. Uncued fallback memories do not automatically displace recent dialogue. The latest actual conversation turn is never displaced. Evidence selection then uses the remaining budget; the reserved space is not a mandatory filler allocation. The continuation-mode assembler also refuses to drop the only remaining real conversation turn.
 
+The test also caught retrieval-cue contamination: the visibility layer prefixes player dialogue with `Player:`, while stored dialogue recollections likewise contain `Player said:`. Querying with that display label caused *all* player memories to appear lexically relevant. The context retriever now uses the latest visible player cue without its display prefix, rather than blending in the prior user turn by default. Unrelated uses of the word `before` no longer activate formative-history biography. A dedicated regression compares short-term continuity with and without topic-matched evidence headroom.
+
 This is a deliberately small allocation-policy fix, not a replacement for lexical retrieval. Different character profiles, longer turns and real native tokenizer counts may produce different outcomes.
 
 ## CI gates
