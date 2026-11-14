@@ -62,7 +62,7 @@ test('two browser world IDs can read, edit, and query without changing global se
   assert.equal(location.status,201);
   assert.equal((await get(base,'/api/worlds?worldId='+b)).data.locations.length,0);
   assert.equal((await get(base,'/api/worlds?worldId='+a)).data.locations.length,1);
-  assert.equal((await get(base,'/api/state?worldId=missing-world')).status,500);
+  assert.equal((await get(base,'/api/state?worldId=missing-world')).status,404);
 });
 
 test('in-flight context assembly retains its original world even after default activation',async t=>{
