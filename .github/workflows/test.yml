@@ -25,6 +25,7 @@ jobs:
       - run: node --check eval/local-semantic.mjs
       - run: npm test
       - run: npm run eval:memory
+      - run: npm run eval:semantic
       - run: npm run eval:scale -- --ci
       - run: node --check scripts/browser-smoke.mjs
       - name: Headless Chrome UI flows (Node 22)

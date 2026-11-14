@@ -196,6 +196,35 @@ async function main(){
     await request('DELETE','/session/'+sessionId+'/window');
     await request('POST','/session/'+sessionId+'/window',{handle:firstHandle});
 
+
+    // A real Character Studio input must persist in its own world database,
+    // survive browser reload, and not appear in the other open world's story.
+    const editableWorld=store.activeWorldId;
+    const familyText='Her aunt Nessa ran the Lantern House near Seabrook.';
+    const edited=await script(`
+      document.querySelector('#new-character').click();
+      document.querySelector('[data-builder-tab="history"]').click();
+      const field=document.querySelector('#builder-familyHistory');
+      field.value=${JSON.stringify(familyText)};
+      field.dispatchEvent(new Event('input',{bubbles:true}));
+      return {open:document.querySelector('#character-builder').open,value:field.value};
+    `);
+    assert.equal(edited.open,true);
+    assert.equal(edited.value,familyText);
+    await script("document.querySelector('#builder-close').click();return true");
+    await until(async()=>{
+      const response=await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld));
+      const story=await response.json();
+      return story.state?.characters.some(c=>c.familyHistory===familyText);
+    },'character field saved to original world');
+    const otherWorldResponse=await fetch(base+'/api/state?worldId='+encodeURIComponent(parallel.id));
+    const otherWorldState=await otherWorldResponse.json();
+    assert.ok(!otherWorldState.state.characters.some(c=>c.familyHistory===familyText),
+      'Character biography must not leak into the other world');
+    await screenshot('06d-character-history-saved');
+    await request('POST','/session/'+sessionId+'/refresh',{});
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'world after character save reload');
+
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
       await delay(130);
@@ -228,7 +257,7 @@ async function main(){
         await script("document.querySelector('#close-inspector').click();return true");
       }
     }
-    console.log('Browser UI smoke: parallel world tabs, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
+    console.log('Browser UI smoke: parallel world tabs, persisted character editing, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');

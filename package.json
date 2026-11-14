@@ -12,7 +12,9 @@
     "audit:storage": "node scripts/storage-health.mjs",
     "backup:storage": "node scripts/backup-storage.mjs",
     "eval:local": "node scripts/local-model-probe.mjs",
-    "eval:scale": "node eval/storage-scale.mjs"
+    "eval:scale": "node eval/storage-scale.mjs",
+    "normalize:storage": "node scripts/normalize-storage.mjs",
+    "eval:semantic": "node eval/semantic-recall.mjs"
   },
   "engines": {
     "node": ">=22.13"

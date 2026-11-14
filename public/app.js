@@ -13,6 +13,7 @@ import { BUILDER_SECTIONS } from '/character/sections.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
 import { worldPath,loadWorldSnapshot,loadWorldCatalog } from '/world-client.mjs';
+import { WORKSPACE_META,searchStudioCommands } from '/studio-navigation.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -1031,21 +1032,6 @@ async function checkComfyJob() {
   }catch(err){status.textContent='ComfyUI job status: '+err.message;}
 }
 
-const WORKSPACE_META=Object.freeze({
-  world:{name:'World & canon',kicker:'THE UNIVERSE',title:'The world behind the story',
-    summary:'A consistent setting with its own places, people, relationships and independent timelines. Edit canon deliberately; scenes do not silently rewrite it.',
-    tab:'worlds'},
-  characters:{name:'Characters',kicker:'THE CAST',title:'People with lives beyond the scene',
-    summary:'Build distinct personalities, histories, routines and voices rooted in this world. Reviewed character details can inform new world canon without forcing it.',
-    tab:'character'},
-  story:{name:'Story room',kicker:'LIVE STORY',title:'Story room',summary:'',tab:'scene'},
-  memory:{name:'Memory & review',kicker:'EVIDENCE & CONTINUITY',title:'What each character can remember',
-    summary:'Witnessed dialogue, reviewed subjective beliefs and objective world events are different kinds of knowledge. Review the evidence before making it canon.',
-    tab:'context'},
-  tools:{name:'Models & lab',kicker:'LOCAL INFRASTRUCTURE',title:'Your private creative toolkit',
-    summary:'Choose a local model, inspect exactly what it sees, test character fidelity, evaluate semantic recall and manage visual workflows—all from this machine.',
-    tab:'setup'}
-});
 const workspaceButton=(label,action,primary=false)=>{
   const button=el('button',label,primary?'primary-button workspace-link-button':'subtle-button workspace-link-button');
   button.type='button';
@@ -1157,12 +1143,7 @@ function performStudioCommand(command){
   command?.run();
 }
 function renderStudioCommands(){
-  const term=$('command-search').value.trim().toLocaleLowerCase();
-  const search=term.split(/\s+/u).filter(Boolean);
-  commandResults=studioCommands().filter(item=>{
-    const haystack=(item.label+' '+item.detail+' '+item.keywords).toLocaleLowerCase();
-    return search.every(word=>haystack.includes(word));
-  }).slice(0,16);
+  commandResults=searchStudioCommands(studioCommands(),$('command-search').value);
   commandIndex=0;
   const host=$('command-items');host.replaceChildren();
   if(!commandResults.length){host.append(el('p','No matching workspace or tool.','empty-note'));return;}
