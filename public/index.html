@@ -47,7 +47,7 @@
     <main class="conversation" id="main-workspace">
       <header class="studio-topbar">
         <div class="studio-breadcrumb"><span class="topbar-micro">OPEN WORLD</span><strong id="top-world-name">Loading…</strong><span class="breadcrumb-divider" aria-hidden="true">/</span><span id="top-workspace-name">Story room</span></div>
-        <div class="topbar-actions"><span class="topbar-private"><span aria-hidden="true">●</span> Private workspace</span><button id="open-workspace-inspector" class="subtle-button" aria-controls="inspector" aria-expanded="false">Detail desk <span aria-hidden="true">☰</span></button></div>
+        <div class="topbar-actions"><button id="open-command" class="subtle-button command-trigger" aria-keyshortcuts="Control+K Meta+K" title="Find worlds, people, editors and tools"><span aria-hidden="true">⌕</span> Jump to… <kbd>Ctrl K</kbd></button><span class="topbar-private"><span aria-hidden="true">●</span> Private workspace</span><button id="open-workspace-inspector" class="subtle-button" aria-controls="inspector" aria-expanded="false">Detail desk <span aria-hidden="true">☰</span></button></div>
       </header>
       <div class="conversation-head">
         <div class="scene-heading"><div class="eyebrow">ACTIVE TIMELINE · STORY ROOM</div><h1 id="scene-title">The Harbor Bookshop</h1><div id="scene-meta" class="muted"></div></div>
@@ -139,6 +139,13 @@
         </section>
       </aside>
     </div>
+  </dialog>
+  <dialog id="command-palette" class="command-palette" aria-labelledby="command-title">
+    <div class="command-header"><div><div class="eyebrow">QUICK NAVIGATION</div><h2 id="command-title">Go somewhere</h2></div><button id="command-close" class="subtle-button" aria-label="Close quick navigation">✕</button></div>
+    <label for="command-search" class="field-label">Search workspaces, world tools and character actions</label>
+    <input id="command-search" type="search" autocomplete="off" placeholder="Search world, scene, memory, characters…" aria-controls="command-items" />
+    <div id="command-items" class="command-items" role="listbox" aria-label="Available commands"></div>
+    <p class="help command-footer">Type to filter · Enter to open · Esc to close. Works entirely on this device.</p>
   </dialog>
   <script type="module" src="/app.js"></script>
 </body>
