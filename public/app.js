@@ -1144,6 +1144,92 @@ function setWorkspace(mode){
   renderWorkspace();
   renderInspector();
 }
+// One searchable jump surface replaces hunting through nested feature tabs.
+// All actions reuse existing route guards and never mutate canon implicitly.
+let commandResults=[];
+let commandIndex=0;
+function studioCommands(){
+  const desk=(label,workspace,tab,keywords='')=>({
+    label,detail:WORKSPACE_META[workspace].name,keywords,
+    run:()=>{setWorkspace(workspace);openDetailDesk(tab);}
+  });
+  return [
+    {label:'World & canon',detail:'Workspace',keywords:'universe overview',run:()=>setWorkspace('world')},
+    {label:'Characters',detail:'Workspace',keywords:'cast profiles identity',run:()=>setWorkspace('characters')},
+    {label:'Story room',detail:'Workspace',keywords:'chat conversation scene',run:()=>setWorkspace('story')},
+    {label:'Memory & review',detail:'Workspace',keywords:'recall evidence',run:()=>setWorkspace('memory')},
+    {label:'Models & lab',detail:'Workspace',keywords:'inference setup tools',run:()=>setWorkspace('tools')},
+    desk('World Library & timelines','world','worlds','world switch clocks encounters'),
+    desk('Atlas & places','world','atlas','geography location map'),
+    desk('World relationships','world','relations','kinships social graph'),
+    desk('Character details','characters','character','profile overview'),
+    desk('Scene cast','characters','cast','speaker witnesses'),
+    desk('Emotion & disposition','characters','emotion','psychology moods'),
+    desk('Scene direction & event review','story','scene','director events actions'),
+    desk('Authored lore','memory','lore','knowledge records'),
+    desk('Story journal','memory','memory','history pinned moments'),
+    desk('Actor memory trace','memory','context','retrieval context evidence'),
+    desk('Visual workflows','tools','gallery','ComfyUI portraits'),
+    desk('Archives & library','tools','library','trash export'),
+    desk('Local model setup','tools','setup','KoboldCpp LM Studio'),
+    {label:'Character Studio · edit active character',detail:'Character authoring',
+      keywords:'editor coauthor fields biography',
+      run:()=>activeCharacter()?openBuilder(activeCharacter()):showError('Create a character in this world first.')},
+    {label:'Character Fidelity Lab',detail:'Local-model evaluation',keywords:'test character benchmarks',
+      run:()=>{
+        const c=activeCharacter();
+        if(!c)return showError('Create a character first.');
+        openBuilder(c);builderTab='lab';renderBuilder();
+      }},
+    {label:'Create a character',detail:'New',keywords:'person npc character',
+      run:()=>$('new-character').click()},
+    {label:'Start a new scene',detail:'New',keywords:'chat encounter',
+      run:()=>openNewSceneDialog()},
+    {label:'Choose a world',detail:'Worlds',keywords:'switch universe',
+      run:()=>{renderWorldLauncher();$('world-launcher').showModal();}}
+  ];
+}
+function performStudioCommand(command){
+  $('command-palette').close();
+  $('command-search').value='';
+  command?.run();
+}
+function renderStudioCommands(){
+  const term=$('command-search').value.trim().toLocaleLowerCase();
+  const search=term.split(/\s+/u).filter(Boolean);
+  commandResults=studioCommands().filter(item=>{
+    const haystack=(item.label+' '+item.detail+' '+item.keywords).toLocaleLowerCase();
+    return search.every(word=>haystack.includes(word));
+  }).slice(0,16);
+  commandIndex=0;
+  const host=$('command-items');host.replaceChildren();
+  if(!commandResults.length){host.append(el('p','No matching workspace or tool.','empty-note'));return;}
+  commandResults.forEach((command,index)=>{
+    const btn=el('button','','command-item');
+    btn.type='button';
+    btn.dataset.commandIndex=String(index);
+    btn.append(el('strong',command.label),el('span',command.detail,'command-item-detail'));
+    btn.classList.toggle('selected',index===commandIndex);
+    btn.onclick=()=>performStudioCommand(command);
+    host.append(btn);
+  });
+}
+function openStudioCommands(){
+  const modal=$('command-palette');
+  if(document.querySelector('dialog[open]')&&!modal.open)return;
+  if(!modal.open)modal.showModal();
+  $('command-search').value='';
+  renderStudioCommands();
+  $('command-search').focus();
+}
+function moveStudioCommand(delta){
+  if(!commandResults.length)return;
+  commandIndex=(commandIndex+delta+commandResults.length)%commandResults.length;
+  document.querySelectorAll('.command-item').forEach((button,i)=>{
+    button.classList.toggle('selected',i===commandIndex);
+    if(i===commandIndex)button.scrollIntoView({block:'nearest'});
+  });
+}
 function renderWorkspace(){
   const mode=Object.hasOwn(WORKSPACE_META,activeWorkspace)?activeWorkspace:'story';
   const chosen=WORKSPACE_META[mode];
@@ -2139,6 +2225,26 @@ $('open-builder').onclick=()=>{if(!running)openBuilder(activeCharacter());};
 $('reading-toggle').onclick=()=>{state.settings.readingMode=!state.settings.readingMode;save();renderReadingMode();};
 $('open-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
 $('open-workspace-inspector').onclick=()=>setDetailDeskOpen(!$('inspector').classList.contains('inspector-open'));
+$('open-command').onclick=openStudioCommands;
+$('command-close').onclick=()=>$('command-palette').close();
+$('command-search').oninput=renderStudioCommands;
+$('command-search').onkeydown=event=>{
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+    event.preventDefault();moveStudioCommand(event.key==='ArrowDown'?1:-1);
+  }else if(event.key==='Enter'){
+    event.preventDefault();performStudioCommand(commandResults[commandIndex]);
+  }
+};
+$('command-palette').onclick=event=>{if(event.target===$('command-palette'))$('command-palette').close();};
+document.addEventListener('keydown',event=>{
+  if((event.ctrlKey||event.metaKey)&&event.key.toLocaleLowerCase()==='k'){
+    if(document.querySelector('dialog[open]')&&!$('command-palette').open)return;
+    event.preventDefault();
+    if($('command-palette').open)$('command-palette').close();
+    else openStudioCommands();
+  }
+});
+
 $('expand-inspector').onclick=()=>{
   const focus=!document.body.classList.contains('detail-focus');
   document.body.classList.toggle('detail-focus',focus);
