@@ -16,7 +16,7 @@ The bridge reads established `backstory`, `familyHistory`, `formativeEvents`, `o
 
 Place kinds reuse `region`, `town`, `neighborhood`, `building`, `room`, `outdoor`, `other`. World entity kinds reuse `character`, `faction`, `organization`, `object`, `concept`. Creating a named world entity of kind `character` does not automatically create a playable Character Studio card or make it a known witness.
 
-Duplicate names (Unicode-normalized, case-insensitive, whitespace-folded) are rejected **within each world/type**. Existing entries should be linked rather than duplicated. For now, the bridge does not automatically merge aliases or infer relationships; use the established World Atlas Relations controls to create a reviewed link.
+Duplicate names (Unicode-normalized, case-insensitive, whitespace-folded) are rejected **within each world/type**. Existing entries should be linked rather than duplicated. For now, the bridge does not automatically merge aliases. It does, however, offer **Review links** for an approved person if the person's exact approved quote explicitly includes a supported kinship or role term (for example, “aunt Nessa”). The creator selects and approves a directed link from that world person to the originating character. Relationships are never generated or added without confirmation; ambiguous directions still require manual review in the World Relations editor. The relationship is saved with its source quote, in a dedicated `character_world_relationship_sources` provenance record, and does not set emotions or live scene state.
 
 ## Security and persistence
 
@@ -25,6 +25,14 @@ Duplicate names (Unicode-normalized, case-insensitive, whitespace-folded) are re
 The provenance table is world-scoped, included in the existing per-world migration/pruning, and remains after later source edits. Editing an old biography does **not** silently delete approved world canon; the audit trail records which earlier text motivated its creation. `GET /api/character/world-entries/sources` exposes provenance for the selected character and active world.
 
 The UI invalidates its remaining staged candidates after one approval, since the world graph has changed and duplicate-resolution must be repeated. Its authoring draft and approval checks both fail closed if another tab changes the world.
+
+
+
+## Reviewed person → character relationships
+
+Use **Character Studio → Character → World Atlas → Review links** after accepting a world entity of kind **character**. Supported relation terms include aunt, uncle, parent, child, sister, brother, cousin, grandparent, mentor, apprentice, friend, colleague, neighbor, employer and employee. A term must appear as a complete word in the exact already-approved source quote and the quote must still be present in the character's current saved field.
+
+The relationship editor displays its direction explicitly: *Nessa → Mara: aunt*. Direction matters. The application cannot infer unstated, reversed, or ambiguous relationship facts; the creator must review the phrase and direction before clicking Approve. The server verifies the source, owning character, source-world provenance, world entities, relationship term, saved revisions and collisions. It stores the relationship and its provenance in one transaction. World partition migrations remove unrelated relationship evidence. No timeline movement, story event, or actor emotional update occurs. If the biography was edited, a stale relationship cannot be approved from an obsolete quote.
 
 ## Verification
 
