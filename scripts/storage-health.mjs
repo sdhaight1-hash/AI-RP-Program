@@ -89,8 +89,9 @@ export function inspectWorldStorage(dataDir) {
         const validSceneIds=new Set(parsed.sessions.map(s=>s.id));
         const lostScenes=new Set();
         for(const table of ['actor_memories','actor_facts','event_proposals']){
+          const statusCondition=table==='event_proposals'?" AND status!='accepted'":'';
           const rows=db.prepare(`SELECT DISTINCT scene_id AS id FROM ${table}
-            WHERE timeline_id IN (SELECT id FROM timelines WHERE world_id=?)`).all(row.id);
+            WHERE timeline_id IN (SELECT id FROM timelines WHERE world_id=?)${statusCondition}`).all(row.id);
           for(const scene of rows)if(!validSceneIds.has(scene.id))lostScenes.add(scene.id);
         }
         entry.orphanedSceneSources=lostScenes.size;
