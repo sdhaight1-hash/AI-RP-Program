@@ -26,7 +26,8 @@ test('studio shell has unique IDs and preserves every required scene and authori
     'builder-ai-target','builder-ai-generate','builder-ai-stop','builder-ai-result','builder-ai-apply',
     'builder-progress-label','builder-progress-track','builder-progress-fill','builder-world-context',
     'world-launcher','world-launcher-list','world-launcher-create','world-filter','world-list-count',
-    'new-scene-dialog','new-scene-character','new-scene-confirm'
+    'new-scene-dialog','new-scene-character','new-scene-confirm',
+    'command-palette','open-command','command-close','command-search','command-items'
   ];
   for(const id of essentials)assert.ok(ids.includes(id),'Missing existing or new control: '+id);
 });
@@ -58,6 +59,24 @@ test('responsive navigation exposes an explicit drawer close and focused editor 
   assert.match(html,/aria-controls="inspector"/);
   assert.match(html,/role="progressbar"/);
   assert.match(css,/:focus-visible/);
+});
+
+test('quick navigation keeps every workspace, editor and primary creator action discoverable',()=>{
+  assert.match(html,/id="open-command"/);
+  assert.match(html,/aria-keyshortcuts="Control\+K Meta\+K"/);
+  assert.match(javascript,/function openStudioCommands\(\)/);
+  assert.match(javascript,/function renderStudioCommands\(\)/);
+  assert.match(javascript,/command-search/);
+  assert.match(javascript,/event\.ctrlKey\|\|event\.metaKey/);
+  for(const feature of [
+    'World & canon','Characters','Story room','Memory & review','Models & lab',
+    'World Library & timelines','Atlas & places','World relationships',
+    'Scene direction & event review','Authored lore','Actor memory trace',
+    'Character Studio · edit active character','Character Fidelity Lab',
+    'Local model setup','Create a character','Start a new scene'
+  ])assert.ok(javascript.includes(feature),'Command not discoverable: '+feature);
+  assert.match(css,/\.command-palette/);
+  assert.match(css,/\.command-item\.selected/);
 });
 
 test('new stylesheet and current app are served from the real allowlisted local server',async()=>{
