@@ -8,6 +8,7 @@ import { StudioStore } from '../storage.mjs';
 import { projectionPrimary } from '../storage/normalized.mjs';
 import { legacyTimelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID } from './canon.mjs';
 import { makeEmptyWorldState } from '../engine.mjs';
+import { reconcileCharacterRecords,reconcileRemovedSceneSources,purgeSceneSourceRecords,deleteWorldRecord } from './deletion.mjs';
 
 const now = () => Date.now();
 const worldIdPattern = /^(?:[0-9a-f]{8}-[0-9a-f-]{27,40}|imported-local-world)$/i;
@@ -125,6 +126,7 @@ export class WorldPartitionStore {
         return this.current.worlds.createEntity(input);
       },
       createRelationship: input => {this.assertWorld(input.worldId);return this.current.worlds.createRelationship(input);},
+      deleteEntry: input => {this.assertWorld(input.worldId);return deleteWorldRecord(this,input);},
       setClock: input => this.current.worlds.setClock(input),
       setActorLocation: input => this.current.worlds.setActorLocation(input),
       actors: timelineId => this.current.worlds.actors(timelineId),
@@ -169,7 +171,7 @@ export class WorldPartitionStore {
     this.assertWorld(options.worldId);
     return this.current.searchLore(query, options);
   }
-  save(state,revision,{worldId}={}) {
+  save(state,revision,{worldId,purgedSceneId=null}={}) {
     if (worldId !== this.activeWorldId) throw new Error('World changed; this save belongs to another world');
     const scoped=structuredClone(state);
     const locations=new Set(this.current.worlds.list().locations.map(x=>x.id));
@@ -199,11 +201,23 @@ export class WorldPartitionStore {
       if((encounter.characterIds||[]).some(id => !characterIds.has(id)))throw new Error('Encounter references a character outside this world');
     }
     return this.current.save(scoped, revision, {
-      beforeCommit: validated => this.ensureCharacterEntities(validated.characters),
+      beforeCommit: validated => {
+        this.ensureCharacterEntities(validated.characters,this.current,this.activeWorldId,validated);
+        if(purgedSceneId){
+          if(validated.sessions.some(s=>s.id===purgedSceneId))
+            throw new Error('Cannot purge derived records of a live scene');
+          purgeSceneSourceRecords(this.current.db,purgedSceneId);
+        }
+      },
     });
   }
   ensureCharacterEntities(characters = this.current.load().state?.characters || [],
-    target = this.current, worldId = this.activeWorldId) {
+    target = this.current, worldId = this.activeWorldId, snapshotState = null) {
+    // Called within the story revision transaction (or explicit world-open
+    // maintenance transaction). Keep archived characters; purge only IDs absent
+    // from canonical state. This also repairs projections left by older builds.
+    const canonical=snapshotState||target.load().state;
+    reconcileCharacterRecords(target.db,canonical,worldId);
     // One lookup for the cast rather than a query per character on every
     // debounced save/streamed reply. Stable character IDs remain authoritative.
     const knownByCharacter = new Map(target.db.prepare(`SELECT id,name,source_character_id AS characterId
@@ -224,7 +238,11 @@ export class WorldPartitionStore {
       // Build the next world without invalidating the currently open one.
       // An entity-projection failure must not partially publish this switch.
       next.db.exec('BEGIN IMMEDIATE');
-      this.ensureCharacterEntities(next.load().state?.characters || [],next,id);
+      const loaded=next.load().state;
+      this.ensureCharacterEntities(loaded?.characters || [],next,id,loaded);
+      // Repair obsolete scene-derived memories from earlier versions once on
+      // world open, not with an O(history) scan on every debounced save.
+      reconcileRemovedSceneSources(next.db,loaded);
       next.db.exec('COMMIT');
       this.registry.prepare("INSERT INTO registry_settings(key,value) VALUES('active_world',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(id);
     } catch(error) {

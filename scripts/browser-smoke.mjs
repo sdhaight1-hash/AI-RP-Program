@@ -225,6 +225,121 @@ async function main(){
     await request('POST','/session/'+sessionId+'/refresh',{});
     await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'world after character save reload');
 
+
+    // The relationship codex must delete a real SQLite entry, not just hide a
+    // client card or leave an orphaned world entity after refresh.
+    const disposableName='Browser Deletion Regression Entity';
+    await script(`
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-tab="relations"]').click();
+      document.querySelector('#relations-entity-name').value=${JSON.stringify(disposableName)};
+      document.querySelector('#relations-entity-kind').value='object';
+      document.querySelector('#relations-add-entity').click();
+      return true;
+    `);
+    await until(async()=>{
+      const response=await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld));
+      const catalog=await response.json();
+      return catalog.entities.some(x=>x.name===disposableName);
+    },'browser world entity created');
+    await screenshot('06e-world-entity-before-deletion');
+    const deletedUi=await script(`
+      window.confirm=()=>true;
+      const card=[...document.querySelectorAll('#relations-list .lore-card')]
+        .find(row=>row.querySelector('strong')?.textContent===${JSON.stringify(disposableName)});
+      const button=card?.querySelector('button');
+      if(!button)return false;
+      button.click();
+      return true;
+    `);
+    assert.equal(deletedUi,true,'relationship codex must expose a permanent entity delete');
+    await until(async()=>{
+      const response=await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld));
+      const catalog=await response.json();
+      return !catalog.entities.some(x=>x.name===disposableName);
+    },'browser world entity was purged from SQLite');
+    await screenshot('06f-world-entity-after-deletion');
+    assert.equal((await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(parallel.id))).json())
+      .entities.some(x=>x.name===disposableName),false);
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
+
+    // Exercise the exact archive → Trash → permanent-delete character flow in
+    // Chrome, not just a direct HTTP request. The old bug left this profile's
+    // world entity behind even after the character disappeared from the UI.
+    const beforePurge=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
+    const existingCharacterIds=new Set(beforePurge.characters.map(c=>c.id));
+    const existingSceneIds=new Set(beforePurge.sessions.map(scene=>scene.id));
+    await script(`
+      document.querySelector('#new-character').click();
+      const name=document.querySelector('#builder-name');
+      name.value='Browser Full Purge Target';
+      name.dispatchEvent(new Event('input',{bubbles:true}));
+      document.querySelector('#builder-close').click();
+      window.confirm=()=>true;
+      return true;
+    `);
+    let purgeTarget;
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      const character=snapshot.state.characters.find(c=>!existingCharacterIds.has(c.id)&&c.name==='Browser Full Purge Target');
+      const scene=snapshot.state.sessions.find(s=>!existingSceneIds.has(s.id)&&s.characterId===character?.id);
+      if(!character||!scene)return false;
+      purgeTarget={characterId:character.id,sceneId:scene.id,sceneTitle:scene.title};
+      return true;
+    },'browser disposable character and scene persisted');
+    const archivedUi=await script(`
+      const archiveScene=document.querySelector('#session-list .session-row button[title="Move scene to Trash"]');
+      if(!archiveScene)return false;
+      archiveScene.click();
+      const actorRow=[...document.querySelectorAll('#character-list .character-row')]
+        .find(row=>row.querySelector('strong')?.textContent==='Browser Full Purge Target');
+      const archiveActor=actorRow?.querySelector('button[title="Move Browser Full Purge Target to Trash"]');
+      if(!archiveActor)return false;
+      archiveActor.click();
+      document.querySelector('[data-tab="library"]').click();
+      return true;
+    `);
+    assert.equal(archivedUi,true,'both actor and dependent scene must be archivable');
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      return snapshot.state.characters.some(c=>c.id===purgeTarget.characterId&&c.trashedAt)
+        &&snapshot.state.sessions.some(s=>s.id===purgeTarget.sceneId&&s.trashedAt);
+    },'browser archive saved before permanent purge');
+    const scenePurgeClicked=await script(`
+      const row=[...document.querySelectorAll('#library-trash .trash-row')]
+        .find(item=>item.querySelector('span')?.textContent===
+          'Scene: '+${JSON.stringify(purgeTarget.sceneTitle)});
+      if(!row)return false;
+      row.querySelector('button.mini-action').click();
+      return true;
+    `);
+    assert.ok(scenePurgeClicked,'archived scene must have a permanent-delete action');
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      return !snapshot.state.sessions.some(s=>s.id===purgeTarget.sceneId);
+    },'scene permanent deletion committed');
+    await until(async()=>script(`
+      const rows=[...document.querySelectorAll('#library-trash .trash-row')];
+      return !rows.some(row=>row.querySelector('span')?.textContent===
+        'Scene: '+${JSON.stringify(purgeTarget.sceneTitle)})
+        &&rows.some(row=>row.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
+    `),'Library refreshed after scene purge');
+    const characterPurgeClicked=await script(`
+      const row=[...document.querySelectorAll('#library-trash .trash-row')]
+        .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
+      if(!row)return false;
+      row.querySelector('button.mini-action').click();
+      return true;
+    `);
+    assert.ok(characterPurgeClicked,'archived character must have a permanent-delete action');
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld))).json();
+      return !snapshot.state.characters.some(c=>c.id===purgeTarget.characterId)
+        &&!catalog.entities.some(e=>e.sourceCharacterId===purgeTarget.characterId);
+    },'character and world mirror permanent deletion committed');
+    await screenshot('06g-character-and-scene-after-permanent-purge');
+
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
       await delay(130);
@@ -257,7 +372,7 @@ async function main(){
         await script("document.querySelector('#close-inspector').click();return true");
       }
     }
-    console.log('Browser UI smoke: parallel world tabs, persisted character editing, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
+    console.log('Browser UI smoke: parallel world tabs, persisted character editing, durable character and canon deletion, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');

@@ -1,6 +1,6 @@
 import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, importCharacter, THEMES, CHARACTER_FIELDS, parseCharacterDraft, EMOTION_BEATS, DEFAULT_EMOTION, applyEmotionBeat, settleEmotion, describeEmotion } from '/engine.mjs';
 import { initAtmosphere } from '/scene.js';
-import { chooseSpeaker, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
+import { chooseSpeaker, archiveCharacter, archiveSession, duplicateSession, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 import { getChannel } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
@@ -459,6 +459,47 @@ const postWorld = async (endpoint,data)=>{
   const value=await response.json();if(!response.ok)throw Error(value.error||`World service returned ${response.status}`);
   await refreshWorldLibrary();return value;
 };
+async function permanentlyDeleteWorldEntry(kind,entry,worldId=activeWorldId) {
+  if(running)return showError('Finish the current generation before deleting world entries.');
+  if(worldId!==activeWorldId)return showError('Open that world before deleting its entries.');
+  const impact=kind==='entity'?' Linked relationships will also be removed.':
+    kind==='location'?' Connected routes will also be removed; occupied places cannot be deleted.':'';
+  if(!confirm(`Permanently delete "${entry.name||entry.kind||entry.id}" from this world?${impact} This cannot be undone. Back up first.`))return;
+  try{
+    await requireSavedStory();
+    const targetWorld=activeWorldId;
+    await postWorld('/api/worlds/entries/delete',{worldId:targetWorld,kind,id:entry.id});
+    if(activeWorldId!==targetWorld)return;
+    renderInspector();renderWorkspace();showError();
+  }catch(error){showError(error.message);}
+}
+async function permanentlyPurgeLibraryItem(type,item) {
+  if(running)return showError('Finish the current generation before deleting library entries.');
+  const name=item.name||item.title,kind=type==='Scene'?'scene':'character';
+  const impact=kind==='character'
+    ?' This also removes the character’s mirrored world person, related relationships, reviewed source quotes, and actor-owned memories. Independently accepted world entries remain.'
+    :' Associated source memories may be removed. Committed world events are managed separately.';
+  if(!confirm(`Permanently delete ${name}?${impact} This cannot be undone; back up first.`))return;
+  try{
+    await requireSavedStory();
+    const requestedWorld=activeWorldId;
+    const response=await fetch('/api/library/purge',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({worldId:requestedWorld,revision,kind,id:item.id})});
+    const result=await response.json();
+    if(!response.ok)throw Error(result.error||'Permanent deletion failed');
+    if(requestedWorld!==activeWorldId)return;
+    revision=result.revision;state=normalizeState(result.state);
+    clearTimeout(writeTimer);pendingSnapshot=null;
+    try{
+      localStorage.setItem(backupStateKey(),JSON.stringify(state));
+      localStorage.removeItem(pendingBackupKey());
+    }catch{/* Canonical SQLite deletion has already committed. */}
+    await refreshWorldLibrary();
+    render();showError();
+  }catch(error){showError(error.message);}
+}
+
 function renderAtlasPanel(host,session) {
   host.innerHTML=`<h2 class="panel-title">World Atlas</h2><p class="help">Create and connect locations within the active universe. Places can be a character’s usual home or workplace without declaring where they are in the current scene.</p><div class="group"><label class="field-label" for="atlas-world">Selected canon world</label><select id="atlas-world"></select></div><div id="atlas-places"></div><div class="group"><label class="field-label" for="atlas-name">New location</label><input id="atlas-name" maxlength="120" placeholder="e.g. Mara's Apartment"/><select id="atlas-kind"><option value="region">Region</option><option value="town">Town</option><option value="neighborhood">Neighborhood</option><option value="building">Building</option><option value="room">Room</option><option value="outdoor">Outdoor area</option><option value="other">Other</option></select><label class="field-label" for="atlas-parent">Inside</label><select id="atlas-parent"></select><textarea id="atlas-description" rows="3" maxlength="4000" placeholder="Description, atmosphere, daily life..."></textarea><button class="primary-button" id="atlas-create">Create place</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
@@ -478,7 +519,15 @@ function renderAtlasPanel(host,session) {
       if(!session||activeTimeline?.worldId!==world.id)return showError('Place the active scene in a timeline for this world first.');
       session.location=loc.name;session.locationId=loc.id;save();renderHeader();renderInspector();showError();
     };
-    card.append(use);container.append(card);
+    card.append(use);
+    if(session?.locationId===loc.id){
+      const unlink=el('button','Clear scene location','subtle-button');
+      unlink.onclick=()=>{session.locationId=null;session.location='';save();renderHeader();renderInspector();};
+      card.append(unlink);
+    }
+    const remove=el('button','Permanently delete place','mini-action');
+    remove.onclick=()=>{void permanentlyDeleteWorldEntry('location',loc,world.id);};
+    card.append(remove);container.append(card);
   }
   $('atlas-create').onclick=async()=>{
     try{await postWorld('/api/worlds/locations',{worldId:world.id,name:$('atlas-name').value,kind:$('atlas-kind').value,parentId:$('atlas-parent').value||null,description:$('atlas-description').value});showError();}
@@ -486,18 +535,32 @@ function renderAtlasPanel(host,session) {
   };
 }
 function renderRelationsPanel(host) {
-  host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Author directed social relationships between people and organizations. Biographies can suggest source-backed kinships in Character Studio; no relationship changes an actor's momentary feelings or timeline events.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="object">Object</option><option value="concept">Concept</option></select><button id="relations-add-entity" class="subtle-button">Add to world</button></div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="3" maxlength="2000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
+  host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Create or permanently delete world people, entities and relationships. Archived character profiles are hidden until restored; deleting an independent world entity also deletes its linked relationships.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="object">Object</option><option value="concept">Concept</option></select><button id="relations-add-entity" class="subtle-button">Add to world</button></div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="3" maxlength="2000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
   addWorldChooser('relations-world');
   const world=selectedWorld();if(!world){$('relations-add-entity').disabled=true;$('relations-add').disabled=true;return;}
-  const entities=worldLibrary.entities?.filter(e=>e.worldId===world.id)||[];
+  // Archived profiles keep recoverable database rows but do not belong in the
+  // active social codex. They reappear if restored from the Trash.
+  const archived=new Set(state.characters.filter(c=>c.trashedAt).map(c=>c.id));
+  const entities=(worldLibrary.entities||[]).filter(e=>e.worldId===world.id &&
+    !(e.sourceCharacterId&&archived.has(e.sourceCharacterId)));
   const byId=new Map(entities.map(e=>[e.id,e]));
   const list=$('relations-list');
-  for(const entity of entities){list.append(el('p',`${entity.name} · ${entity.kind}`,'help'));}
+  for(const entity of entities){
+    const row=el('div','','lore-card');
+    row.append(el('strong',entity.name),el('p',entity.kind,'help'));
+    const remove=el('button','Permanently delete entity','mini-action');
+    remove.onclick=()=>{void permanentlyDeleteWorldEntry('entity',entity,world.id);};
+    row.append(remove);list.append(row);
+  }
   if(!entities.length)list.append(el('p','Add a couple of characters before connecting them.','empty-note'));
-  for(const edge of worldLibrary.relationships?.filter(r=>r.worldId===world.id)||[]){
-    const row=el('div','','lore-card');row.append(el('strong',`${byId.get(edge.fromId)?.name||'?'} → ${byId.get(edge.toId)?.name||'?'} · ${edge.kind}`));
-    if(edge.notes)row.append(el('p',edge.notes,'help'));list.append(row);
+  for(const edge of worldLibrary.relationships?.filter(r=>r.worldId===world.id &&
+    byId.has(r.fromId)&&byId.has(r.toId))||[]){
+    const row=el('div','','lore-card');row.append(el('strong',`${byId.get(edge.fromId).name} → ${byId.get(edge.toId).name} · ${edge.kind}`));
+    if(edge.notes)row.append(el('p',edge.notes,'help'));
+    const remove=el('button','Delete relationship','mini-action');
+    remove.onclick=()=>{void permanentlyDeleteWorldEntry('relationship',edge,world.id);};
+    row.append(remove);list.append(row);
   }
   for(const entity of entities){$('relations-from').add(new Option(entity.name,entity.id));$('relations-to').add(new Option(entity.name,entity.id));}
   $('relations-add-entity').onclick=async()=>{
@@ -812,12 +875,14 @@ function renderInspector() {
     $('comfy-refresh').onclick=checkComfyJob;
     if(comfyJob)checkComfyJob();
   } else if (currentTab === 'library') {
-    host.innerHTML='<h2 class="panel-title">Library & Trash</h2><p class="help">Restore archived characters and scenes. Their history and original speaker attribution are preserved.</p><div id="library-trash"></div>';
+    host.innerHTML='<h2 class="panel-title">Library & Trash</h2><p class="help">The × buttons only archive. To actually remove a character or scene from SQLite, use Permanently delete here. First remove any dependent scenes or encounter templates. Independent world canon entries have separate Delete controls in Atlas and Relations.</p><div id="library-trash"></div>';
     const list=$('library-trash');
     const archived=[...state.characters.filter(c=>c.trashedAt).map(c=>({type:'Character',item:c})),...state.sessions.filter(s=>s.trashedAt).map(s=>({type:'Scene',item:s}))];
     if(!archived.length)list.append(el('p','Trash is empty. Use × beside a character or session to archive.','help'));
     for(const {type,item} of archived){const row=el('div','','trash-row');row.append(el('span',`${type}: ${item.name||item.title}`));const restore=el('button','Restore','subtle-button');restore.onclick=()=>{item.trashedAt=null;if(type==='Scene')state.activeSessionId=item.id;save();render();};
-      const remove=el('button','Permanently delete','mini-action');remove.onclick=()=>{if(!confirm(`Permanently delete ${item.name||item.title}? This cannot be undone. Back up your data first.`))return;try{purgeArchived(state,type==='Scene'?'scene':'character',item.id);save();render();showError();}catch(err){showError(err.message);}};row.append(restore,remove);list.append(row);}
+      const remove=el('button','Permanently delete','mini-action');
+      remove.onclick=()=>{void permanentlyPurgeLibraryItem(type,item);};
+      row.append(restore,remove);list.append(row);}
   } else if (currentTab === 'lore') {
     host.innerHTML = `<h2 class="panel-title">World codex</h2><p class="help">Record canon facts. Private entries go only to characters who explicitly know them; keyword and always-on retrieval is scoped to the actor.</p><button id="add-lore" class="subtle-button" style="margin-bottom:16px">＋ New lore entry</button><div id="lore-list"></div>`;
     $('add-lore').onclick = () => { state.lore.unshift({id:crypto.randomUUID(),title:'New entry',keywords:[],content:''}); save(); renderInspector(); };
@@ -1196,8 +1261,12 @@ function renderWorkspace(){
   const characters=state.characters.filter(c=>!c.trashedAt);
   const scenes=state.sessions.filter(s=>!s.trashedAt);
   const places=(worldLibrary?.locations||[]).filter(x=>x.worldId===activeWorldId);
-  const entities=(worldLibrary?.entities||[]).filter(x=>x.worldId===activeWorldId);
-  const relationships=(worldLibrary?.relationships||[]).filter(x=>x.worldId===activeWorldId);
+  const archivedCharacterIds=new Set(state.characters.filter(c=>c.trashedAt).map(c=>c.id));
+  const entities=(worldLibrary?.entities||[]).filter(x=>x.worldId===activeWorldId &&
+    !(x.sourceCharacterId&&archivedCharacterIds.has(x.sourceCharacterId)));
+  const activeEntityIds=new Set(entities.map(x=>x.id));
+  const relationships=(worldLibrary?.relationships||[]).filter(x=>x.worldId===activeWorldId &&
+    activeEntityIds.has(x.fromId)&&activeEntityIds.has(x.toId));
   const timelines=(worldLibrary?.timelines||[]).filter(x=>x.worldId===activeWorldId);
   const scene=activeSession(),character=activeCharacter();
   const grid=el('div','','workspace-grid');

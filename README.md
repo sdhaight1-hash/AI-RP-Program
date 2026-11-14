@@ -8,6 +8,8 @@ An early, self-contained roleplay web app. The design draws on Character.AI's ch
 
 The workspace shell now organizes features as **World & canon**, **Characters**, **Story room**, **Memory & review**, and **Models & lab**. Use the left navigation or **Ctrl+K / Cmd+K** to jump directly to tools, including Atlas, Relations, memory traces, Character Studio and Fidelity Lab. World editing and memory review can open in a wide focused detail panel. The world chooser is searchable, and Character Studio displays field completion plus established world context. The layout adapts to small screens and preserves existing color themes.
 
+**Deletion and cleanup:** The × button archives rather than erases. To remove a character and its stored derived actor data, archive it and select **Permanently delete** in **Library & Trash**; remove its scene/encounter dependencies first. Atlas places, independent world entities, and relationships now have explicit delete controls. Old character projections left by earlier builds are reconciled when that world opens. See [deletion rules and recovery limitations](docs/durable-deletion.md). Backups and media files are not automatically wiped.
+
 See [the Studio Experience v3 architecture, interaction guide and verification checklist](docs/studio-experience-v3.md). For headless browser verification (optional ChromeDriver installation), run `npm run test:browser`; GitHub Actions on Node 22 archives desktop/mobile screenshots as `ui-review-screenshots`.
 
 ## Requirements
