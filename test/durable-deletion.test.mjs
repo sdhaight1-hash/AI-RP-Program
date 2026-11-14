@@ -180,6 +180,8 @@ test('synchronous HTTP purge enforces archives, rejects stale revisions and clea
     assert.equal((await post({worldId:foreign.id,revision:next,kind:'character',id:actor.id})).status,409);
     assert.equal(f.scoped.db.prepare('PRAGMA foreign_key_check').all().length,0);
   }finally{
-    await new Promise(resolve=>app.close(resolve));f.close();
+    // createApp closes its supplied store when the HTTP listener closes.
+    await new Promise(resolve=>app.close(resolve));
+    rmSync(f.dir,{recursive:true,force:true});
   }
 });
