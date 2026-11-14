@@ -53,7 +53,9 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     rememberedEvents:[],worldPlaceNotes:placeNotes
   });
   const latest=visible.history.slice(-8).map(m=>m.content).join(' ');
-  const directCue=visible.history.filter(m=>m.role==='user').slice(-2).map(m=>m.content).join(' ') || latest;
+  // Use the latest witnessed user cue. Including the preceding user message
+  // made unrelated small talk resurrect its old topic and steal token budget.
+  const directCue=visible.history.filter(m=>m.role==='user').at(-1)?.content || latest;
   const details=selectCharacterDetails(actor,directCue);
   // Personal recollections respond to the actual conversation cue. Names and
   // scene labels belong in lore search, not every actor's memory search query.
