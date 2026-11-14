@@ -10,7 +10,7 @@ import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } fro
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
 import { initializeFactSchema } from './memory/facts.mjs';
-import { projectionEnabled,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
+import { projectionEnabled,projectionPrimary,readPrimaryStory,compactPrimaryDocument,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
 
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
@@ -60,8 +60,12 @@ export class StudioStore {
 
   load() {
     const row = this.db.prepare('SELECT revision, updated_at, document FROM studio_state WHERE id = 1').get();
-    return row ? { revision: row.revision, updatedAt: row.updated_at, state: bindTimelineIds(normalizeState(JSON.parse(row.document))) } :
-      { revision: 0, updatedAt: null, state: null };
+    if(!row)return {revision:0,updatedAt:null,state:null};
+    const state=projectionPrimary(this.db)
+      ?readPrimaryStory(this.db,{revision:row.revision,document:row.document})
+      :JSON.parse(row.document);
+    return {revision:row.revision,updatedAt:row.updated_at,
+      state:bindTimelineIds(normalizeState(state))};
   }
 
   rebuildLoreIndex(entries) {
@@ -95,8 +99,15 @@ export class StudioStore {
   save(state, expectedRevision, { beforeCommit } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new TypeError('Invalid revision');
     const validated = bindTimelineIds(normalizeState(state));
-    const payload = JSON.stringify(validated);
-    if (Buffer.byteLength(payload, 'utf8') > 4_000_000) throw new RangeError('Story data exceeds the 4 MB save limit; export and archive older stories.');
+    const fullPayload=JSON.stringify(validated);
+    const primary=projectionPrimary(this.db);
+    const payload=primary?JSON.stringify(compactPrimaryDocument(validated)):fullPayload;
+    const fullMax=primary?16_000_000:4_000_000;
+    if(Buffer.byteLength(fullPayload,'utf8')>fullMax)
+      throw new RangeError(primary?'Story exceeds the 16 MB world transfer limit; archive older scenes.':
+        'Story data exceeds the 4 MB save limit; export and archive older stories.');
+    if(Buffer.byteLength(payload,'utf8')>4_000_000)
+      throw new RangeError('World metadata exceeds the 4 MB limit; archive unused lore and character drafts.');
     const updatedAt = Date.now();
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -169,7 +180,8 @@ export class StudioStore {
       synchronizeSceneTimelines(this.db,validated,this.scopeWorldId);
       // Timeline IDs are stable and part of the persisted scene snapshot.
       // synchronizeSceneTimelines may add metadata, so update the same revision document.
-      this.db.prepare('UPDATE studio_state SET document = ? WHERE id = 1').run(JSON.stringify(validated));
+      this.db.prepare('UPDATE studio_state SET document = ? WHERE id = 1').run(
+        primary?JSON.stringify(compactPrimaryDocument(validated)):JSON.stringify(validated));
       this.rebuildLoreIndex(validated.lore);
       syncConversationMemories(this.db,validated);
       if(projectionActive) {
