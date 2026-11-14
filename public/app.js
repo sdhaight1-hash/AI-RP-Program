@@ -1211,6 +1211,7 @@ function openEncounterManager(templateId=null,returnToTrash=false){
 }
 function setWorkspace(mode){
   if(!Object.hasOwn(WORKSPACE_META,mode))return;
+  showError();
   activeWorkspace=mode;
   currentTab=WORKSPACE_META[mode].tab;
   setDetailDeskOpen(false);
@@ -2236,7 +2237,11 @@ async function generate(mode = 'normal') {
   const session=activeSession(); const character=session ? sceneActor(session) : null;
   if (running || !session || !character) {if(!running)showError('Select a scene with an available cast member first.');return;}
   if(pendingReply){const origin=state.sessions.find(s=>s.id===pendingReply.sessionId);showError(`Resolve the unsaved NPC draft in ${origin?.title||'the previous scene'} before generating another reply.`);return;}
-  if (!state.settings.model) { currentTab='setup';renderInspector();showError('Load a model in KoboldCpp or LM Studio, then select it in Setup.');return; }
+  if (!state.settings.model) {
+    setWorkspace('tools');openDetailDesk('setup');
+    showError('Choose a loaded local model in Settings & tools → Setup before generating.');
+    return;
+  }
   const previous = session.messages.at(-1);
   const retry = mode === 'retry' && previous?.role === 'assistant';
   if (mode === 'retry' && !retry) return;
