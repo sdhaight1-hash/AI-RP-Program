@@ -788,3 +788,54 @@ body.detail-focus .inspector-body :where(input,textarea,select){font-size:13px}
   .builder-dialog[open] .builder-grid{overflow:auto;height:auto}
   .inspector-expand{font-size:10px}
 }
+
+
+/* Searchable local navigation: discover every feature without memorizing its tab. */
+.command-trigger{display:inline-flex;align-items:center;gap:8px;padding:8px 11px}
+.command-trigger>span{font-size:18px;line-height:1;color:var(--accent-text)}
+.command-trigger kbd{
+  border:1px solid var(--ux-line);
+  background:var(--ux-faint);
+  border-radius:5px;padding:3px 5px;
+  color:var(--muted);font:10px ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.command-palette{
+  padding:22px;
+  width:min(630px,calc(100vw - 26px));
+  max-height:min(660px,calc(100dvh - 35px));
+  border:1px solid var(--ux-line-strong);
+  border-radius:20px;
+  color:var(--text);
+  background:var(--panel);
+  box-shadow:0 25px 100px #0009;
+}
+.command-palette::backdrop{background:#020206d6;backdrop-filter:blur(8px)}
+.command-header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px}
+.command-header h2{font-family:var(--ux-serif);font-size:30px;font-weight:490;margin:4px 0 0}
+.command-palette>.field-label{margin:0 0 8px}
+#command-search{width:100%;font-size:15px;padding:14px}
+.command-items{max-height:375px;overflow:auto;padding:8px 0;display:grid;gap:3px;scrollbar-width:thin}
+.command-item{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:13px 14px;border:1px solid transparent;border-radius:11px;
+  background:transparent;color:var(--text);text-align:left;min-height:47px;
+  width:100%;
+}
+.command-item:hover,.command-item.selected,.command-item:focus-visible{
+  background:var(--ux-soft);
+  border-color:color-mix(in srgb,var(--accent) 21%,transparent);
+}
+.command-item strong{font-size:13px;font-weight:650}
+.command-item-detail{font-size:10px;color:var(--muted);white-space:nowrap}
+.command-footer{border-top:1px solid var(--ux-line);margin:7px 0 0;padding:13px 0 0}
+@media(max-width:760px){
+  .command-trigger{padding:7px 9px;font-size:11px}
+  .command-trigger kbd{display:none}
+  .command-palette{padding:16px;border-radius:15px}
+  .command-item{padding:11px 10px}
+}
+@media(max-width:460px){
+  .command-trigger{font-size:0;gap:0}
+  .command-trigger>span{font-size:20px}
+  .command-item-detail{font-size:9px}
+}
