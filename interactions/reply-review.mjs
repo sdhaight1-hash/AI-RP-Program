@@ -22,11 +22,11 @@ export function inspectNpcReply(channelId, value, characterName = '') {
   if (!text) return ['The model returned an empty reply.'];
   if (PLAYER_LINE.test(text) || PLAYER_ACTION.test(text))
     issues.push('Possible player-controlled dialogue or action. The AI must not decide for your character.');
-  if (channel === 'text_message') {
+  if (getChannel(channel).kind === 'written') {
     if (TEXT_STAGE.test(text) || TEXT_SCENE.test(text))
-      issues.push('Possible stage directions or scene narration in a text message.');
+      issues.push('Possible stage directions or scene narration in a written message.');
     if (TEXT_ROLE.test(text) || TEXT_TIMESTAMP.test(text) || roleLine?.test(text))
-      issues.push('Possible speaker label or timestamp; the messaging interface supplies these.');
+      issues.push('Possible speaker label or timestamp; the interface supplies these.');
   }
   if (channel === 'phone_call' && (PHONE_VISUAL.test(text) || visualName?.test(text)))
     issues.push('Possible untransmitted visual action during an audio-only call.');
