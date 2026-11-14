@@ -15,6 +15,7 @@ import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
 import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
+import { appendPlayerMessage } from './scene/append.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -268,6 +269,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       if (req.method === 'GET' && path === '/api/state') {
         if (requestUrl.searchParams.has('worldId')) requireWorldScope(requestUrl.searchParams.get('worldId'));
         return json(res, 200, store.load());
+      }
+      if (req.method === 'POST' && path === '/api/scene/messages/append') {
+        const input=await readJson(req,40_000);
+        requireWorldScope(input?.worldId);
+        try{return json(res,201,appendPlayerMessage(store,input));}
+        catch(error){
+          const conflict=/revision changed|Wrong world/.test(error.message);
+          return json(res,conflict?409:422,{error:error.message});
+        }
       }
       if (req.method === 'PUT' && path === '/api/state') {
         // Opt-in normalized-primary worlds can carry larger histories in the
