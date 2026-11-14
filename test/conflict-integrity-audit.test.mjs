@@ -137,3 +137,54 @@ test('old orphan actor-owned memories and accepted events are removed even if mi
     }finally{store.close();}
   }finally{rmSync(temp,{recursive:true,force:true});}
 });
+
+
+test('world-open ghost reconciliation preserves system actor positions and event observations',()=>{
+  const temp=mkdtempSync(join(tmpdir(),'rp-system-actor-audit-'));
+  try {
+    let store=new WorldPartitionStore(temp),id=store.activeWorldId,scoped=store.forWorld(id);
+    scoped.save(makeInitialState(),scoped.load().revision,{worldId:id});
+    const scene=scoped.load().state.sessions[0],timelineId=scene.timelineId;
+    const source=scoped.events.propose({sceneId:scene.id,timelineId,
+      sourceMessageId:scene.messages.at(-1).id,description:'The NPC greeted the visitor.'});
+    scoped.events.decide({proposalId:source.id,decision:'accept'});
+    const event=scoped.db.prepare('SELECT id FROM timeline_events WHERE actor_id=?')
+      .get(scoped.load().state.characters[0].id);
+    const location=scoped.worlds.createLocation({worldId:id,name:'Clock Observatory',kind:'building'});
+    const system='system:world-clock';
+    scoped.db.prepare(`INSERT INTO timeline_actors(timeline_id,actor_id,controller,character_id)
+      VALUES(?,?,?,NULL)`).run(timelineId,system,'system');
+    scoped.worlds.setActorLocation({timelineId,actorId:system,locationId:location.id});
+    scoped.db.prepare('INSERT INTO timeline_event_observers(event_id,actor_id) VALUES (?,?)')
+      .run(event.id,system);
+    store.close();
+    store=new WorldPartitionStore(temp);
+    try{
+      const reopened=store.forWorld(id);
+      assert.equal(total(reopened.db,'timeline_positions','actor_id',system),1);
+      assert.equal(total(reopened.db,'timeline_event_observers','actor_id',system),1);
+      assert.equal(reopened.worlds.actors(timelineId).find(x=>x.actorId===system)?.controller,'system');
+      assert.equal(reopened.db.prepare('PRAGMA foreign_key_check').all().length,0);
+    }finally{store.close();}
+  }finally{rmSync(temp,{recursive:true,force:true});}
+});
+
+test('damaged SQLite story refuses demo fallback and does not mutate the original revision',()=>{
+  const store=new StudioStore(':memory:');
+  try{
+    store.save(makeInitialState(),0);
+    const original=store.db.prepare('SELECT document,revision FROM studio_state WHERE id=1').get();
+    for(const corrupt of [
+      {characters:[],persona:{name:'Wrong'}},
+      {characters:[{id:'invalid-person'}],sessions:[]},
+      {characters:[],sessions:[{id:'broken-scene',characterId:'ghost',messages:[{role:'system',content:'Invisible'}]}]}
+    ]){
+      store.db.prepare('UPDATE studio_state SET document=? WHERE id=1')
+        .run(JSON.stringify(corrupt));
+      assert.throws(()=>store.load(),/Stored story/);
+      assert.equal(store.db.prepare('SELECT revision FROM studio_state WHERE id=1').get().revision,original.revision);
+    }
+    store.db.prepare('UPDATE studio_state SET document=? WHERE id=1').run(original.document);
+    assert.equal(store.load().state.characters[0].name,'Mara Vale');
+  }finally{store.close();}
+});
