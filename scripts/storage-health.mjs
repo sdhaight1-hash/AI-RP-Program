@@ -12,7 +12,7 @@ const validWorldId=id=>typeof id==='string'&&
   /^(?:[0-9a-f]{8}-[0-9a-f-]{27,40}|imported-local-world)$/i.test(id)&&!id.includes('..');
 
 export function inspectWorldStorage(dataDir) {
-  const report={dataDir:resolve(dataDir),ok:true,worlds:[],errors:[]};
+  const report={dataDir:resolve(dataDir),ok:true,worlds:[],errors:[],warnings:[]};
   const issue=(scope,detail)=>{report.ok=false;report.errors.push({scope,detail});};
   const registryPath=join(dataDir,'registry.sqlite');
   if(!existsSync(registryPath)){
@@ -61,6 +61,13 @@ export function inspectWorldStorage(dataDir) {
         }
         if(parsed.characters.some(c=>c.worldId&&c.worldId!==row.id))
           fail('Foreign-world character in story snapshot');
+        const knownCharacterIds=new Set(parsed.characters.map(c=>c.id));
+        const orphaned=db.prepare(`SELECT id,source_character_id AS characterId
+          FROM world_entities WHERE world_id=? AND source_character_id IS NOT NULL`)
+          .all(row.id).filter(e=>!knownCharacterIds.has(e.characterId));
+        entry.orphanedCharacterEntities=orphaned.length;
+        if(orphaned.length)report.warnings.push({scope:row.id,
+          detail:orphaned.length+' obsolete character projections; opening this world repairs them'});
         const timelineIds=new Set(db.prepare('SELECT id FROM timelines WHERE world_id=?').all(row.id).map(x=>x.id));
         if(parsed.sessions.some(s=>s.timelineId&&!timelineIds.has(s.timelineId)))
           fail('Scene references an unknown or foreign timeline');
