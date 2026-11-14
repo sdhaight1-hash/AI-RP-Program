@@ -158,3 +158,44 @@ test('branches retain their original scene when copied replies depend on it',t=>
   assert.equal(store.load().revision,1);
   assert.ok(store.load().state.sessions.some(x=>x.id===source.id));
 });
+
+
+test('failed active-world registry update leaves the original world open and writable',async t=>fixture(t,async({store})=>{
+  const first=store.activeWorldId;
+  const second=store.worlds.createWorld({name:'Switch destination'}).id;
+  store.registry.exec(`CREATE TRIGGER reject_switch BEFORE UPDATE ON registry_settings
+    WHEN NEW.key='active_world' AND NEW.value!=OLD.value
+    BEGIN SELECT RAISE(ABORT,'Registry switch deliberately denied'); END;`);
+  assert.throws(()=>store.activateWorld(second),/Registry switch deliberately denied/);
+  assert.equal(store.activeWorldId,first);
+  assert.equal(store.registry.prepare("SELECT value FROM registry_settings WHERE key='active_world'").get().value,first);
+  assert.equal(store.load().worldId,first);
+  store.save(sceneState(createCharacter('Still in the original world')),
+    store.load().revision,{worldId:first});
+  store.registry.exec('DROP TRIGGER reject_switch');
+  store.activateWorld(second);
+  assert.equal(store.load().worldId,second);
+  assert.equal(store.load().state.characters.length,0);
+}));
+
+test('failed world activation entity repair rolls back without switching worlds',async t=>fixture(t,async({store})=>{
+  const first=store.activeWorldId;
+  const second=store.worlds.createWorld({name:'Needs entity repair'}).id;
+  store.activateWorld(second);
+  store.save(sceneState(createCharacter('Destination NPC')),
+    store.load().revision,{worldId:second});
+  store.activateWorld(first);
+  const db=new DatabaseSync(store.worldFile(second));
+  try {
+    db.exec(`DELETE FROM world_entities WHERE source_character_id IS NOT NULL;
+      CREATE TRIGGER reject_entity_repair BEFORE INSERT ON world_entities
+      BEGIN SELECT RAISE(ABORT,'Entity repair deliberately denied'); END;`);
+  } finally { db.close(); }
+  assert.throws(()=>store.activateWorld(second),/Entity repair deliberately denied/);
+  assert.equal(store.activeWorldId,first);
+  assert.equal(store.registry.prepare("SELECT value FROM registry_settings WHERE key='active_world'").get().value,first);
+  assert.equal(store.load().worldId,first);
+  const check=new DatabaseSync(store.worldFile(second),{readOnly:true});
+  try {assert.equal(check.prepare('SELECT count(*) AS count FROM world_entities').get().count,0);}
+  finally {check.close();}
+}));
