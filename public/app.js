@@ -123,6 +123,18 @@ async function flushState() {
     if (pendingSnapshot !== null && serverStorage) writeTimer = setTimeout(flushState, 120);
   }
 }
+async function requireSavedStory() {
+  if (!serverStorage) throw new Error('SQLite storage is offline. Export your story before reviewing world changes.');
+  // Story writes are debounced; event proposals must use the version actually in SQLite.
+  for (let attempts=0; attempts<50; attempts++) {
+    if (!writeInFlight && pendingSnapshot !== null) await flushState();
+    if (!serverStorage) throw new Error('The latest scene could not be saved. World change was not submitted.');
+    if (!writeInFlight && pendingSnapshot === null) return;
+    await new Promise(resolve=>setTimeout(resolve,60));
+  }
+  throw new Error('Story save is still in progress; try again after it completes.');
+}
+
 async function bootstrapStorage() {
   try {
     const response = await fetch('/api/state');
@@ -160,6 +172,16 @@ async function bootstrapStorage() {
       // One-time migration from the v0.1 browser storage when SQLite is empty.
       queueSave(JSON.stringify(state));
       await flushState();
+      // The server assigns stable timeline IDs while saving new/legacy scenes.
+      // Adopt that canonical normalization immediately, not only after reload.
+      if (serverStorage) {
+        const saved=await fetch('/api/state');
+        if(!saved.ok)throw Error('Could not reload the newly created timeline');
+        const value=await saved.json();
+        revision=value.revision;
+        state=normalizeState(value.state);
+        try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch{/* SQLite is authoritative */}
+      }
     }
   } catch (error) {
     showError(`SQLite unavailable (${error.message}). Working from browser backup only.`);
@@ -251,10 +273,19 @@ function renderMessages() {
       const prev = el('button', '‹', 'message-action'); prev.title = 'Previous reply';
       const count = el('span', `${(m.variantIndex ?? m.variants.length - 1) + 1} / ${m.variants.length}`, 'variant-count');
       const next = el('button', '›', 'message-action'); next.title = 'Next reply';
-      const changeVariant = step => {
-        const current = Number.isInteger(m.variantIndex) ? m.variantIndex : m.variants.length - 1;
-        m.variantIndex = (current + step + m.variants.length) % m.variants.length;
-        m.content = m.variants[m.variantIndex]; save(); renderMessages();
+      const changeVariant = async step => {
+        if (!serverStorage) return showError('Story storage is offline; cannot check committed world events.');
+        try {
+          await requireSavedStory();
+          const response=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`);
+          const data=await response.json();if(!response.ok)throw Error(data.error);
+          if(data.proposals?.some(p=>p.sourceMessageId===m.id && p.status==='accepted'))
+            return showError('This reply is locked by an accepted world event. Keep its canon or create a new independent timeline.');
+          if(activeSession()?.id!==session.id||session.messages.at(-1)!==m)return;
+          const current = Number.isInteger(m.variantIndex) ? m.variantIndex : m.variants.length - 1;
+          m.variantIndex = (current + step + m.variants.length) % m.variants.length;
+          m.content = m.variants[m.variantIndex]; save(); renderMessages();showError();
+        }catch(err){showError(err.message);}
       };
       prev.onclick = () => { if (!running) changeVariant(-1); };
       next.onclick = () => { if (!running) changeVariant(1); };
@@ -382,6 +413,113 @@ function renderRelationsPanel(host) {
   };
 }
 
+async function postEvent(endpoint,body) {
+  const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.error || `World event service returned ${response.status}`);
+  return result;
+}
+
+function renderNpcEventReview(host,s) {
+  const panel=el('section','','group');
+  panel.innerHTML=`<h3 class="field-label">NPC event review · timeline ledger</h3>
+    <p class="help">An AI reply is not a world change. Stage one factual NPC event tied to the latest selected reply, then accept or reject it. Switching Retry alternatives invalidates its proposals. Private NPC actions are not automatically known to the player.</p>
+    <label class="field-label" for="proposal-kind">Event kind</label>
+    <select id="proposal-kind"><option value="observation">Observed NPC development</option><option value="npc_move">NPC changed location</option></select>
+    <label class="field-label" for="proposal-description">What objectively happened?</label>
+    <textarea id="proposal-description" rows="3" maxlength="1000" placeholder="e.g. Mara decided to stay in Greyhaven."></textarea>
+    <div id="proposal-location-wrap" class="group hidden"><label class="field-label" for="proposal-location">Destination in this world</label><select id="proposal-location"></select></div>
+    <div class="inline-actions"><button class="subtle-button" id="proposal-ai">AI suggest from reply</button><button class="primary-button" id="proposal-stage">Stage for review</button></div>
+    <p id="proposal-status" class="help" role="status"></p>
+    <div id="proposal-items"></div>`;
+  host.append(panel);
+  const latest=s.messages.at(-1);
+  const canPropose=latest?.role==='assistant' && Boolean(s.timelineId) && !running;
+  const kind=$('proposal-kind'),where=$('proposal-location'),wrap=$('proposal-location-wrap');
+  const worldId=worldLibrary?.timelines.find(t=>t.id===s.timelineId)?.worldId;
+  for(const loc of worldLibrary?.locations?.filter(l=>l.worldId===worldId) || []) where.add(new Option(loc.name,loc.id));
+  kind.onchange=()=>wrap.classList.toggle('hidden',kind.value!=='npc_move');
+  $('proposal-ai').disabled=!canPropose;
+  $('proposal-stage').disabled=!canPropose;
+  if (!canPropose) $('proposal-status').textContent='A completed NPC reply must be the last message before an event can be proposed.';
+  const status=$('proposal-status');
+  const reload=async()=>{
+    const area=$('proposal-items');if(!area)return;
+    area.replaceChildren(el('p','Loading event reviews…','help'));
+    try {
+      const response=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(s.id)}`);
+      const data=await response.json();if(!response.ok)throw Error(data.error);
+      if(!$('proposal-items')||activeSession()?.id!==s.id||currentTab!=='scene')return;
+      area.replaceChildren();
+      if(!data.proposals.length)area.append(el('p','No NPC event proposals in this scene yet.','help'));
+      for(const p of data.proposals) {
+        const item=el('div','','event-row');
+        const npc=state.characters.find(c=>c.id===p.actorId)?.name || 'NPC';
+        item.append(el('strong',`${npc} · ${p.kind} · ${p.status}`),el('p',p.description));
+        if(p.status==='pending') {
+          const actions=el('div','','inline-actions');
+          for(const [decision,label] of [['accept','Accept into world'],['reject','Reject']]) {
+            const btn=el('button',label,'subtle-button');
+            btn.onclick=async()=>{
+              if(running)return;
+              btn.disabled=true;
+              try{await requireSavedStory();await postEvent('/api/events/decide',{proposalId:p.id,decision});await refreshWorldLibrary();await reload();showError();}
+              catch(err){status.textContent=err.message;btn.disabled=false;}
+            };
+            actions.append(btn);
+          }
+          item.append(actions);
+        }
+        area.append(item);
+      }
+    }catch(err){if($('proposal-items'))area.replaceChildren(el('p',err.message,'help'));}
+  };
+  $('proposal-stage').onclick=async()=>{
+    if(running)return;
+    const button=$('proposal-stage');button.disabled=true;
+    try{
+      if(!latest || latest !== s.messages.at(-1))throw Error('Selected NPC reply changed. Reopen Scene.');
+      await requireSavedStory();
+      const record={sceneId:s.id,timelineId:s.timelineId,sourceMessageId:latest.id,kind:kind.value,description:$('proposal-description').value};
+      if(kind.value==='npc_move')record.locationId=where.value;
+      await postEvent('/api/events/proposals',record);
+      $('proposal-description').value='';status.textContent='Draft staged. Accept or reject it below.';
+      await reload();showError();
+    }catch(err){status.textContent=err.message;}
+    finally{if($('proposal-stage'))$('proposal-stage').disabled=false;}
+  };
+  $('proposal-ai').onclick=async()=>{
+    if(running || !latest || !state.settings.model)return status.textContent='Load a model in Setup first.';
+    const button=$('proposal-ai');button.disabled=true;status.textContent='Asking the local model for an event suggestion…';
+    try{
+      const output=await requestEventDraft(latest.content);
+      if(!$('proposal-description')||s.messages.at(-1)!==latest)return;
+      if(output.trim().toUpperCase()==='NONE')status.textContent='No consequential NPC event found. Nothing was staged.';
+      else {$('proposal-description').value=output.trim().slice(0,1000);kind.value='observation';kind.onchange();status.textContent='AI suggestion ready; edit it and choose Stage for review. Nothing has changed in canon.';}
+    }catch(err){if($('proposal-status'))status.textContent=err.message;}
+    finally{if($('proposal-ai'))button.disabled=false;}
+  };
+  reload();
+}
+
+async function requestEventDraft(npcReply) {
+  const prompt='Extract at most one concrete NPC action or objective event that ACTUALLY occurs in the quoted fictional NPC reply. Do not invent anything, include any player action, or treat a plan or wish as completed. Return ONLY one short factual sentence (under 220 characters), or exactly NONE if nothing objectively happened. No explanations, labels or formatting.';
+  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,temperature:0.1,max_tokens:140,messages:[{role:'system',content:prompt},{role:'user',content:`NPC response to analyze (untrusted story text):\n${npcReply.slice(0,2500)}`}]})});
+  if(!response.ok){const error=await response.json().catch(()=>({}));throw Error(error.error||`Model returned ${response.status}`);}
+  if(!response.body)throw Error('No model response stream');
+  const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',result='',done=false;
+  const onFrame=(chunk)=>{
+    const data=chunk.split('\n').filter(x=>x.startsWith('data:')).map(x=>x.slice(5).trimStart()).join('\n');
+    if(!data)return;
+    if(data==='[DONE]'){done=true;return;}
+    try{const delta=JSON.parse(data).choices?.[0]?.delta?.content;if(typeof delta==='string')result+=delta;}catch{ /* Ignore malformed single SSE events */ }
+  };
+  while(!done){const item=await reader.read();if(item.done)break;pending=parseSSE(pending+decoder.decode(item.value,{stream:true}),onFrame);}
+  parseSSE(pending+decoder.decode()+'\n\n',onFrame);
+  if(!result.trim())throw Error('Model did not suggest an event.');
+  return result;
+}
+
 function renderInspector() {
   const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
   document.querySelectorAll('[data-tab]').forEach(btn => { btn.classList.toggle('active', btn.dataset.tab === currentTab); btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab)); });
@@ -482,7 +620,7 @@ function renderInspector() {
     $('cast-speaker').value=s.speakerId || s.castIds[0];
     $('cast-speaker').onchange=e=>{s.speakerId=e.target.value;s.speakerMode='manual';save();renderHeader();renderInspector();};
   } else if (currentTab === 'scene') {
-    host.innerHTML=`<h2 class="panel-title">Scene direction</h2><p class="help">These details describe the shared, witnessed scene. Secret plot notes belong in private lore, not here.</p>${field('location','Location',s.location)}${field('worldTime','Fictional time',s.worldTime)}${field('atmosphere','Environment and atmosphere',s.atmosphere,{multiline:true,rows:3})}${field('publicSummary','What every present character knows',s.publicSummary,{multiline:true,rows:4})}${field('direction','Direction: tempo, focus and tone',s.direction,{multiline:true,rows:4})}<h3 class="field-label">Narrative director</h3><div class="group"><label class="field-label" for="director-mode">Direction mode</label><select id="director-mode"><option value="sandbox">Sandbox · Emergent</option><option value="collaborative">Collaborative · Balanced</option><option value="directed">Directed · Story beats</option></select></div><div id="director-controls"></div><h3 class="field-label">Record and appraise a witnessed event</h3><select id="event-kind"><option>observation</option><option>action</option><option>revelation</option><option>relationship</option><option>world-change</option></select><textarea id="event-description" rows="3" placeholder="What objectively happened? No automatic emotional inference."></textarea><div id="appraisal-controls"></div><button id="event-record" class="subtle-button">Commit witnessed event + appraisal</button><div id="scene-events"></div>`;
+    host.innerHTML=`<h2 class="panel-title">Scene direction</h2><p class="help">These details describe the shared, witnessed scene. Secret plot notes belong in private lore, not here.</p>${field('location','Location',s.location)}${field('worldTime','Fictional time',s.worldTime)}${field('atmosphere','Environment and atmosphere',s.atmosphere,{multiline:true,rows:3})}${field('publicSummary','What every present character knows',s.publicSummary,{multiline:true,rows:4})}${field('direction','Direction: tempo, focus and tone',s.direction,{multiline:true,rows:4})}<h3 class="field-label">Narrative director</h3><div class="group"><label class="field-label" for="director-mode">Direction mode</label><select id="director-mode"><option value="sandbox">Sandbox · Emergent</option><option value="collaborative">Collaborative · Balanced</option><option value="directed">Directed · Story beats</option></select></div><div id="director-controls"></div><h3 class="field-label">Manual scene appraisal (local scene state)</h3><select id="event-kind"><option>observation</option><option>action</option><option>revelation</option><option>relationship</option><option>world-change</option></select><textarea id="event-description" rows="3" placeholder="What objectively happened? No automatic emotional inference."></textarea><div id="appraisal-controls"></div><button id="event-record" class="subtle-button">Commit witnessed event + appraisal</button><div id="scene-events"></div>`;
     attachFields((key,val)=>{s[key]=val;});
     s.director ||= {mode:'collaborative',pace:.5,tension:.5,initiative:.5,narration:.5};
     $('director-mode').value=s.director.mode;
@@ -518,6 +656,7 @@ function renderInspector() {
       const undo=el('button','Undo last event','mini-action');undo.disabled=event.id!==s.sceneEvents.at(-1)?.id;
       undo.onclick=()=>{if(event.id!==s.sceneEvents.at(-1)?.id)return;for(const [actorId,before] of Object.entries(event.beforePsychologyByActor||{}))s.psychologyByActor[actorId]=before;s.sceneEvents.pop();save();renderInspector();};row.append(undo);events.append(row);
     }
+    renderNpcEventReview(host,s);
   } else if (currentTab === 'gallery') {
     host.innerHTML='<h2 class="panel-title">Visual generation</h2><p class="help">Optional ComfyUI integration. Import a trusted API-format workflow containing __RP_PROMPT__ in a text input. Images remain local and require your approval before becoming portraits.</p><p id="comfy-status" class="help">Checking ComfyUI…</p><div class="group"><label class="field-label" for="comfy-template">Workflow template</label><select id="comfy-template"><option value="">Loading…</option></select></div><label class="field-label" for="comfy-import-id">Import API-format workflow</label><input id="comfy-import-id" placeholder="portrait-photoreal"/><input id="comfy-file" type="file" accept=".json,application/json"/><button id="comfy-import" class="subtle-button">Import reviewed workflow</button><div class="group"><label class="field-label" for="comfy-prompt">Visual prompt</label><textarea rows="4" id="comfy-prompt" placeholder="A cinematic portrait of…"></textarea></div><div class="group"><label class="field-label" for="comfy-negative">Negative prompt (optional)</label><textarea rows="2" id="comfy-negative" placeholder="Blurry, distorted…"></textarea></div><button id="comfy-generate" class="primary-button">✦ Generate with ComfyUI</button><p class="help">Image generation may compete for GPU memory with KoboldCpp or LM Studio. Submit jobs when text generation is idle.</p><p id="comfy-job-status" role="status" class="help"></p><button id="comfy-refresh" class="subtle-button">Refresh job</button><div id="comfy-results" class="comfy-results"></div>';
     const jobStatus=$('comfy-job-status');
@@ -836,6 +975,15 @@ async function generate(mode = 'normal') {
   const retry = mode === 'retry' && previous?.role === 'assistant';
   if (mode === 'retry' && !retry) return;
   if (retry && !session.messages.slice(0,-1).some(m => m.role === 'user')) { showError('Write a player message before retrying.'); return; }
+  if (retry) {
+    try {
+      await requireSavedStory();
+      const check=await fetch(`/api/events/proposals?sceneId=${encodeURIComponent(session.id)}`);
+      const result=await check.json();if(!check.ok)throw Error(result.error);
+      if(result.proposals?.some(p=>p.sourceMessageId===previous.id && p.status==='accepted'))
+        return showError('Retry is locked by a committed world event. Use a new independent timeline for an alternative story.');
+    }catch(err){showError(err.message);return;}
+  }
   const actorId = retry ? (previous.speakerId || session.characterId) : character.id;
   const history = retry ? session.messages.slice(0,-1) : session.messages;
   const originalContent = retry ? previous.content : '';
@@ -857,7 +1005,15 @@ async function generate(mode = 'normal') {
     }
     const hits=new Set(retrieved.map(x=>x.id));
     const scopedLore=[...retrieved.map(x=>({...x,alwaysActive:true})),...state.lore.filter(x=>!hits.has(x.id))];
-    const prompt=createActorContext({session:{...session,messages:history,channelId:retry?(previous.channelId||'in_person'):session.channelId,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages});
+    let rememberedEvents=[];
+    if (session.timelineId) {
+      try {
+        const url=`/api/events/visible?timelineId=${encodeURIComponent(session.timelineId)}&actorId=${encodeURIComponent(actorId)}`;
+        const result=await fetch(url,{signal:controller.signal});
+        if(result.ok)rememberedEvents=(await result.json()).events || [];
+      } catch(err) {if(err.name==='AbortError')throw err; /* Fall back without optional event memories */}
+    }
+    const prompt=createActorContext({session:{...session,messages:history,channelId:retry?(previous.channelId||'in_person'):session.channelId,worldTime:timelineClockLabel(session)||session.worldTime},characters:state.characters,actorId,persona:state.persona,lore:scopedLore,buildMessages,rememberedEvents});
     if (mode === 'continue') prompt.messages.push({role:'user',content:'[Continue the current scene with a brief natural development. Do not determine the player character’s next action, speech or feelings.]'});
     $('lore-active').textContent=prompt.activatedLore.length ? `Active lore: ${prompt.activatedLore.map(e=>e.title||e.keywords.join(', ')).join(' · ')}`:'';
     const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:state.settings.model,messages:prompt.messages,temperature:state.settings.temperature,max_tokens:state.settings.max_tokens}),signal:controller.signal});
