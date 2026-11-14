@@ -225,6 +225,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try {return json(res,201,store.worlds.createRelationship(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
+      if (req.method === 'POST' && path === '/api/worlds/entries/delete') {
+        const input=await readJson(req,1500);
+        requireWorldScope(input?.worldId);
+        try{return json(res,200,store.worlds.deleteEntry(input));}
+        catch(error){
+          const conflict=/referenced|linked|first|used by|unlink|belongs to|Wrong world/.test(error.message);
+          return json(res,conflict?409:422,{error:error.message});
+        }
+      }
       if (req.method === 'POST' && path === '/api/timelines/clock') {
         const data=await readJson(req,2500);
         requireWorldScope(data.worldId);
