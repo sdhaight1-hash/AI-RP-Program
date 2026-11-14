@@ -59,6 +59,7 @@ function pruneDatabase(db, worldId, state, priorRevision) {
     // Dialogue memories are timeline-scoped derived rows: partition before
     // removing their owning timelines, and let FTS triggers prune the index.
     db.prepare('DELETE FROM actor_memories WHERE timeline_id NOT IN '+scope).run(worldId);
+    db.prepare('DELETE FROM actor_facts WHERE timeline_id NOT IN '+scope).run(worldId);
     for (const table of ['timeline_event_observers'])
       db.prepare(`DELETE FROM ${table} WHERE event_id NOT IN (SELECT id FROM timeline_events WHERE timeline_id IN ${scope})`).run(worldId);
     for (const table of ['timeline_events', 'event_proposals']) db.prepare(`DELETE FROM ${table} WHERE timeline_id NOT IN ${scope}`).run(worldId);
