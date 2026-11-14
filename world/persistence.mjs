@@ -105,6 +105,14 @@ export function initializeWorldSchema(db, state, scopeWorldId = null) {
       from_id TEXT NOT NULL REFERENCES world_entities(id), to_id TEXT NOT NULL REFERENCES world_entities(id),
       kind TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS character_world_sources (
+      world_id TEXT NOT NULL REFERENCES worlds(id),character_id TEXT NOT NULL,
+      entry_type TEXT NOT NULL CHECK(entry_type IN ('entity','location')),entry_id TEXT NOT NULL,
+      source_field TEXT NOT NULL,source_quote TEXT NOT NULL,source_version TEXT NOT NULL,
+      created_at INTEGER NOT NULL,PRIMARY KEY(world_id,entry_type,entry_id)
+    );
+    CREATE INDEX IF NOT EXISTS character_world_sources_owner_idx
+      ON character_world_sources(world_id,character_id,created_at);
     CREATE TABLE IF NOT EXISTS timeline_clocks (
       timeline_id TEXT PRIMARY KEY REFERENCES timelines(id), instant_ms INTEGER NOT NULL,time_zone TEXT NOT NULL, is_explicit INTEGER NOT NULL DEFAULT 0
     );
@@ -116,7 +124,7 @@ export function initializeWorldSchema(db, state, scopeWorldId = null) {
     );`);
     synchronizeSceneTimelines(db,state,scopeWorldId);
     db.prepare('INSERT OR IGNORE INTO timeline_clocks(timeline_id,instant_ms,time_zone) SELECT id, ?, ? FROM timelines').run(now(),'UTC');
-    for(const version of [1,2])db.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (?,?)').run(version,now());
+    for(const version of [1,2,3])db.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (?,?)').run(version,now());
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
 }

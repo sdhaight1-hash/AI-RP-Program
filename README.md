@@ -44,6 +44,10 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
 
+## Character and world co-authoring (2026)
+
+Character Studio's AI co-author now prioritizes the selected world's established setting, the character's linked places, and established world relationships. **Character → World Atlas** can suggest named places and people explicitly stated in the character's saved biography, each tied to an exact source quote. You review and approve each proposal separately; approved entries are added to that world's persistent Atlas with an audit trail. No unapproved model text becomes world canon, and no place entry moves an actor in a live scene. See [the character/world bridge](docs/character-world-bridge.md).
+
 ## Reviewed NPC knowledge (v2.1 follow-up)
 
 The Context Inspector also has a **Character memory notebook**. Select a message the current NPC actually heard or said, record a concise belief, promise, relationship observation or autobiographical memory, and save it to that NPC's timeline. Reviewed notes can be corrected or revoked. Revised source dialogue invalidates the associated memory, and a timeline fork freezes only memories with valid sources. This supplements—not replaces—the automatic witnessed-dialogue index. These notes represent what the NPC remembers or believes, **not new world canon**. Automatic AI memory extraction and semantic embeddings are still future milestones.

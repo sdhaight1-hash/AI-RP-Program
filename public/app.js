@@ -5,7 +5,8 @@ import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normaliz
 import { getChannel } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
 import { normalizeFrequentPlaces, importedEncounter } from '/character/schema.mjs';
-import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis } from '/character/authoring.mjs';
+import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis, characterDraftVersion, worldDraftVersion } from '/character/authoring.mjs';
+import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/character/world-bridge.mjs';
 import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 
@@ -29,6 +30,8 @@ let builderTab = 'identity';
 let aiDraftTarget = null;
 let aiDraftRequest = null;
 let aiDraftController = null;
+let worldEntryController = null;
+let worldEntryRequest = null;
 let fidelityController = null;
 let fidelityDraft = null;
 let fidelitySelectedProbe = 'everyday';
@@ -1064,6 +1067,8 @@ function openBuilder(c) {
   builderCharacterId = c.id; builderTab = 'identity';
   $('builder-ai-preview').classList.add('hidden'); $('builder-ai-status').textContent = '';
   $('builder-ai-guidance').value = '';
+  worldEntryController?.abort(); worldEntryRequest=null;
+  $('builder-world-items').replaceChildren();$('builder-world-status').textContent='';
   if (fidelityDraft?.characterId !== c.id) fidelityDraft = null;
   renderBuilder();
   if (!$('character-builder').open) $('character-builder').showModal();
@@ -1326,7 +1331,7 @@ function setupBuilderAI() {
       : 'Develop four currently empty fields. Each receives its own rules and uses the established character as context.';
   };
   $('builder-close').onclick = () => $('character-builder').close();
-  $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); fidelityController?.abort(); });
+  $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); worldEntryController?.abort(); fidelityController?.abort(); });
   document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { if (builderTab === 'lab' && btn.dataset.builderTab !== 'lab') fidelityController?.abort(); builderTab = btn.dataset.builderTab; renderBuilder(); });
   $('portrait-upload-button').onclick = () => $('portrait-upload-file').click();
   $('portrait-upload-file').onchange = async event => {
@@ -1342,6 +1347,8 @@ function setupBuilderAI() {
     if (currentTab === 'character') renderInspector();
   };
   $('builder-ai-generate').onclick = generateBuilderDraft;
+  $('builder-world-suggest').onclick = generateCharacterWorldEntries;
+  $('builder-world-stop').onclick = () => worldEntryController?.abort();
   $('builder-ai-result').addEventListener('input',()=>renderBuilderAIChanges());
   $('builder-ai-stop').onclick = () => aiDraftController?.abort();
   $('builder-ai-apply').onclick = () => {
@@ -1357,12 +1364,116 @@ function setupBuilderAI() {
       const patch=selectCharacterChanges({character:c,worldLibrary,worldId:activeWorldId,lore:state.lore,request:aiDraftRequest,changes:accepted});
       if(!confirm(`Apply ${Object.keys(patch).length} reviewed character detail(s)? No other fields or world facts will change.`))return;
       Object.assign(c,patch);save();renderBuilder();renderLists();renderHeader();renderMessages();
+      worldEntryRequest=null;$('builder-world-items').replaceChildren();
+      $('builder-world-status').textContent='Character updated. Find world entries again using the newly approved profile.';
       if(currentTab==='character')renderInspector();
       $('builder-ai-status').textContent=`Applied ${Object.keys(patch).join(', ')}. No world canon was modified.`;
       $('builder-ai-preview').classList.add('hidden');aiDraftTarget=null;aiDraftRequest=null;
     }catch(err){$('builder-ai-status').textContent=err.message;}
   };
 }
+function renderCharacterWorldCandidates(items,request,version) {
+  const host=$('builder-world-items');host.replaceChildren();
+  if(!items.length){host.append(el('p','No new named world entries supported by this character’s authored fields.','help'));return;}
+  host.append(el('p','These are uncommitted proposals. Confirm each one individually; an existing place or person should be linked rather than duplicated.','help'));
+  for(const source of items){
+    const box=el('div','','lore-card');
+    box.append(el('strong',source.type==='location'?'Proposed place':'Proposed world entity'));
+    const name=document.createElement('input');name.value=source.name;name.maxLength=120;
+    const kind=document.createElement('select');
+    const choices=source.type==='location'
+      ?['region','town','neighborhood','building','room','outdoor','other']
+      :['character','faction','organization','object','concept'];
+    for(const choice of choices)kind.add(new Option(choice,choice));
+    kind.value=source.kind;
+    const description=document.createElement('textarea');description.value=source.description;description.maxLength=800;description.rows=2;
+    const sourceNote=el('p',`Source: ${source.sourceField} — “${source.sourceQuote}”`,'help');
+    const approve=el('button','Add reviewed entry to World Atlas','primary-button');
+    const status=el('p','','help');
+    approve.onclick=async()=>{
+      const character=builderCharacter();
+      if(!character||character.id!==request.characterId||activeWorldId!==request.worldId||
+        characterDraftVersion(character)!==request.profileVersion ||
+        worldDraftVersion(worldLibrary)!==request.worldVersion ||
+        revision!==version){
+        status.textContent='Character or world changed. Regenerate these proposals before approving.';return;
+      }
+      const entry={...source,name:name.value,kind:kind.value,description:description.value};
+      if(!confirm(`Add “${entry.name}” as a ${source.type} to the current world? This is persistent world canon, not a current event or character location.`))return;
+      approve.disabled=true;
+      try{
+        await requireSavedStory();
+        const reply=await fetch('/api/character/world-entries/approve',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({approval:'approve',worldId:request.worldId,characterId:character.id,
+            revision:version,profileVersion:request.profileVersion,worldVersion:request.worldVersion,entry})
+        });
+        const outcome=await reply.json();
+        if(!reply.ok)throw new Error(outcome.error||'Could not add world entry');
+        worldEntryRequest=null;host.replaceChildren();
+        $('builder-world-status').textContent=`Added ${outcome.entry.name} to World Atlas from a reviewed ${outcome.sourceField} quote. Regenerate for further entries; no scene or current location was changed.`;
+        await refreshWorldLibrary();
+        if(builderTab==='life')renderBuilder();
+      }catch(err){status.textContent=err.message;approve.disabled=false;}
+    };
+    box.append(el('label','Name','field-label'),name,
+      el('label','Entry kind','field-label'),kind,
+      el('label','World description (review before committing)','field-label'),
+      description,sourceNote,approve,status);
+    host.append(box);
+  }
+}
+
+async function generateCharacterWorldEntries() {
+  const c=builderCharacter(),status=$('builder-world-status');
+  if(!c||worldEntryController)return;
+  if(!state.settings.model){status.textContent='Load a local model in Setup first.';return;}
+  const aborter=new AbortController();worldEntryController=aborter;
+  $('builder-world-suggest').disabled=true;
+  $('builder-world-stop').classList.remove('hidden');
+  $('builder-world-items').replaceChildren();
+  status.textContent='Looking for named world details supported by the saved character…';
+  try {
+    await requireSavedStory();
+    await refreshWorldLibrary();
+    const request=makeWorldEntryDraftRequest({character:c,worldId:activeWorldId,worldLibrary});
+    const savedRevision=revision;
+    const response=await fetch('/api/chat',{method:'POST',signal:aborter.signal,
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({worldId:activeWorldId,model:state.settings.model,
+        temperature:0.2,max_tokens:1000,messages:request.messages})
+    });
+    if(!response.ok){const reason=await response.json().catch(()=>({}));throw new Error(reason.error||'Local model could not suggest world entries');}
+    if(!response.body)throw new Error('Local model returned no response stream');
+    const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',out='',done=false;
+    const onFrame=frame=>{
+      const payload=frame.split('\n').filter(x=>x.startsWith('data:')).map(x=>x.slice(5).trim()).join('\n');
+      if(payload==='[DONE]'){done=true;return;}
+      if(!payload)return;
+      const obj=JSON.parse(payload);
+      if(obj.error)throw new Error(String(obj.error));
+      const text=obj.choices?.[0]?.delta?.content;
+      if(typeof text==='string')out+=text;
+    };
+    while(!done){const part=await reader.read();if(part.done)break;
+      buffer=parseSSE(buffer+decoder.decode(part.value,{stream:true}),onFrame);}
+    parseSSE(buffer+decoder.decode()+'\n\n',onFrame);
+    if(aborter.signal.aborted)throw new DOMException('Cancelled','AbortError');
+    if(builderCharacter()?.id!==c.id||revision!==savedRevision||activeWorldId!==request.worldId||
+      characterDraftVersion(c)!==request.profileVersion||
+      worldDraftVersion(worldLibrary)!==request.worldVersion)
+      throw new Error('Character or world changed; discard these stale suggestions.');
+    const entries=parseWorldEntrySuggestions(out,{character:c,worldLibrary,worldId:request.worldId});
+    worldEntryRequest=request;
+    renderCharacterWorldCandidates(entries,request,savedRevision);
+    status.textContent=entries.length
+      ?`${entries.length} source-backed suggestion(s). Nothing will be added until you approve an entry.`
+      :'No new named world entries were supported by the saved profile.';
+  }catch(error){status.textContent=error.name==='AbortError'?'World discovery cancelled.':error.message;}
+  finally{worldEntryController=null;$('builder-world-suggest').disabled=false;
+    $('builder-world-stop').classList.add('hidden');}
+}
+
 async function generateBuilderDraft() {
   const c = builderCharacter(); if (!c || aiDraftController) return;
   if (!state.settings.model) { $('builder-ai-status').textContent = 'Load a model first in Setup.'; return; }
