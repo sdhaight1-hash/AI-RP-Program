@@ -145,8 +145,25 @@ export function purgeArchived(state, kind, objectId) {
   if (kind !== 'character') throw new Error('Invalid library item type');
   const ch=state.characters.find(c=>c.id===objectId && c.trashedAt);
   if(!ch) throw new Error('Archive the character before permanent removal');
-  if(state.sessions.some(s=>s.characterId===objectId || s.castIds?.includes(objectId) || s.messages?.some(m=>m.speakerId===objectId || m.witnessIds?.includes(objectId)))) {
+  if(state.sessions.some(s=>s.characterId===objectId || s.castIds?.includes(objectId) || s.speakerId===objectId ||
+    s.messages?.some(m=>m.speakerId===objectId || m.witnessIds?.includes(objectId)))) {
     throw new Error('Character is still referenced by a scene. Purge those scenes first or keep this character archived.');
+  }
+  if(state.encounters?.some(e=>e.characterIds?.includes(objectId)))
+    throw new Error('Remove encounter templates involving this character before permanently deleting them.');
+  // Knowledge access is an identity reference, not ordinary prose: scrub it.
+  // A deleted character must not reappear in known-by lists or psychology IDs.
+  for(const lore of state.lore||[])if(Array.isArray(lore.knownBy))
+    lore.knownBy=lore.knownBy.filter(id=>id!==objectId);
+  for(const scene of state.sessions) {
+    if(scene.emotionByActor)delete scene.emotionByActor[objectId];
+    if(scene.psychologyByActor) {
+      delete scene.psychologyByActor[objectId];
+      for(const mind of Object.values(scene.psychologyByActor))
+        if(mind?.relationships)delete mind.relationships[objectId];
+    }
+    for(const event of scene.sceneEvents||[])if(Array.isArray(event.witnessIds))
+      event.witnessIds=event.witnessIds.filter(id=>id!==objectId);
   }
   state.characters=state.characters.filter(c=>c.id!==objectId);
 }
