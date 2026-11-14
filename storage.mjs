@@ -114,7 +114,13 @@ export class StudioStore {
       // A previously opted-in normalized shadow may never silently diverge
       // from the canonical snapshot. Validate before changing either copy.
       const projectionActive=projectionEnabled(this.db);
-      if(projectionActive)verifyStoryProjection(this.db,this.load());
+      if(projectionActive) {
+        const current=this.load();
+        // readPrimaryStory already validates revision, fingerprint and the
+        // compact metadata. Reconstructing the whole projection again here
+        // doubled every primary save's preflight cost with no additional gate.
+        if(!primary)verifyStoryProjection(this.db,current);
+      }
       // Accepted world events depend on their precise source response. Never
       // overwrite its wording, speaker, channel or witnesses via Retry/swipes.
       const accepted=this.db.prepare(`SELECT p.scene_id AS sceneId,p.timeline_id AS timelineId,
