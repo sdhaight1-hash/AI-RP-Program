@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v2.0.1 (world isolation + character creation redesign).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v2.1 (actor-scoped dialogue recollection and context budgeting).** A local model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, autonomous NPC life, semantic memory consolidation, and full Tavern PNG/V2 card support are **not** implemented yet. Per-world SQLite storage, witnessed-dialogue recall, accepted-event knowledge, topic-sensitive identity context, safe Trash, indexed lore, and optional ComfyUI workflow execution are implemented.
 
 ## Requirements
 
@@ -43,6 +43,14 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v2.1: Actor memory and compact local-model context
+
+Normal NPC replies now use the server's world-scoped actor context instead of assembling an acting prompt in the browser. Past **witnessed dialogue is indexed as what was said, not as world truth**. The system combines an actor's prior speech, witnessed player messages, already-approved world events, permitted lore, and topic-specific character history while keeping worlds and timeline forks separate. Pinned story moments receive retrieval priority, and relationship notes belonging to another NPC are not exposed as the current actor's knowledge.
+
+The new **Context Inspector** shows the server-generated prompt, retrieved memory count, active model context and exact or estimated token usage. In **Setup**, set **Active model context tokens** to the capacity actually allocated by your local model server (the default is 4096). The server detects allocated KoboldCpp context and uses its native token-count endpoint when available; LM Studio's loaded-instance context is used when discoverable. Generation keeps room for the reply and trims older dialogue/evidence to fit.
+
+There are no new dependencies. This is the first retrieval milestone, **not** a claim that LLM-derived long-term semantic facts, emotional reflections, or fully automated summarization are finished. See [actor memory architecture and limitations](docs/actor-memory-v2.1.md). Back up the entire `.data/` directory before upgrading.
 
 ## v2.0.1: Repository audit and hardening
 
