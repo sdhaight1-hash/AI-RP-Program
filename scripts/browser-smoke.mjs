@@ -248,6 +248,8 @@ async function main(){
       const story=await response.json();
       return story.state?.sessions.some(x=>x.messages.some(m=>m.content===browserDelta));
     },'browser player delta persisted in selected world');
+    await until(async()=>script("return document.querySelector('#message-input').value===''"),
+      'browser composer acknowledges saved delta');
     const sent=await script(`return {
       composer:document.querySelector('#message-input').value,
       requests:window.__appendRequests,
