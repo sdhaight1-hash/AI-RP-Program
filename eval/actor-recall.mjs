@@ -89,7 +89,7 @@ function rawCandidates(f,query) {
   const facts=retrieveActorFacts(f.store,{timelineId:f.timelineId,
     actorId:f.actorId,query,limit:5}).map(x=>'fact:'+x.id);
   const dialogue=retrieveActorMemories(f.store.db,{timelineId:f.timelineId,
-    actorId:f.actorId,query,excludeMessageIds:['eval-cue'],limit:8})
+    actorId:f.actorId,query,excludeMessageIds:['eval-cue'],limit:5})
     .map(x=>'dialogue:'+x.sourceMessageId);
   return {facts,dialogue};
 }
