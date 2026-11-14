@@ -135,7 +135,7 @@ test('manual canon entry deletion removes relation provenance but refuses still-
     f.scoped.worlds.deleteEntry({worldId:f.worldId,kind:'location',id:child.id});
     const actor=createCharacter('Resident'),state=makeEmptyWorldState();actor.homeLocationId=loc.id;
     state.characters=[actor];save(f.scoped,f.worldId,state);
-    assert.throws(()=>f.scoped.worlds.deleteEntry({worldId:f.worldId,kind:'location',id:loc.id}),/character or encounter/);
+    assert.throws(()=>f.scoped.worlds.deleteEntry({worldId:f.worldId,kind:'location',id:loc.id}),/character, scene or encounter/);
     const saved=f.scoped.load();saved.state.characters[0].homeLocationId=null;
     save(f.scoped,f.worldId,saved.state);
     f.scoped.worlds.deleteEntry({worldId:f.worldId,kind:'location',id:loc.id});
