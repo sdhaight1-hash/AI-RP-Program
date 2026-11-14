@@ -113,7 +113,7 @@ async function main(){
       return choices.some(x=>x.includes('Atlas'))&&!document.querySelector('#command-palette').open&&
         document.body.dataset.workspace==='world'&&document.body.classList.contains('detail-focus');
     `),true,'command palette should navigate into the real Atlas editor');
-    await script("document.querySelector('#close-inspector').click();document.querySelector('button[data-workspace="characters"]').click();return true");
+    await script(`document.querySelector('#close-inspector').click();document.querySelector('button[data-workspace="characters"]').click();return true`);
     assert.equal(await script("return document.querySelector('#workspace-title').textContent"),'People with lives beyond the scene');
     await screenshot('04-character-workspace');
 
