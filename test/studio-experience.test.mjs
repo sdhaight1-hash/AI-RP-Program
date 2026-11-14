@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve,dirname } from 'node:path';
 import { StudioStore } from '../storage.mjs';
 import { createApp } from '../server.mjs';
-import { WORKSPACE_META,searchStudioCommands } from '../public/studio-navigation.mjs';
+import { WORKSPACE_META,visibleDetailTabs,searchStudioCommands } from '../public/studio-navigation.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const html=readFileSync(resolve(root,'public/index.html'),'utf8');
@@ -47,7 +47,7 @@ test('redesigned HTML preserves every existing static DOM target referenced by t
 
 test('every major workspace and all thirteen functional detail desk tools remain reachable',()=>{
   const workspaces=[...html.matchAll(/<button\b[^>]*data-workspace="([^"]+)"/g)].map(x=>x[1]);
-  assert.deepEqual(workspaces,['world','characters','story','memory','tools']);
+  assert.deepEqual(workspaces,['world','characters','encounters','story','memory','tools']);
   const expected=['worlds','atlas','relations','character','cast','emotion',
     'scene','lore','memory','context','gallery','library','setup'];
   const tabs=[...html.matchAll(/<button\b[^>]*data-tab="([^"]+)"/g)].map(x=>x[1]);
@@ -121,5 +121,23 @@ test('navigation search is deterministic, bounded and works without DOM state',(
   assert.deepEqual(searchStudioCommands(commands,'private').map(x=>x.label),['Actor memory']);
   assert.deepEqual(searchStudioCommands(commands,'unrelated'),[]);
   assert.equal(searchStudioCommands(commands,'',2).length,2);
-  assert.deepEqual(Object.keys(WORKSPACE_META),['world','characters','story','memory','tools']);
+  assert.deepEqual(Object.keys(WORKSPACE_META),['world','characters','encounters','story','memory','tools']);
+});
+
+
+test('new encounter workspace is reachable without hunting through world inspector tabs',()=>{
+  assert.match(javascript,/renderEncounterStudio\(host/);
+  assert.match(javascript,/openEncounterManager\(/);
+  assert.match(javascript,/Manage linked encounters/);
+  assert.match(html,/data-workspace="encounters"/);
+  assert.match(html,/id="new-scene-channel"/);
+  assert.match(html,/id="new-scene-manage-encounters"/);
+  assert.ok(visibleDetailTabs('world').includes('atlas'));
+  assert.ok(visibleDetailTabs('characters').includes('library'));
+  assert.ok(!visibleDetailTabs('story').includes('setup'));
+  assert.match(css,/\.encounter-layout/);
+  assert.match(css,/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.ok(ids.includes('detail-error')&&ids.includes('error'));
+  assert.match(javascript,/\['error','detail-error'\]/);
+  assert.match(css,/\.detail-error/);
 });

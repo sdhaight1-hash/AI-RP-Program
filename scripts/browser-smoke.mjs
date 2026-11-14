@@ -146,6 +146,9 @@ async function main(){
     assert.equal(await script("return document.querySelector('#workspace-title').textContent"),'People with lives beyond the scene');
     await screenshot('04-character-workspace');
 
+    const priorCharacterSnapshot=(await(await fetch(base+'/api/state')).json()).state;
+    const sceneCountBeforeCharacter=priorCharacterSnapshot.sessions.length;
+    const characterCountBeforeCharacter=priorCharacterSnapshot.characters.length;
     await script(`
       document.querySelector('button[data-workspace="story"]').click();
       document.querySelector('#new-character').click();
@@ -156,8 +159,25 @@ async function main(){
       document.querySelector('#builder-world-context').textContent.includes('WORLD CONTEXT')`),true);
     await screenshot('05-character-workshop');
     await script("document.querySelector('#builder-close').click();return true");
-    assert.equal(await script("return document.body.dataset.workspace"),'story');
-    await screenshot('06-story-with-character');
+    assert.equal(await script("return document.body.dataset.workspace"),'characters',
+      'Creating a profile must not automatically create an unrelated scene');
+    await until(async()=>{
+      const snapshot=(await(await fetch(base+'/api/state')).json()).state;
+      return snapshot.characters.length===characterCountBeforeCharacter+1;
+    },'profile saved independently of any new scene');
+    assert.equal((await(await fetch(base+'/api/state')).json()).state.sessions.length,
+      sceneCountBeforeCharacter,'creating character must not create a scene in SQLite');
+    await screenshot('06-character-created-without-auto-scene');
+    assert.equal(await script(`
+      const button=[...document.querySelectorAll('.workspace-card button')]
+        .find(x=>x.textContent==='Open active character');
+      if(!button)return false;
+      button.click();
+      const name=document.querySelector('#builder-name')?.value;
+      document.querySelector('#builder-close').click();
+      return name==='New character';
+    `),true,'character workspace must keep its selected draft instead of jumping back to the active scene NPC');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
     const previousTheme=await script("return document.querySelector('#quick-theme').value");
     assert.equal(await script(`
       const theme=document.querySelector('#quick-theme');
@@ -171,6 +191,52 @@ async function main(){
       theme.dispatchEvent(new Event('change',{bubbles:true}));
       return true;
     `);
+
+    // End-to-end encounter authoring: the main workspace, not a hidden
+    // detail-desk subpanel, creates a social-media template and reuses its
+    // configured medium for a new scene.
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="encounters"]').click();
+      document.querySelector('#encounter-save').click();
+      return !!document.querySelector('#error')?.textContent.includes('Enter a title') &&
+        getComputedStyle(document.querySelector('#error')).display!=='none';
+    `),true,'encounter validation errors must be visible outside the hidden story composer');
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="encounters"]').click();
+      const title=document.querySelector('#encounter-title');
+      title.value='Browser Social DM';
+      document.querySelector('#encounter-channel').value='social_dm';
+      document.querySelector('#encounter-opening').value='hey, online now?';
+      document.querySelector('#encounter-save').click();
+      return document.body.dataset.workspace==='encounters' &&
+        document.querySelector('#workspace-title').textContent==='Encounters & communication';
+    `),true,'Encounters must be a directly navigable world-level editor');
+    await until(async()=>{
+      const result=await fetch(base+'/api/state');
+      const snapshot=await result.json();
+      return snapshot.state.encounters.some(e=>e.title==='Browser Social DM'&&e.channelId==='social_dm');
+    },'browser social encounter saved');
+    await screenshot('06b-social-encounter-workspace');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.encounter-card')].find(card=>
+        card.querySelector('strong')?.textContent==='Browser Social DM');
+      if(!row)return false;
+      const start=[...row.querySelectorAll('button')].find(x=>x.textContent==='Start scene');
+      if(!start)return false;
+      start.click();
+      return document.body.dataset.workspace==='story'&&
+        document.querySelector('#channel-select').value==='social_dm';
+    `),true,'starting the template must carry its social-media channel into the scene');
+    await screenshot('06b-social-scene-started');
+    assert.equal(await script(`
+      document.querySelector('#continue').click();
+      return document.body.dataset.workspace==='tools' &&
+        document.querySelector('[data-tab="setup"]').classList.contains('active') &&
+        getComputedStyle(document.querySelector('#error')).display!=='none' &&
+        getComputedStyle(document.querySelector('#detail-error')).display!=='none' &&
+        document.querySelector('#detail-error').textContent.includes('Choose a loaded local model');
+    `),true,'an unconfigured model must navigate directly to visible Setup with global feedback');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
 
     // Real headless browser tabs each retain their own selected world.
     // This catches browser/sessionStorage regressions that HTTP-only tests miss.
@@ -275,6 +341,11 @@ async function main(){
       name.value='Browser Full Purge Target';
       name.dispatchEvent(new Event('input',{bubbles:true}));
       document.querySelector('#builder-close').click();
+      const row=[...document.querySelectorAll('#character-list .character-row')]
+        .find(item=>item.querySelector('strong')?.textContent==='Browser Full Purge Target');
+      const start=row?.querySelector('button[title="Start scene with Browser Full Purge Target"]');
+      if(!start)return false;
+      start.click();
       window.confirm=()=>true;
       return true;
     `);
@@ -287,6 +358,26 @@ async function main(){
       purgeTarget={characterId:character.id,sceneId:scene.id,sceneTitle:scene.title};
       return true;
     },'browser disposable character and scene persisted');
+    // Reproduce the real complaint: an archived character cannot be purged
+    // because a hidden world template still references it. Encounters must
+    // expose that template by name and offer a working return to Trash.
+    await script(`
+      document.querySelector('button[data-workspace="encounters"]').click();
+      document.querySelector('#encounter-title').value='Browser Purge Blocker';
+      document.querySelector('#encounter-character').value=${JSON.stringify(purgeTarget.characterId)};
+      document.querySelector('#encounter-channel').value='video_call';
+      document.querySelector('#encounter-premise').value='A camera call begins.';
+      document.querySelector('#encounter-save').click();
+      document.querySelector('button[data-workspace="story"]').click();
+      return true;
+    `);
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      return snapshot.state.encounters.some(e=>e.title==='Browser Purge Blocker'&&
+        e.characterIds.includes(purgeTarget.characterId)&&e.channelId==='video_call');
+    },'blocking video encounter saved to world');
+    await screenshot('06g-encounter-template-visible');
+
     const archivedUi=await script(`
       const archiveScene=document.querySelector('#session-list .session-row button[title="Move scene to Trash"]');
       if(!archiveScene)return false;
@@ -324,6 +415,38 @@ async function main(){
         'Scene: '+${JSON.stringify(purgeTarget.sceneTitle)})
         &&rows.some(row=>row.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
     `),'Library refreshed after scene purge');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#library-trash .trash-row')]
+        .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
+      return !!row?.querySelector('.trash-dependency')?.textContent.includes('Browser Purge Blocker');
+    `),true,'Trash must name the encounter template blocking permanent deletion');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#library-trash .trash-row')]
+        .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
+      row.querySelector('.trash-dependency button').click();
+      return document.body.dataset.workspace==='encounters'&&
+        document.querySelector('#encounter-title')?.value==='Browser Purge Blocker';
+    `),true,'blocked character must link directly into the encounter editor');
+    await screenshot('06h-encounter-blocker-editor');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.encounter-card')]
+        .find(item=>item.querySelector('strong')?.textContent==='Browser Purge Blocker');
+      if(!row)return false;
+      [...row.querySelectorAll('button')].find(btn=>btn.textContent==='Delete').click();
+      return true;
+    `),true,'encounter editor must expose permanent template deletion');
+    await until(async()=>{
+      const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
+      return !snapshot.state.encounters.some(e=>e.title==='Browser Purge Blocker');
+    },'blocking encounter removed from world snapshot');
+    assert.equal(await script(`
+      const back=document.querySelector('#encounter-return-trash');
+      if(!back)return false;
+      back.click();
+      return !!document.querySelector('#library-trash') &&
+        document.body.dataset.workspace==='tools';
+    `),true,'one-click return to Trash should be possible after cleanup');
+    await screenshot('06i-deletion-blocker-resolved');
     const characterPurgeClicked=await script(`
       const row=[...document.querySelectorAll('#library-trash .trash-row')]
         .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
@@ -338,7 +461,8 @@ async function main(){
       return !snapshot.state.characters.some(c=>c.id===purgeTarget.characterId)
         &&!catalog.entities.some(e=>e.sourceCharacterId===purgeTarget.characterId);
     },'character and world mirror permanent deletion committed');
-    await screenshot('06g-character-and-scene-after-permanent-purge');
+    await screenshot('06j-character-and-scene-after-permanent-purge');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
 
     for(const width of [900,720,390]){
       await size(width,width===390?760:850);
@@ -356,7 +480,7 @@ async function main(){
       assert.notEqual(view.workspaceNav,'none');
       assert.notEqual(view.composer,'none');
       if(width<=760){
-        assert.equal(view.navigation.length,5);
+        assert.equal(view.navigation.length,6);
         for(const [index,nav] of view.navigation.entries())
           assert.ok(nav.visible && nav.left>=-2 && nav.right<=view.width+2,
             'Mobile workspace '+index+' clipped at '+width+'px: '+JSON.stringify(view));
