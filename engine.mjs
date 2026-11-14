@@ -140,7 +140,7 @@ export function normalizeState(value) {
       messages: s.messages.filter(m => ['user', 'assistant'].includes(m?.role) && typeof m?.content === 'string')
         .map(m => ({ ...m, id: typeof m.id === 'string' ? m.id : crypto.randomUUID(),
           pinned: Boolean(m.pinned),
-          channelId: ['in_person','phone_call','text_message'].includes(m.channelId) ? m.channelId : 'in_person',
+          channelId: getChannel(m.channelId).id,
           sentAt: Number.isFinite(m.sentAt) ? m.sentAt : undefined,
           speakerId: m.role === 'assistant' ? (typeof m.speakerId === 'string' ? m.speakerId : s.characterId) : undefined,
           witnessIds: Array.isArray(m.witnessIds) ? [...new Set(m.witnessIds.filter(id => typeof id === 'string'))] : [s.characterId],
