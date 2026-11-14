@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, existsSync, readdirSync, renameSync, copyFileSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { StudioStore } from '../storage.mjs';
+import { projectionPrimary } from '../storage/normalized.mjs';
 import { legacyTimelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID } from './canon.mjs';
 import { makeEmptyWorldState } from '../engine.mjs';
 
@@ -265,6 +266,11 @@ export class WorldPartitionStore {
   migrateLegacy() {
     const source=new StudioStore(join(this.dataDir,'studio.sqlite'));
     try {
+      // This migrator was designed for full legacy JSON snapshots. A compact
+      // primary snapshot has independent normalized records and must never be
+      // pruned or copied by the old repartitioning procedure.
+      if(projectionPrimary(source.db))
+        throw new Error('Legacy world migration does not support normalized-primary storage. Restore a full pre-cutover snapshot before importing.');
       const meta=source.worlds.list();
       const existing=source.load();
       const state=existing.state || makeEmptyWorldState();

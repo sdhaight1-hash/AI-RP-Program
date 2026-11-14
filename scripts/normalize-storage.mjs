@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { normalizeState } from '../engine.mjs';
 import { bindTimelineIds } from '../world/canon.mjs';
 import {
-  inspectStoryProjectionInput,projectionEnabled,verifyStoryProjection,writeStoryProjection
+  inspectStoryProjectionInput,projectionEnabled,projectionPrimary,readPrimaryStory,
+  enablePrimaryProjection,verifyStoryProjection,writeStoryProjection
 } from '../storage/normalized.mjs';
 import { inspectWorldStorage } from './storage-health.mjs';
 import { sha256 } from './backup-storage.mjs';
@@ -17,6 +18,9 @@ import { sha256 } from './backup-storage.mjs';
 function snapshot(db) {
   const row=db.prepare('SELECT revision,document FROM studio_state WHERE id=1').get();
   if(!row)throw new Error('Story snapshot not found');
+  if(projectionPrimary(db))return {revision:row.revision,
+    state:bindTimelineIds(normalizeState(readPrimaryStory(db,{revision:row.revision,document:row.document}))),
+    document:row.document};
   const normalize=()=>bindTimelineIds(normalizeState(JSON.parse(row.document)));
   const state=normalize();
   // Some very old exports omit message IDs or emotion-event IDs. Their
@@ -66,48 +70,53 @@ function matchingBackup(dataDir,backupDir,health){
   }
 }
 
-export function normalizeStorage(dataDir,{apply=false,backupDir=null}={}){
+export function normalizeStorage(dataDir,{apply=false,primary=false,backupDir=null}={}){
   const root=resolve(dataDir),health=inspectWorldStorage(root);
   if(!health.ok)throw Error('Storage audit failed: '+JSON.stringify(health.errors));
-  if(apply)matchingBackup(root,backupDir,health);
+  if(apply&&primary)throw Error('Use one migration operation per invocation');
+  if(apply||primary)matchingBackup(root,backupDir,health);
   const worlds=[];
   for(const world of health.worlds){
     const file=join(root,'worlds',world.id,'world.sqlite');
-    const db=open(file,!apply);
+    const db=open(file,!(apply||primary));
     try {
       const before=snapshot(db);
       const counts=inspectStoryProjectionInput(before.state);
-      const present=projectionEnabled(db);
-      if(present)verifyStoryProjection(db,before);
-      if(apply&&!present){
+      const present=projectionEnabled(db),isPrimary=projectionPrimary(db);
+      if(present&&!isPrimary)verifyStoryProjection(db,before);
+      if(primary&&!present)throw Error('Stage the normalized shadow projection before primary cutover');
+      if((apply&&!present)||(primary&&!isPrimary)){
         db.exec('BEGIN IMMEDIATE');
         try{
-          // Re-read inside the write lock in case the source was edited since
-          // the preliminary inspection. An offline backup must match exactly.
+          // Re-read under the write lock to avoid converting a changed story.
           const locked=snapshot(db);
           if(locked.revision!==before.revision||locked.document!==before.document)
             throw Error('Source changed during normalization');
-          writeStoryProjection(db,locked.state,locked.revision);
-          verifyStoryProjection(db,locked);
+          if(apply) {
+            writeStoryProjection(db,locked.state,locked.revision);
+            verifyStoryProjection(db,locked);
+          } else enablePrimaryProjection(db,locked);
           db.exec('COMMIT');
         }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
       }
       worlds.push({worldId:world.id,revision:before.revision,...counts,
-        result:present?'already-normalized':apply?'normalized':'ready-to-normalize'});
+        result:isPrimary?'already-primary':primary?'normalized-primary':
+          present?'already-normalized':apply?'normalized':'ready-to-normalize'});
     }finally{db.close();}
   }
-  return {mode:apply?'apply':'dry-run',worlds,
-    note:'Canonical snapshots remain authoritative; normalized tables are optional, verified projections.'};
+  return {mode:primary?'primary':apply?'apply':'dry-run',worlds,
+    note:primary?'Opted-in normalized-primary worlds use SQLite projection as canonical story; keep the full backup.':
+      'Shadow snapshots remain canonical until an explicit --primary conversion.'};
 }
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const dir=process.argv[2],flag=process.argv[3];
-  if(!dir||flag&&flag!=='--apply'||(flag==='--apply'&&!process.argv[4])){
-    console.error('Usage: node scripts/normalize-storage.mjs <.data directory> [--apply <existing backup folder>]');
+  if(!dir||flag&&!['--apply','--primary'].includes(flag)||((flag==='--apply'||flag==='--primary')&&!process.argv[4])){
+    console.error('Usage: node scripts/normalize-storage.mjs <.data directory> [--apply|--primary <existing backup folder>]');
     process.exitCode=1;
   }else{
     try{console.log(JSON.stringify(normalizeStorage(dir,{
-      apply:flag==='--apply',backupDir:process.argv[4]||null
+      apply:flag==='--apply',primary:flag==='--primary',backupDir:process.argv[4]||null
     }),null,2));}
     catch(error){console.error('Normalization refused:',error.message);process.exitCode=1;}
   }
