@@ -66,6 +66,7 @@ function pruneDatabase(db, worldId, state, priorRevision) {
     for (const table of ['timeline_fork_snapshots', 'timeline_positions', 'timeline_clocks', 'timeline_actors'])
       db.prepare(`DELETE FROM ${table} WHERE timeline_id NOT IN ${scope}`).run(worldId);
     db.prepare('DELETE FROM timelines WHERE world_id != ?').run(worldId);
+    db.prepare('DELETE FROM character_world_relationship_sources WHERE world_id != ?').run(worldId);
     db.prepare('DELETE FROM character_world_sources WHERE world_id != ?').run(worldId);
     db.prepare('DELETE FROM world_relationships WHERE world_id != ?').run(worldId);
     db.prepare('DELETE FROM world_entities WHERE world_id != ?').run(worldId);

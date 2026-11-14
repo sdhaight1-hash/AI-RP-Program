@@ -13,6 +13,7 @@ import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mj
 import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
+import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
 import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,7 @@ const ALLOWED = new Map([
   ['/character/schema.mjs', ['../character/schema.mjs', 'text/javascript; charset=utf-8']],
   ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
   ['/character/world-bridge.mjs', ['../character/world-bridge.mjs', 'text/javascript; charset=utf-8']],
+  ['/character/relationship-bridge.mjs', ['../character/relationship-bridge.mjs', 'text/javascript; charset=utf-8']],
   ['/eval/local-model.mjs', ['../eval/local-model.mjs', 'text/javascript; charset=utf-8']],
   ['/character/field-contracts.mjs', ['../character/field-contracts.mjs', 'text/javascript; charset=utf-8']],
   ['/interactions/channels.mjs', ['../interactions/channels.mjs', 'text/javascript; charset=utf-8']],
@@ -174,6 +176,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         }catch(error){
           requireWorldScope(input.worldId);
           return json(res,200,{status:'unavailable',error:error.message});
+        }
+      }
+      if (req.method === 'POST' && path === '/api/character/world-relationships/approve') {
+        const data=await readJson(req,5000);
+        requireWorldScope(data.worldId);
+        try{return json(res,201,approveCharacterWorldRelationship(store,data));}
+        catch(error){
+          const stale=/changed|Wrong world|reload approved/.test(error.message);
+          return json(res,stale?409:422,{error:error.message});
         }
       }
       if (req.method === 'POST' && path === '/api/character/world-entries/approve') {

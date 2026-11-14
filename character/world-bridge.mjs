@@ -138,8 +138,14 @@ export function commitCharacterWorldEntry(store,input) {
 
 export function listCharacterWorldSources(store,{worldId,characterId}) {
   if(store.activeWorldId&&store.activeWorldId!==worldId)throw new Error('Wrong world');
-  return store.db.prepare(`SELECT world_id AS worldId,character_id AS characterId,
-    entry_type AS type,entry_id AS entryId,source_field AS sourceField,source_quote AS sourceQuote,
-    created_at AS createdAt FROM character_world_sources
-    WHERE world_id=? AND character_id=? ORDER BY created_at DESC LIMIT 50`).all(worldId,characterId);
+  return store.db.prepare(`SELECT p.world_id AS worldId,p.character_id AS characterId,
+    p.entry_type AS type,p.entry_id AS entryId,p.source_field AS sourceField,p.source_quote AS sourceQuote,
+    COALESCE(e.name,l.name) AS entryName,e.kind AS entityKind,
+    (SELECT r.relationship_id FROM character_world_relationship_sources r
+      WHERE r.world_id=p.world_id AND r.source_entry_id=p.entry_id AND r.character_id=p.character_id LIMIT 1) AS relationshipId,
+    p.created_at AS createdAt
+    FROM character_world_sources p
+    LEFT JOIN world_entities e ON p.entry_type='entity' AND e.id=p.entry_id AND e.world_id=p.world_id
+    LEFT JOIN world_locations l ON p.entry_type='location' AND l.id=p.entry_id AND l.world_id=p.world_id
+    WHERE p.world_id=? AND p.character_id=? ORDER BY p.created_at DESC LIMIT 50`).all(worldId,characterId);
 }
