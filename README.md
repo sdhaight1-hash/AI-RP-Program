@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v0.8.0 (reviewed event ledger foundation).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v0.9.0 (independent timeline forks).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -44,6 +44,15 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
 
+## v0.9: Genuine branch isolation (fifth milestone)
+
+- **Branch scene (⎇)** now creates a **new independent timeline** through "/api/timelines/fork" before copying the scene. Unlike earlier versions, the alternate scene no longer shares its parent's future world events or actor locations.
+- The fork records the precise last committed-event sequence at its creation. It **inherits only historical events up to that boundary**; later events in the original timeline are excluded. Events committed in the fork do not leak back to its parent, and nested forks honor all ancestor boundaries.
+- Fork creation atomically copies registered NPC actor IDs, assigns a distinct player-controlled actor ID, and snapshots the fictional clock/time zone and actor locations. The scene duplication retains its chat history, established psychology and message provenance.
+- **Accepted history remains locked** across nested scene forks: copying a scene cannot subsequently delete or rewrite an inherited NPC reply that supports a committed event. To explore a contradictory history, create a new unrelated timeline from canon rather than branching after the event.
+- SQLite adds a `timeline_fork_snapshots` table and a one-time `.data/studio.sqlite.before-world-v4.bak` backup for existing databases. The API accepts `POST /api/timelines/fork` and `POST /api/timelines` with a parent creates a frozen fork, not a live link.
+- **Limits:** This copies the current scene and timeline-level positions/clock/event-history *view*. It does not yet snapshot a normalized collection of all other conversation threads, world inventory, or background NPC schedules; those subsystems are not implemented. Branching a scene from the beginning or selecting an arbitrary event cutoff requires future UI work. The previous versions' duplicate-scene feature had no independent event history; older duplicated scenes retain their previously shared timeline until explicitly migrated or re-branched.
+
 ## v0.8: Reviewed NPC events and timeline provenance (fourth milestone)
 
 - **Scene → NPC event review** stages an objective NPC development from the latest **selected assistant reply**. Stage manually or use **AI suggest from reply**, which only fills an editable draft; AI output never directly commits canon. Choose **Accept into world** or **Reject**.
@@ -51,7 +60,7 @@ Select the model in **Setup**. The model must be loaded in the inference applica
 - **Scoped memory:** accepted events are stored in normalized `timeline_events`, associated with actor and explicit observers; only observed events are retrieved for an NPC's later prompts in that timeline. The player's authoring UI can inspect the ledger, but that does not automatically grant the player character knowledge.
 - **Safe retries and swipes:** a proposal captures a fingerprint of the selected reply, including speaker, interaction channel, witnesses, and content. Switching variants or changing the source makes it stale. After an event is accepted, the source reply is **locked** against edits, Retry, and swipes; the SQLite save path also enforces this invariant. Rejected proposals do not mutate timeline state.
 - **Local migration:** existing databases receive a one-time `.data/studio.sqlite.before-world-v3.bak` before the new event tables are added. Existing scenes and legacy manually appraised events remain intact. A first-run browser now immediately reloads server-assigned timeline IDs, without requiring a page refresh.
-- **Limits:** the model's suggested event text is untrusted and should be reviewed for correctness. No automatic event extraction occurs during normal chat. Earlier manual scene events still live in the legacy scene snapshot. Duplicate scene/branch currently copies the scene **within its existing timeline**; do not treat it as an independent fork of the committed world event ledger. Create independent timelines in World Library while proper event-snapshot forking is under development.
+- **Limits:** the model's suggested event text is untrusted and should be reviewed for correctness. No automatic event extraction occurs during normal chat. Earlier manual scene events still live in the legacy scene snapshot. In v0.9 and later, the Branch action creates a frozen event-snapshot timeline fork; older imported branches may still share an original timeline until explicitly re-branched.
 
 ## v0.7: Interaction channels (third foundation milestone)
 

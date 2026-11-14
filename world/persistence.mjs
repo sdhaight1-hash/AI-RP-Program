@@ -150,6 +150,9 @@ export class WorldRepository {
     if (parentTimelineId !== null) {
       const parent = this.db.prepare('SELECT world_id AS worldId FROM timelines WHERE id=?').get(parentTimelineId);
       if (!parent || parent.worldId !== worldId) throw new Error('Parent timeline belongs to another world');
+      // A declared parent is a real snapshot fork, never a live pointer to
+      // the parent's future events or mutable character positions.
+      return this.forkTimeline({timelineId:parentTimelineId,name});
     }
     const record = newTimelineRecord({ worldId, canonId: canon.id, name, parentTimelineId });
     this.db.exec('BEGIN IMMEDIATE');
@@ -161,6 +164,38 @@ export class WorldRepository {
       this.db.exec('COMMIT');
       return record;
     } catch (err) { this.db.exec('ROLLBACK'); throw err; }
+  }
+
+  forkTimeline({timelineId,name}) {
+    const parent=this.db.prepare('SELECT id,world_id AS worldId,canon_id AS canonId FROM timelines WHERE id=?').get(timelineId);
+    if(!parent)throw new Error('Source timeline does not exist');
+    const record=newTimelineRecord({worldId:parent.worldId,canonId:parent.canonId,name,parentTimelineId:timelineId});
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      // Snapshot boundary is a committed event sequence, not wall clock time:
+      // two events can share a timestamp, but cannot share a SQLite rowid.
+      const cutoff=this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS cutoff FROM timeline_events WHERE timeline_id=?').get(timelineId).cutoff;
+      this.db.prepare(`INSERT INTO timelines(id,world_id,canon_id,name,parent_timeline_id,created_at)
+        VALUES (?,?,?,?,?,?)`).run(record.id,record.worldId,record.canonId,record.name,record.parentTimelineId,record.createdAt);
+      this.db.prepare('INSERT INTO timeline_fork_snapshots(timeline_id,parent_timeline_id,max_parent_event_rowid) VALUES (?,?,?)')
+        .run(record.id,timelineId,cutoff);
+      // Copy actors without duplicating NPC identity; the player is a different
+      // controller in each independent timeline.
+      const oldPlayer=playerActorId(timelineId),newPlayer=playerActorId(record.id);
+      for(const actor of this.actors(timelineId)) {
+        const actorId=actor.controller==='player' ? newPlayer : actor.actorId;
+        registerActor(this.db,record.id,actorId,actor.controller,actor.characterId);
+      }
+      registerActor(this.db,record.id,newPlayer,'player');
+      const clock=this.db.prepare('SELECT instant_ms AS instantMs,time_zone AS timeZone,is_explicit AS explicit FROM timeline_clocks WHERE timeline_id=?').get(timelineId);
+      this.db.prepare('INSERT INTO timeline_clocks(timeline_id,instant_ms,time_zone,is_explicit) VALUES (?,?,?,?)')
+        .run(record.id,clock?.instantMs??now(),clock?.timeZone??'UTC',clock?.explicit??0);
+      const insert=this.db.prepare('INSERT INTO timeline_positions(timeline_id,actor_id,location_id,updated_at) VALUES (?,?,?,?)');
+      for(const position of this.actorLocations(timelineId))
+        insert.run(record.id,position.actorId===oldPlayer ? newPlayer : position.actorId,position.locationId,now());
+      this.db.exec('COMMIT');
+      return record;
+    } catch(err){this.db.exec('ROLLBACK');throw err;}
   }
 
   createLocation({worldId,name,parentId=null,kind='other',description=''}) {

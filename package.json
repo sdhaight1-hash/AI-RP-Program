@@ -1,6 +1,6 @@
 {
   "name": "ai-rp-program",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "Local-first character and storytelling app for KoboldCpp and LM Studio",

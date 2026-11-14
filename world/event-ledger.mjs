@@ -46,8 +46,13 @@ export function initializeEventLedger(db) {
     actor_id TEXT NOT NULL,
     PRIMARY KEY(event_id,actor_id)
   );
-  CREATE INDEX IF NOT EXISTS timeline_observer_actor_idx ON timeline_event_observers(actor_id,event_id);`);
-  db.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (3,?)').run(Date.now());
+  CREATE INDEX IF NOT EXISTS timeline_observer_actor_idx ON timeline_event_observers(actor_id,event_id);
+  CREATE TABLE IF NOT EXISTS timeline_fork_snapshots (
+    timeline_id TEXT PRIMARY KEY REFERENCES timelines(id),
+    parent_timeline_id TEXT NOT NULL REFERENCES timelines(id),
+    max_parent_event_rowid INTEGER NOT NULL CHECK(max_parent_event_rowid >= 0)
+  );`);
+  for(const version of [3,4])db.prepare('INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (?,?)').run(version,Date.now());
 }
 
 function requireScene(store, sceneId, timelineId) {
@@ -135,10 +140,24 @@ export class EventLedger {
   visible(timelineId,actorId,limit=12) {
     if(typeof timelineId!=='string'||!timelineId||typeof actorId!=='string'||!actorId)throw new Error('Timeline and actor required');
     if(!this.db.prepare('SELECT 1 FROM timeline_actors WHERE timeline_id=? AND actor_id=?').get(timelineId,actorId))throw new Error('Actor is not in this timeline');
-    return this.db.prepare(`SELECT e.id,e.timeline_id AS timelineId,e.scene_id AS sceneId,
-      e.actor_id AS actorId,e.kind,e.description,e.location_id AS locationId,e.game_time_ms AS gameTimeMs
+    // A fork sees a frozen snapshot of its ancestors plus its own newer events.
+    // Parent activity after the fork's saved rowid cutoff is invisible to the child.
+    const lineage=[];let current=timelineId,cutoff=Number.MAX_SAFE_INTEGER;
+    const seen=new Set();
+    while(current && !seen.has(current)) {
+      seen.add(current);lineage.push({timelineId:current,cutoff});
+      const fork=this.db.prepare('SELECT parent_timeline_id AS parentId,max_parent_event_rowid AS cutoff FROM timeline_fork_snapshots WHERE timeline_id=?').get(current);
+      current=fork?.parentId || null;
+      cutoff=fork?.cutoff ?? 0;
+    }
+    const query=this.db.prepare(`SELECT e.rowid AS seq,e.id,e.timeline_id AS timelineId,e.scene_id AS sceneId,
+      e.actor_id AS actorId,e.kind,e.description,e.location_id AS locationId,e.game_time_ms AS gameTimeMs,
+      e.created_at AS createdAt
       FROM timeline_events e JOIN timeline_event_observers o ON o.event_id=e.id
-      WHERE e.timeline_id=? AND o.actor_id=? ORDER BY e.created_at DESC,e.rowid DESC LIMIT ?`)
-      .all(timelineId,actorId,Math.min(30,Math.max(1,limit))).reverse();
+      WHERE e.timeline_id=? AND o.actor_id=? AND e.rowid<=?
+      ORDER BY e.rowid DESC LIMIT ?`);
+    const records=lineage.flatMap(entry=>query.all(entry.timelineId,actorId,entry.cutoff,Math.max(1,limit)));
+    records.sort((a,b)=>a.seq-b.seq);
+    return records.slice(-Math.min(30,Math.max(1,limit))).map(({seq,createdAt,...entry})=>entry);
   }
 }
