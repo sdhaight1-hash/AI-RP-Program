@@ -7,6 +7,7 @@ import { normalizeState } from './engine.mjs';
 import { canKnowLore } from './harness.mjs';
 import { bindTimelineIds } from './world/canon.mjs';
 import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } from './world/persistence.mjs';
+import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite')) {
@@ -17,6 +18,8 @@ export class StudioStore {
         copyFileSync(filename, `${filename}.before-world-v1.bak`);
       if (existsSync(filename) && !existsSync(`${filename}.before-world-v2.bak`))
         copyFileSync(filename, `${filename}.before-world-v2.bak`);
+      if (existsSync(filename) && !existsSync(`${filename}.before-world-v3.bak`))
+        copyFileSync(filename, `${filename}.before-world-v3.bak`);
     }
     this.db = new DatabaseSync(filename);
     this.db.exec(`CREATE TABLE IF NOT EXISTS studio_state (
@@ -29,7 +32,9 @@ export class StudioStore {
     // Existing SQLite snapshots from earlier versions acquire a search index on first load.
     const persisted = this.load().state;
     initializeWorldSchema(this.db, persisted);
+    initializeEventLedger(this.db);
     this.worlds = new WorldRepository(this.db);
+    this.events = new EventLedger(this);
     this.rebuildLoreIndex(persisted?.lore || []);
   }
 
@@ -70,6 +75,19 @@ export class StudioStore {
     const updatedAt = Date.now();
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      // Accepted world events depend on their precise source response. Never
+      // overwrite its wording, speaker, channel or witnesses via Retry/swipes.
+      const accepted=this.db.prepare(`SELECT scene_id AS sceneId,timeline_id AS timelineId,
+        source_message_id AS messageId,source_hash AS fingerprint
+        FROM event_proposals WHERE status='accepted'`).all();
+      const scenes=new Map(validated.sessions.map(s=>[s.id,s]));
+      for(const lock of accepted){
+        const scene=scenes.get(lock.sceneId);
+        if(!scene)continue; // Library purge may delete a source scene, but not its event ledger.
+        const message=scene.messages.find(m=>m.id===lock.messageId);
+        if(scene.timelineId!==lock.timelineId || !message || sourceFingerprint(message)!==lock.fingerprint)
+          throw new Error('Accepted world event locks its source NPC reply. Create a separate timeline before changing this history.');
+      }
       let result;
       if (expectedRevision === 0) {
         result = this.db.prepare('INSERT OR IGNORE INTO studio_state (id, revision, updated_at, document) VALUES (1, 1, ?, ?)').run(updatedAt, payload);

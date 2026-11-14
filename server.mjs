@@ -131,6 +131,24 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if(!timelineId || timelineId.length>120) return json(res,400,{error:'Valid timelineId required'});
         return json(res,200,{actors:store.worlds.actors(timelineId)});
       }
+      if (req.method === 'POST' && path === '/api/events/proposals') {
+        const input=await readJson(req,5000);
+        try {return json(res,201,store.events.propose(input));}
+        catch(err){return json(res,422,{error:err.message});}
+      }
+      if (req.method === 'GET' && path === '/api/events/proposals') {
+        try {return json(res,200,{proposals:store.events.list(requestUrl.searchParams.get('sceneId'))});}
+        catch(err){return json(res,400,{error:err.message});}
+      }
+      if (req.method === 'POST' && path === '/api/events/decide') {
+        const input=await readJson(req,2500);
+        try {return json(res,200,store.events.decide(input));}
+        catch(err){return json(res,409,{error:err.message});}
+      }
+      if (req.method === 'GET' && path === '/api/events/visible') {
+        try {return json(res,200,{events:store.events.visible(requestUrl.searchParams.get('timelineId'),requestUrl.searchParams.get('actorId'))});}
+        catch(err){return json(res,400,{error:err.message});}
+      }
       if (req.method === 'GET' && path === '/api/state') {
         return json(res, 200, store.load());
       }

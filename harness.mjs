@@ -104,7 +104,7 @@ export function duplicateSession(state, sessionId) {
   return copy;
 }
 
-export function createActorContext({ session, characters, actorId, persona, lore, buildMessages }) {
+export function createActorContext({ session, characters, actorId, persona, lore, buildMessages, rememberedEvents = [] }) {
   const actor = characters.find(c => c.id === actorId && !c.trashedAt);
   if (!actor || !(session.castIds || [session.characterId]).includes(actor.id)) throw new Error('Actor is not eligible for this scene');
   const history = actorVisibleHistory(session, actorId, characters);
@@ -122,7 +122,8 @@ export function createActorContext({ session, characters, actorId, persona, lore
     directorNotes,
     `Scene controls (0-1): pacing ${Number(director.pace??.5).toFixed(2)}, tension ${Number(director.tension??.5).toFixed(2)}, initiative ${Number(director.initiative??.5).toFixed(2)}, narration ${Number(director.narration??.5).toFixed(2)}. Treat as tendencies, not quotas.`,
     session.direction && `Scene direction (style and pacing, never overriding agency): ${session.direction}`,
-    seenEvents.length && `Events this character actually witnessed:\n${seenEvents.map(e => `- ${e.description}`).join('\n')}`].filter(Boolean).join('\n');
+    seenEvents.length && `Events this character actually witnessed:\n${seenEvents.map(e => `- ${e.description}`).join('\n')}`,
+    rememberedEvents.length && `Previously committed events this character knows (not necessarily visible through the current channel):\n${rememberedEvents.slice(-12).map(e=>`- ${String(e.description).slice(0,450)}`).join('\n')}`].filter(Boolean).join('\n');
   const summary = inPerson ? ((session.castIds || []).length > 1 ? session.publicSummary : (session.summary || '')) : ''; // Do not inject unseen shared-scene narration in remote channels.
   const assembled = buildMessages({ character: actingCharacter, persona, summary, authorNote: session.authorNote,
     emotion: session.emotionByActor?.[actorId] || session.emotion,

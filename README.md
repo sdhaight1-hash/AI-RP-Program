@@ -2,7 +2,7 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v0.7.0 (interaction-channel foundation).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
+**Status: prototype v0.8.0 (reviewed event ledger foundation).** A model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, automatic long-term memory, multi-NPC autonomy, and full Tavern PNG/V2 card support are **not** implemented yet. SQLite-backed story saves, the first cast-aware context harness, safe library Trash, indexed lore retrieval, and optional ComfyUI workflow execution are implemented. The character atelier, theme palettes, and portrait uploads are included in this version.
 
 ## Requirements
 
@@ -43,6 +43,15 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 ```
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
+
+## v0.8: Reviewed NPC events and timeline provenance (fourth milestone)
+
+- **Scene → NPC event review** stages an objective NPC development from the latest **selected assistant reply**. Stage manually or use **AI suggest from reply**, which only fills an editable draft; AI output never directly commits canon. Choose **Accept into world** or **Reject**.
+- **Two supported event kinds:** `observation` (the NPC's observed development) and `npc_move` (a validated NPC destination within its world). A move changes the NPC's timeline-specific location in the same SQLite transaction as the accepted event; it does **not** simulate travel or permit moving the player character. Other NPC action types will be added only with specific validated reducers.
+- **Scoped memory:** accepted events are stored in normalized `timeline_events`, associated with actor and explicit observers; only observed events are retrieved for an NPC's later prompts in that timeline. The player's authoring UI can inspect the ledger, but that does not automatically grant the player character knowledge.
+- **Safe retries and swipes:** a proposal captures a fingerprint of the selected reply, including speaker, interaction channel, witnesses, and content. Switching variants or changing the source makes it stale. After an event is accepted, the source reply is **locked** against edits, Retry, and swipes; the SQLite save path also enforces this invariant. Rejected proposals do not mutate timeline state.
+- **Local migration:** existing databases receive a one-time `.data/studio.sqlite.before-world-v3.bak` before the new event tables are added. Existing scenes and legacy manually appraised events remain intact. A first-run browser now immediately reloads server-assigned timeline IDs, without requiring a page refresh.
+- **Limits:** the model's suggested event text is untrusted and should be reviewed for correctness. No automatic event extraction occurs during normal chat. Earlier manual scene events still live in the legacy scene snapshot. Duplicate scene/branch currently copies the scene **within its existing timeline**; do not treat it as an independent fork of the committed world event ledger. Create independent timelines in World Library while proper event-snapshot forking is under development.
 
 ## v0.7: Interaction channels (third foundation milestone)
 
