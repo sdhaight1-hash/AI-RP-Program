@@ -6,7 +6,8 @@
   "description": "Local-first character and storytelling app for KoboldCpp and LM Studio",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "eval:memory": "node eval/actor-recall.mjs"
   },
   "engines": {
     "node": ">=22.13"

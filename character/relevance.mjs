@@ -2,7 +2,7 @@
 // Retrieve the specialized parts only when the present topic calls for them.
 const categories=[
   {name:'Family and upbringing',pattern:/\b(family|parent|mother|father|mom|dad|sibling|brother|sister|grandparent|childhood|grew up|raised|born|hometown|heritage)\b/iu,keys:['familyHistory','backstory']},
-  {name:'Formative history',pattern:/\b(past|history|before|used to|when you were|happened to you|formative|experience|previous life)\b/iu,keys:['formativeEvents','backstory']},
+  {name:'Formative history',pattern:/\b(past|history|used to|when you were|happened to you|formative|experience|previous life)\b/iu,keys:['formativeEvents','backstory']},
   {name:'Appearance',pattern:/\b(eyes?|hair|face|look like|looks?|appear|height|tall|skin|body|build|wear|clothes?|dress|outfit|style)\b/iu,keys:['facialFeatures','hair','eyes','physique','clothingStyle','description']},
   {name:'Hobbies and interests',pattern:/\b(hobb(?:y|ies)|interest|free time|fun|enjoy|music|books?|reading|sports?|games?|pastime)\b/iu,keys:['hobbies','socialHabits']},
   {name:'Work and routine',pattern:/\b(work|job|school|teach|office|shift|schedule|day|daily|routine|week|busy|occupation)\b/iu,keys:['dailyRoutine','occupation']},

@@ -19,3 +19,4 @@ jobs:
       - run: node --check context/backend.mjs
       - run: node --check memory/store.mjs
       - run: npm test
+      - run: npm run eval:memory

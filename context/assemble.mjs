@@ -53,7 +53,12 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     rememberedEvents:[],worldPlaceNotes:placeNotes
   });
   const latest=visible.history.slice(-8).map(m=>m.content).join(' ');
-  const directCue=visible.history.filter(m=>m.role==='user').slice(-2).map(m=>m.content).join(' ') || latest;
+  // Use the latest witnessed user cue. Including the preceding user message
+  // made unrelated small talk resurrect its old topic and steal token budget.
+  // The visibility layer decorates player speech with "Player:". That label
+  // must never become a retrieval term: every indexed player memory has it.
+  const directCue=visible.history.filter(m=>m.role==='user').at(-1)?.content
+    .replace(/^Player:\s*/u,'') || latest;
   const details=selectCharacterDetails(actor,directCue);
   // Personal recollections respond to the actual conversation cue. Names and
   // scene labels belong in lore search, not every actor's memory search query.
@@ -126,10 +131,20 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
       text:'Previously heard: '+shorten(m.text,300)}))
   ];
   const loreText=lore.map(x=>({kind:'lore',id:x.id,text:'World lore: '+shorten(x.content,340)}));
-  // Build recent conversation first, then context evidence; trim the oldest
-  // messages and lowest-ranked candidates when the model window is tight.
+  // Preserve the latest conversation, but reserve a bounded share of a small
+  // context for relevant evidence. Otherwise a long recent transcript can
+  // consume the entire window before one retrieved memory is considered.
+  // Unused space remains available to the model; it is not filled with padding.
   const recent=[];
   const dialogue=visible.history.filter(m=>['user','assistant'].includes(m.role)).slice(-24);
+  // Recent uncued memories are fallback continuity, not a reason to evict
+  // immediately preceding dialogue. Reserve headroom for topic-matched evidence.
+  const cueTerms=(query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[])
+    .filter(w=>!stop.has(w));
+  const matchedPersonalFact=facts.some(f=>cueTerms.some(w=>f.text.toLocaleLowerCase().includes(w)));
+  const cuedEvidence=matchedPersonalFact || recalled.some(m=>m.score>=5) ||
+    scoredEvents.some(e=>e.match>0) || details.length>0 || loreText.length>0;
+  const evidenceHeadroom=cuedEvidence?Math.min(440,Math.floor(budget*0.28)):0;
   const systemParts=[...base];
   let system=systemParts.join('\n\n');
   const asMessages=()=>[{role:'system',content:system},...recent];
@@ -145,7 +160,9 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
       if(!recent.length)throw new Error('Latest witnessed message exceeds model context; shorten it or increase context size');
       break;
     }
-    if(estimateTokens([{role:'system',content:system},next,...recent])>budget)break;
+    const proposedTokens=estimateTokens([{role:'system',content:system},next,...recent]);
+    // Never sacrifice the newest real turn; shorten older history first.
+    if(proposedTokens>budget || (recent.length>0 && proposedTokens>budget-evidenceHeadroom))break;
     recent.unshift(next);
   }
   // The last current message must survive. Context candidates never displace it.
@@ -160,7 +177,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   }
   if(mode==='continue') {
     const direction={role:'user',content:'[Continue naturally without deciding the player character’s actions or speech.]'};
-    while(recent.length && estimateTokens([...asMessages(),direction])>budget)recent.shift();
+    while(recent.length>1 && estimateTokens([...asMessages(),direction])>budget)recent.shift();
     if(estimateTokens([...asMessages(),direction])>budget)throw new Error('Cannot fit continuation instruction into context');
     recent.push(direction);
   }
@@ -169,6 +186,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   return {messages,metadata:{
     actorId,worldId,timelineId:scene.timelineId,sceneId,mode,
     contextWindow:context,maxOutput:output,safetyMargin:margin,
+    evidenceHeadroomReserved:evidenceHeadroom,
     promptTokensEstimated:estimateTokens(messages),
     // These IDs describe selected evidence; the backend may trim further
     // after a model-native exact token count.

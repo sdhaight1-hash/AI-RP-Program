@@ -56,6 +56,8 @@ The new **Context Inspector** shows the server-generated prompt, retrieved memor
 
 There are no new dependencies. This is the first retrieval milestone, **not** a claim that LLM-derived long-term semantic facts, emotional reflections, or fully automated summarization are finished. See [actor memory architecture and limitations](docs/actor-memory-v2.1.md). Back up the entire `.data/` directory before upgrading.
 
+For deterministic memory-quality diagnostics, run `npm run eval:memory` (or add `-- --json` for machine-readable results). The [evidence-funnel benchmark](docs/actor-memory-evaluation.md) checks stored, retrieved and prompt-packed sources at 2048/4096 tokens plus privacy and fork isolation, without calling a local model.
+
 ## v2.0.1: Repository audit and hardening
 
 Fixes a broken browser module route, atomic world/character saves, lore visibility ranking, cross-world identity and media boundaries, consistent SQLite backups, stale-tab handling and UTF-8 parsing. It also reduces repeated database work. See the [code audit and remaining-risk register](docs/code-audit-v2.0.1.md). **Back up `.data/` before upgrading.**
