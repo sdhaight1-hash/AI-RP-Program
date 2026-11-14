@@ -9,6 +9,7 @@ import { WorldPartitionStore } from './world/partition-store.mjs';
 import { ComfyClient } from './comfy.mjs';
 import { buildActorContext } from './context/assemble.mjs';
 import { discoverBackendContext, enforceTokenBudget } from './context/backend.mjs';
+import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -254,6 +255,24 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if (!response.ok) throw new Error(`Model server returned ${response.status}`);
         const data = await response.json();
         return json(res, 200, { backend: new URL(lmUrl).host, models: Array.isArray(data.data) ? data.data.map(m => ({ id: m.id })).filter(m => typeof m.id === 'string') : [] });
+      }
+      if (req.method === 'GET' && path === '/api/actor/facts') {
+        requireWorldScope(requestUrl.searchParams.get('worldId'));
+        try {
+          return json(res,200,{facts:listActorFacts(store,{
+            timelineId:requestUrl.searchParams.get('timelineId'),
+            actorId:requestUrl.searchParams.get('actorId')})});
+        }catch(error){return json(res,422,{error:error.message});}
+      }
+      if (req.method === 'POST' && (path === '/api/actor/facts' || path === '/api/actor/facts/revoke')) {
+        const data=await readJson(req,3500);
+        requireWorldScope(data.worldId);
+        if(Number.isSafeInteger(data.revision) && data.revision!==store.load().revision)
+          return json(res,409,{error:'The scene changed before this memory was submitted'});
+        try {
+          if(path.endsWith('/revoke'))return json(res,200,revokeActorFact(store,data));
+          return json(res,201,addActorFact(store,data));
+        }catch(error){return json(res,422,{error:error.message});}
       }
       if (req.method === 'POST' && (path === '/api/actor/context' || path === '/api/actor/reply')) {
         const data=await readJson(req,3000);

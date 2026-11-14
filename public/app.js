@@ -893,6 +893,74 @@ ${m.content}`).join('\n\n');
         host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">Server-assembled, actor-scoped prompt. Token numbers are ${escapeHtml(prompt.metadata.countMethod)}.</p><div class="context-stats"><div><strong>${prompt.metadata.promptTokens.toLocaleString()}</strong><span>Prompt tokens</span></div><div><strong>${prompt.metadata.contextWindow.toLocaleString()}</strong><span>Context window</span></div><div><strong>${prompt.metadata.recalled}</strong><span>Retrieved memories</span></div></div><div class="inline-actions"><button id="copy-context" class="subtle-button">Copy prompt</button></div><pre class="context-text" id="context-text"></pre>`;
         $('context-text').textContent=allText;
         $('copy-context').onclick=async()=>{try{await navigator.clipboard.writeText(allText);}catch{showError('Clipboard unavailable.');}};
+
+        // Reviewed personal knowledge is stored outside the scene transcript.
+        // The actor must have witnessed the selected evidence before saving.
+        const factsUrl='/api/actor/facts?worldId='+encodeURIComponent(requestedWorld)+
+          '&timelineId='+encodeURIComponent(s.timelineId)+'&actorId='+encodeURIComponent(actor.id);
+        const factsResponse=await fetch(factsUrl);
+        const factData=await factsResponse.json();
+        if(!factsResponse.ok)throw new Error(factData.error||'Cannot read character memories');
+        if(currentTab!=='context'||activeWorldId!==requestedWorld||activeSession()?.id!==requestedScene)return;
+        const section=el('section','','group');
+        section.append(el('h3','Character memory notebook','builder-subtitle'),
+          el('p','Record a concise belief, promise, or meaningful personal detail. The source must be something this character actually heard or said. These notes are subjective memories, never world canon.','help'));
+        for(const fact of factData.facts.slice(0,15)){
+          const entry=el('div','','lore-card');
+          entry.append(el('strong',fact.kind+' · '+fact.status+(fact.validSource?'':' · source changed (not recalled)')),el('p',fact.text,'help'));
+          if(fact.status==='active'){
+            const revoke=el('button','Revoke memory','subtle-button');
+            revoke.onclick=async()=>{
+              try{
+                const response=await fetch('/api/actor/facts/revoke',{method:'POST',headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({worldId:requestedWorld,timelineId:s.timelineId,actorId:actor.id,id:fact.id})});
+                const result=await response.json();
+                if(!response.ok)throw Error(result.error||'Memory revocation failed');
+                renderInspector();
+              }catch(error){showError(error.message);}
+            };
+            entry.append(revoke);
+          }
+          section.append(entry);
+        }
+        const visibleSources=s.messages.filter(m=>m.id && (
+          (m.witnessIds||[]).includes(actor.id) || (m.role==='assistant' && m.speakerId===actor.id)
+        )).slice(-40);
+        const source=el('select');source.id='fact-source';
+        for(const m of visibleSources){
+          const label=(m.role==='user'?'Player':m.speakerId===actor.id?'Self':'Other NPC')+': '+m.content.slice(0,85);
+          source.add(new Option(label,m.id));
+        }
+        const kind=el('select');kind.id='fact-kind';
+        for(const value of ['belief','promise','relationship','autobiography','observation'])kind.add(new Option(value,value));
+        const supersedes=el('select');supersedes.id='fact-supersedes';
+        supersedes.add(new Option('No correction — new memory',''));
+        for(const fact of factData.facts.filter(x=>x.status==='active' && x.validSource))
+          supersedes.add(new Option('Correct: '+fact.text.slice(0,65),fact.id));
+        const note=el('textarea');note.id='fact-note';note.rows=3;note.maxLength=700;
+        note.placeholder='What does this NPC now remember or believe?';
+        const saveFact=el('button','Remember this detail','primary-button');
+        saveFact.disabled=!visibleSources.length;
+        saveFact.onclick=async()=>{
+          if(!note.value.trim())return showError('Write a short character memory first.');
+          try {
+            await requireSavedStory();
+            const response=await fetch('/api/actor/facts',{method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({worldId:requestedWorld,sceneId:requestedScene,actorId:actor.id,
+                sourceMessageId:source.value,kind:kind.value,text:note.value,revision,
+                supersedesId:supersedes.value||null})});
+            const result=await response.json();
+            if(!response.ok)throw Error(result.error||'Memory was not saved');
+            renderInspector();showError();
+          }catch(error){showError(error.message);}
+        };
+        section.append(el('label','Source conversation message','field-label'),source,
+          el('label','Kind of memory','field-label'),kind,
+          el('label','Correct an earlier belief (optional)','field-label'),supersedes,
+          el('label','Subjective memory','field-label'),note,saveFact);
+        if(!visibleSources.length)section.append(el('p','No witnessed source messages in this scene yet.','help'));
+        host.append(section);
+
       }catch(error){if(currentTab==='context')host.innerHTML='<h2 class="panel-title">Context inspector</h2><p class="help"></p>',host.querySelector('p').textContent=error.message;}
     })();
   } else if (currentTab === 'setup') {

@@ -5,6 +5,7 @@ import { describeEmotion } from '../engine.mjs';
 import { characterPlaceContext } from '../character/context.mjs';
 import { selectCharacterDetails } from '../character/relevance.mjs';
 import { retrieveActorMemories } from '../memory/store.mjs';
+import { retrieveActorFacts } from '../memory/facts.mjs';
 
 const shorten = (value, limit) => String(value || '').slice(0,limit);
 export const estimateTokens = messages => messages.reduce((sum,m)=>sum+Math.ceil([...m.content].reduce((n,c)=>n+(c.codePointAt(0)>127?1.5:1),0)/2.3)+8,0) + 12;
@@ -58,6 +59,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     .filter(Boolean).join(' ').slice(-900);
   const excluded=history.slice(-8).map(m=>m.id);
   const recalled=retrieveActorMemories(store.db,{timelineId:scene.timelineId,actorId,query,excludeMessageIds:excluded,limit:8});
+  const facts=retrieveActorFacts(store,{timelineId:scene.timelineId,actorId,query,limit:5});
   const events=store.events.visible(scene.timelineId,actorId,30);
   const eventWords=new Set((query.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[]).slice(-40));
   const scoredEvents=events.map(e=>({...e,match:(String(e.description).toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu)||[]).filter(w=>eventWords.has(w)).length}))
@@ -101,6 +103,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   ].filter(Boolean);
   const memories=[
     ...scoredEvents.map(e=>'Committed event: '+shorten(e.description,240)),
+    ...facts.map(f=>'Reviewed personal '+f.kind+' (subjective, not world canon): '+shorten(f.text,320)),
     ...details.map(d=>'Character background — '+d.name+': '+shorten(d.content,420)),
     ...recalled.map(m=>'Previously heard: '+shorten(m.text,300))
   ];
@@ -147,7 +150,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
     contextWindow:context,maxOutput:output,safetyMargin:margin,
     promptTokensEstimated:estimateTokens(messages),
     memoryIds:recalled.filter(m=>added.some(x=>x.includes(m.text.slice(0,Math.min(40,m.text.length))))).map(m=>m.id),
-    recalled:recalled.length,selectedEvidence:added.length,characterDetails:details.length,
+    recalled:recalled.length,reviewedFacts:facts.length,selectedEvidence:added.length,characterDetails:details.length,
     visibleEvents:scoredEvents.length,lore:loreText.filter(x=>added.includes(x)).length,
     recentMessages:recent.length
   }};

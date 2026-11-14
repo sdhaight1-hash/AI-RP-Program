@@ -44,6 +44,10 @@ INFERENCE_URL=http://127.0.0.1:1234/v1 npm start
 
 Select the model in **Setup**. The model must be loaded in the inference application; this studio doesn't download models itself. If you see "Model server offline", verify the inference server is running and its port matches `INFERENCE_URL`.
 
+## Reviewed NPC knowledge (v2.1 follow-up)
+
+The Context Inspector also has a **Character memory notebook**. Select a message the current NPC actually heard or said, record a concise belief, promise, relationship observation or autobiographical memory, and save it to that NPC's timeline. Reviewed notes can be corrected or revoked. Revised source dialogue invalidates the associated memory, and a timeline fork freezes only memories with valid sources. This supplements—not replaces—the automatic witnessed-dialogue index. These notes represent what the NPC remembers or believes, **not new world canon**. Automatic AI memory extraction and semantic embeddings are still future milestones.
+
 ## v2.1: Actor memory and compact local-model context
 
 Normal NPC replies now use the server's world-scoped actor context instead of assembling an acting prompt in the browser. Past **witnessed dialogue is indexed as what was said, not as world truth**. The system combines an actor's prior speech, witnessed player messages, already-approved world events, permitted lore, and topic-specific character history while keeping worlds and timeline forks separate. Pinned story moments receive retrieval priority, and relationship notes belonging to another NPC are not exposed as the current actor's knowledge.
