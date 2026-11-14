@@ -318,6 +318,12 @@ async function main(){
       const snapshot=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json();
       return !snapshot.state.sessions.some(s=>s.id===purgeTarget.sceneId);
     },'scene permanent deletion committed');
+    await until(async()=>script(`
+      const rows=[...document.querySelectorAll('#library-trash .trash-row')];
+      return !rows.some(row=>row.querySelector('span')?.textContent===
+        'Scene: '+${JSON.stringify(purgeTarget.sceneTitle)})
+        &&rows.some(row=>row.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
+    `),'Library refreshed after scene purge');
     const characterPurgeClicked=await script(`
       const row=[...document.querySelectorAll('#library-trash .trash-row')]
         .find(item=>item.querySelector('span')?.textContent==='Character: Browser Full Purge Target');
