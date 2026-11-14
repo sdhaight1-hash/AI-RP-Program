@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { StudioStore } from '../storage.mjs';
 import { WorldPartitionStore } from '../world/partition-store.mjs';
 import { makeInitialState,makeEmptyWorldState } from '../engine.mjs';
+import { createApp } from '../server.mjs';
 import { backupWorldStorage } from '../scripts/backup-storage.mjs';
 import { normalizeStorage } from '../scripts/normalize-storage.mjs';
 import { inspectWorldStorage } from '../scripts/storage-health.mjs';
@@ -140,6 +141,66 @@ test('backup-gated primary migration handles independent worlds and restores ori
     try {
       assert.equal(restored.forWorld(one).load().state.characters[0].name,'Mara Vale');
       assert.equal(projectionPrimary(restored.forWorld(one).db),false);
+    }finally{restored.close();}
+  }finally{rmSync(directory,{recursive:true,force:true});}
+});
+
+test('large primary story passes actual HTTP PUT/GET with scoped-world revisions',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'rp-primary-http-'));
+  const store=new WorldPartitionStore(directory);
+  const worldId=store.activeWorldId,other=store.worlds.createWorld({name:'Separate HTTP world'}).id;
+  const scoped=store.forWorld(worldId);
+  scoped.save(makeInitialState(),scoped.load().revision,{worldId});
+  staged(scoped.current);
+  const initial=scoped.load();
+  const state=initial.state,actor=state.characters[0];
+  for(let i=0;i<2800;i++)state.sessions[0].messages.push({
+    id:'http-large-'+i,role:'user',content:'A long serialized transcript. '+'q'.repeat(1550),
+    witnessIds:[actor.id],sentAt:1000+i
+  });
+  const body=JSON.stringify({revision:initial.revision,worldId,state});
+  assert.ok(Buffer.byteLength(body,'utf8')>4_500_000);
+  const app=createApp({store,fetchImpl:async()=>{throw Error('No model needed')}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+app.address().port;
+  try{
+    const put=()=>fetch(base+'/api/state',{method:'PUT',
+      headers:{'Content-Type':'application/json'},body});
+    const first=await put();
+    assert.equal(first.status,200,await first.clone().text());
+    const saved=await first.json();
+    assert.equal(saved.revision,initial.revision+1);
+    assert.equal((await put()).status,409,'stale full-document writes are still rejected');
+    const response=await fetch(base+'/api/state?worldId='+encodeURIComponent(worldId));
+    assert.equal(response.status,200);
+    const actual=await response.json();
+    assert.equal(actual.state.sessions[0].messages.length,2801);
+    assert.equal(actual.state.sessions[0].messages.at(-1).id,'http-large-2799');
+    assert.equal(actual.worldId,worldId);
+    const foreign=await(await fetch(base+'/api/state?worldId='+encodeURIComponent(other))).json();
+    assert.equal(foreign.state.characters.length,0);
+    assert.equal(foreign.revision,1);
+  }finally{
+    await new Promise(resolve=>app.close(resolve));
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+test('legacy multiworld importer refuses a normalized-primary source without changing it',()=>{
+  const directory=mkdtempSync(join(tmpdir(),'rp-primary-legacy-'));
+  const file=join(directory,'studio.sqlite');
+  try{
+    const legacy=new StudioStore(file);
+    legacy.save(makeInitialState(),0);
+    staged(legacy);
+    legacy.close();
+    assert.throws(()=>new WorldPartitionStore(directory),
+      /Legacy world migration does not support normalized-primary storage/);
+    const restored=new StudioStore(file);
+    try{
+      assert.equal(restored.load().state.characters[0].name,'Mara Vale');
+      assert.equal(projectionPrimary(restored.db),true);
+      assert.equal(restored.load().revision,1);
     }finally{restored.close();}
   }finally{rmSync(directory,{recursive:true,force:true});}
 });
