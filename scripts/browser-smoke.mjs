@@ -168,6 +168,15 @@ async function main(){
     assert.equal((await(await fetch(base+'/api/state')).json()).state.sessions.length,
       sceneCountBeforeCharacter,'creating character must not create a scene in SQLite');
     await screenshot('06-character-created-without-auto-scene');
+    assert.equal(await script(`
+      const button=[...document.querySelectorAll('.workspace-card button')]
+        .find(x=>x.textContent==='Open active character');
+      if(!button)return false;
+      button.click();
+      const name=document.querySelector('#builder-name')?.value;
+      document.querySelector('#builder-close').click();
+      return name==='New character';
+    `),true,'character workspace must keep its selected draft instead of jumping back to the active scene NPC');
     await script("document.querySelector('button[data-workspace=story]').click();return true");
     const previousTheme=await script("return document.querySelector('#quick-theme').value");
     assert.equal(await script(`
