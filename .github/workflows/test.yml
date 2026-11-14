@@ -20,6 +20,7 @@ jobs:
       - run: node --check memory/store.mjs
       - run: node --check memory/semantic.mjs
       - run: node --check character/world-bridge.mjs
+      - run: node --check character/relationship-bridge.mjs
       - run: node --check eval/local-model.mjs
       - run: node --check eval/local-semantic.mjs
       - run: npm test
