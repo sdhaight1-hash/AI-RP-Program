@@ -30,6 +30,8 @@ export function createLocalSemanticRetriever({
 }={}) {
   if(typeof model!=='string'||!model.trim()||model.length>250)throw new Error('Select a local embedding model');
   const url=new URL(baseUrl);
+  if(url.username||url.password||url.search||url.hash)
+    throw new Error('Embedding URL must not contain credentials or query parameters');
   if(url.protocol!=='http:'||!['localhost','127.0.0.1','[::1]'].includes(url.hostname))
     throw new Error('Semantic memory requires an explicit loopback HTTP embedding endpoint');
   if(!/^\/?v1\/?$/.test(url.pathname.replace(/^\//,'')) && !url.pathname.endsWith('/v1'))
@@ -40,7 +42,7 @@ export function createLocalSemanticRetriever({
   const minimum=cap(Number(threshold)||0.62,0,1);
   const embed=async input=>{
     const response=await fetchImpl(endpoint,{
-      method:'POST',headers:{'Content-Type':'application/json'},
+      method:'POST',redirect:'error',headers:{'Content-Type':'application/json'},
       signal:AbortSignal.timeout(timeoutMs),
       body:JSON.stringify({model,input})
     });
