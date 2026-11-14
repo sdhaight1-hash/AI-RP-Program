@@ -137,4 +137,7 @@ test('new encounter workspace is reachable without hunting through world inspect
   assert.ok(!visibleDetailTabs('story').includes('setup'));
   assert.match(css,/\.encounter-layout/);
   assert.match(css,/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.ok(ids.includes('detail-error')&&ids.includes('error'));
+  assert.match(javascript,/\['error','detail-error'\]/);
+  assert.match(css,/\.detail-error/);
 });
