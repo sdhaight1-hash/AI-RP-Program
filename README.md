@@ -58,6 +58,8 @@ There are no new dependencies. This is the first retrieval milestone, **not** a 
 
 For deterministic memory-quality diagnostics, run `npm run eval:memory` (or add `-- --json` for machine-readable results). The [evidence-funnel benchmark](docs/actor-memory-evaluation.md) checks stored, retrieved and prompt-packed sources at 2048/4096 tokens plus privacy and fork isolation, without calling a local model.
 
+Optional **semantic NPC recall** can use a separately loaded local embedding model (such as LM Studio's `/v1/embeddings`) to catch indirect references that FTS5 misses. It is disabled unless `RP_EMBEDDING_MODEL` is configured; `RP_EMBEDDING_URL` defaults to the loopback LM Studio port 1234. Actor/world/timeline boundaries are enforced before embedding, reviewed facts are revalidated, and an unavailable embedding model falls back to lexical recall. See [semantic recall setup and limitations](docs/semantic-recall-v1.md).
+
 ## v2.0.1: Repository audit and hardening
 
 Fixes a broken browser module route, atomic world/character saves, lore visibility ranking, cross-world identity and media boundaries, consistent SQLite backups, stale-tab handling and UTF-8 parsing. It also reduces repeated database work. See the [code audit and remaining-risk register](docs/code-audit-v2.0.1.md). **Back up `.data/` before upgrading.**
