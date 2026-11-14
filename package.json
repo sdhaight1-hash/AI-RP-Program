@@ -11,7 +11,8 @@
     "test:browser": "node scripts/browser-smoke.mjs",
     "audit:storage": "node scripts/storage-health.mjs",
     "backup:storage": "node scripts/backup-storage.mjs",
-    "eval:local": "node scripts/local-model-probe.mjs"
+    "eval:local": "node scripts/local-model-probe.mjs",
+    "eval:scale": "node eval/storage-scale.mjs"
   },
   "engines": {
     "node": ">=22.13"
