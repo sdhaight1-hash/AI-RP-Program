@@ -288,7 +288,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const next=structuredClone(snapshot.state);
         try{
           purgeArchived(next,input.kind,input.id);
-          const saved=store.save(next,input.revision,{worldId:input.worldId});
+          const saved=store.save(next,input.revision,{
+            worldId:input.worldId,purgedSceneId:input.kind==='scene'?input.id:null
+          });
           if(!saved)return json(res,409,{error:'Story changed before permanent deletion'});
           return json(res,200,{...saved,worldId:input.worldId,state:store.load().state});
         }catch(error){return json(res,422,{error:error.message});}
