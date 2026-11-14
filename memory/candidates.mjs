@@ -2,7 +2,7 @@
 // This selects authorized IDs/text only; scores grant no permission to see data.
 import { retrieveActorMemories } from './store.mjs';
 
-export function selectSemanticDialogueCandidates(db,{timelineId,actorId,query,limit=96}){
+export function selectSemanticDialogueCandidates(db,{timelineId,actorId,query,limit=96,excludeMessageIds=[]}){
   const room=Math.max(0,Math.min(160,Math.trunc(Number(limit)||0)));
   if(!room)return [];
   if(!db.prepare('SELECT 1 FROM timeline_actors WHERE timeline_id=? AND actor_id=?')
@@ -36,12 +36,12 @@ export function selectSemanticDialogueCandidates(db,{timelineId,actorId,query,li
     const row=midpoint.get(timelineId,actorId,offset);
     if(row)middle.push(row);
   }
-  const selected=[],seen=new Set();
+  const selected=[],seen=new Set(),excluded=new Set(excludeMessageIds);
   const add=(rows,max=room)=>{
     let accepted=0;
     for(const item of rows){
       if(selected.length>=room||accepted>=max)break;
-      if(seen.has(item.id))continue;
+      if(seen.has(item.id)||excluded.has(item.source_message_id))continue;
       seen.add(item.id);accepted++;
       selected.push({kind:'dialogue',id:item.id,sourceMessageId:item.source_message_id,
         text:'Previously heard: '+item.text,
