@@ -122,3 +122,26 @@ test('every authored message medium survives story normalization rather than sil
   assert.deepEqual(again.sessions[0].messages.map(x=>x.channelId),
     CHANNEL_OPTIONS.map(channel=>channel.id));
 });
+
+
+test('SQLite round-trip preserves webcam and social medium of every authored message',async()=>{
+  const {StudioStore}=await import('../storage.mjs');
+  const store=new StudioStore(':memory:');
+  try{
+    const actor=createCharacter('Noah'),scene=createSession(actor);
+    scene.channelId='video_call';
+    scene.messages=['video_call','social_dm','social_thread','email'].map((channelId,i)=>({
+      id:'persist-'+i,role:i%2?'assistant':'user',
+      speakerId:i%2?actor.id:undefined,content:'Line from '+channelId,
+      channelId,witnessIds:[actor.id],sentAt:1000+i
+    }));
+    const state=makeEmptyWorldState();
+    state.characters=[actor];state.sessions=[scene];state.activeSessionId=scene.id;
+    assert.equal(store.save(state,0).revision,1);
+    const reloaded=store.load().state.sessions[0];
+    assert.equal(reloaded.channelId,'video_call');
+    assert.deepEqual(reloaded.messages.map(m=>m.channelId),
+      ['video_call','social_dm','social_thread','email']);
+    assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{store.close();}
+});
