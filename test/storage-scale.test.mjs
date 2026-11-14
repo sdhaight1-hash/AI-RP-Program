@@ -15,3 +15,15 @@ test('disk-backed benchmark uses ephemeral worlds and verifies persisted actor m
   assert.equal(report.rows[0].memoryRows,6);
   assert.throws(()=>measureStorageScale(0),/Invalid/);
 });
+
+test('opt-in normalized-primary benchmark retains complete actor memory and revision integrity',()=>{
+  const row=measureStorageScale(240,{primary:true});
+  assert.equal(row.storageMode,'normalized-primary');
+  assert.equal(row.turns,240);
+  assert.equal(row.memoryRows,241);
+  assert.equal(row.integrity,'ok');
+  assert.ok(row.databaseBytes>row.snapshotBytes);
+  const report=runStorageScaleEvaluation([50],{primary:true});
+  assert.equal(report.rows[0].storageMode,'normalized-primary');
+  assert.equal(report.rows[0].memoryRows,51);
+});
