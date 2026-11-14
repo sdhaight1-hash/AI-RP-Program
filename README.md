@@ -2,15 +2,15 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: evolving local-first studio, Studio Experience v3 (November 2026).** Worlds are independent, character/world links require review, actor memory is witness-scoped, and the redesigned interface organizes these systems into five task-focused workspaces. A local model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, autonomous NPC life, semantic memory consolidation, and full Tavern PNG/V2 card support are **not** implemented yet. Per-world SQLite storage, witnessed-dialogue recall, accepted-event knowledge, topic-sensitive identity context, safe Trash, indexed lore, and optional ComfyUI workflow execution are implemented.
+**Status: evolving local-first studio, Studio Experience v4 (November 2026).** Worlds are independent, character/world links require review, actor memory is witness-scoped, and the interface now has six clearly named workspaces. A local model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, autonomous NPC life, semantic memory consolidation, and full Tavern PNG/V2 card support are **not** implemented yet. Per-world SQLite storage, witnessed-dialogue recall, accepted-event knowledge, topic-sensitive identity context, safe Trash, indexed lore, and optional ComfyUI workflow execution are implemented.
 
 ## New Studio Experience
 
-The workspace shell now organizes features as **World & canon**, **Characters**, **Story room**, **Memory & review**, and **Models & lab**. Use the left navigation or **Ctrl+K / Cmd+K** to jump directly to tools, including Atlas, Relations, memory traces, Character Studio and Fidelity Lab. World editing and memory review can open in a wide focused detail panel. The world chooser is searchable, and Character Studio displays field completion plus established world context. The layout adapts to small screens and preserves existing color themes.
+The workspace shell now has six direct destinations: **World**, **Characters**, **Encounters**, **Play**, **Knowledge**, and **Settings & tools**. The navigation follows create → play → manage, and the detail desk displays only tools relevant to the current section. Use **Ctrl+K / Cmd+K** to jump to Atlas, Relations, Memory, Character Studio, Fidelity Lab or Trash. An encounter is a reusable starting situation, not a permanent character trait; manage, edit, or remove it directly in **Encounters**. Character creation/editing no longer automatically starts an unrelated scene—use **Start scene** deliberately. The layout remains responsive and theme-aware.
 
-**Deletion and cleanup:** The × button archives rather than erases. To remove a character and its stored derived actor data, archive it and select **Permanently delete** in **Library & Trash**; remove its scene/encounter dependencies first. Atlas places, independent world entities, and relationships now have explicit delete controls. Old character projections left by earlier builds are reconciled when that world opens. See [deletion rules and recovery limitations](docs/durable-deletion.md). Backups and media files are not automatically wiped.
+**Deletion and cleanup:** The × button archives rather than erases. To remove a character and its derived database records, archive it and select **Permanently delete** in **Library & Trash**. If encounters block deletion, the archived character's Trash row now names the exact templates and includes a **Manage linked encounters** button, followed by **Back to Trash**. Remove dependent scenes separately first. Atlas places, independent world entities, and relationships now have explicit delete controls. Old character projections left by earlier builds are reconciled when that world opens. See [deletion rules and recovery limitations](docs/durable-deletion.md). Backups and media files are not automatically wiped.
 
-See [the Studio Experience v3 architecture, interaction guide and verification checklist](docs/studio-experience-v3.md). For headless browser verification (optional ChromeDriver installation), run `npm run test:browser`; GitHub Actions on Node 22 archives desktop/mobile screenshots as `ui-review-screenshots`.
+See [the new navigation, encounter editing, and communication-media guide](docs/encounters-and-ux-v4.md) and [the existing Studio Experience v3 architecture](docs/studio-experience-v3.md). For headless browser verification (optional ChromeDriver installation), run `npm run test:browser`; GitHub Actions on Node 22 archives desktop/mobile screenshots as `ui-review-screenshots`.
 
 ## Requirements
 
@@ -30,7 +30,7 @@ npm start
 
 To stop the server from the same terminal, type **`quit`** or **`exit`** and press Enter (or use **Ctrl+C**). The app closes its HTTP server and SQLite database cleanly.
 
-Then open **http://127.0.0.1:4173** in your browser. Start your local model server first (or start it later and click **Find local models** in Models & lab → Setup). On Windows PowerShell, to use LM Studio instead of KoboldCpp:
+Then open **http://127.0.0.1:4173** in your browser. Start your local model server first (or start it later and click **Find local models** in Settings & tools → Setup). On Windows PowerShell, to use LM Studio instead of KoboldCpp:
 
 ```powershell
 $env:INFERENCE_URL="http://127.0.0.1:1234/v1"
