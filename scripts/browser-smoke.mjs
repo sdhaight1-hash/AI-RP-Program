@@ -224,7 +224,8 @@ async function main(){
       return document.body.dataset.workspace==='tools' &&
         document.querySelector('[data-tab="setup"]').classList.contains('active') &&
         getComputedStyle(document.querySelector('#error')).display!=='none' &&
-        document.querySelector('#error').textContent.includes('Choose a loaded local model');
+        getComputedStyle(document.querySelector('#detail-error')).display!=='none' &&
+        document.querySelector('#detail-error').textContent.includes('Choose a loaded local model');
     `),true,'an unconfigured model must navigate directly to visible Setup with global feedback');
     await script("document.querySelector('button[data-workspace=story]').click();return true");
 
