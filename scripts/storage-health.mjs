@@ -4,6 +4,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { projectionEnabled,verifyStoryProjection } from '../storage/normalized.mjs';
+import { normalizeState } from '../engine.mjs';
+import { bindTimelineIds } from '../world/canon.mjs';
 
 const validWorldId=id=>typeof id==='string'&&
   /^(?:[0-9a-f]{8}-[0-9a-f-]{27,40}|imported-local-world)$/i.test(id)&&!id.includes('..');
@@ -57,6 +60,14 @@ export function inspectWorldStorage(dataDir) {
         const timelineIds=new Set(db.prepare('SELECT id FROM timelines WHERE world_id=?').all(row.id).map(x=>x.id));
         if(parsed.sessions.some(s=>s.timelineId&&!timelineIds.has(s.timelineId)))
           fail('Scene references an unknown or foreign timeline');
+        entry.projection='absent';
+        if(projectionEnabled(db)) {
+          try {
+            entry.projection=verifyStoryProjection(db,{
+              revision:state.revision,state:bindTimelineIds(normalizeState(parsed))
+            }).status;
+          }catch(error){entry.projection='invalid';fail('Normalized projection: '+error.message);}
+        }
       }catch(error){fail('Could not inspect world database: '+error.message);}
       finally{db?.close();}
     }
