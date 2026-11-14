@@ -8,6 +8,7 @@ import { StudioStore } from '../storage.mjs';
 import { projectionPrimary } from '../storage/normalized.mjs';
 import { legacyTimelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID } from './canon.mjs';
 import { makeEmptyWorldState } from '../engine.mjs';
+import { reconcileCharacterRecords,deleteWorldRecord } from './deletion.mjs';
 
 const now = () => Date.now();
 const worldIdPattern = /^(?:[0-9a-f]{8}-[0-9a-f-]{27,40}|imported-local-world)$/i;
@@ -125,6 +126,7 @@ export class WorldPartitionStore {
         return this.current.worlds.createEntity(input);
       },
       createRelationship: input => {this.assertWorld(input.worldId);return this.current.worlds.createRelationship(input);},
+      deleteEntry: input => {this.assertWorld(input.worldId);return deleteWorldRecord(this,input);},
       setClock: input => this.current.worlds.setClock(input),
       setActorLocation: input => this.current.worlds.setActorLocation(input),
       actors: timelineId => this.current.worlds.actors(timelineId),
@@ -199,11 +201,15 @@ export class WorldPartitionStore {
       if((encounter.characterIds||[]).some(id => !characterIds.has(id)))throw new Error('Encounter references a character outside this world');
     }
     return this.current.save(scoped, revision, {
-      beforeCommit: validated => this.ensureCharacterEntities(validated.characters),
+      beforeCommit: validated => this.ensureCharacterEntities(validated.characters,this.current,this.activeWorldId,validated),
     });
   }
   ensureCharacterEntities(characters = this.current.load().state?.characters || [],
-    target = this.current, worldId = this.activeWorldId) {
+    target = this.current, worldId = this.activeWorldId, snapshotState = null) {
+    // Called within the story revision transaction (or explicit world-open
+    // maintenance transaction). Keep archived characters; purge only IDs absent
+    // from canonical state. This also repairs projections left by older builds.
+    reconcileCharacterRecords(target.db,snapshotState||target.load().state,worldId);
     // One lookup for the cast rather than a query per character on every
     // debounced save/streamed reply. Stable character IDs remain authoritative.
     const knownByCharacter = new Map(target.db.prepare(`SELECT id,name,source_character_id AS characterId
