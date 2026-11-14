@@ -10,7 +10,7 @@ import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } fro
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
 import { initializeFactSchema } from './memory/facts.mjs';
-import { projectionEnabled,projectionPrimary,readPrimaryStory,compactPrimaryDocument,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
+import { inspectStoryProjectionInput,projectionEnabled,projectionPrimary,readPrimaryStory,compactPrimaryDocument,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
 
 function assertPersistedStoryShape(raw) {
   // normalizeState intentionally repairs loosely structured browser imports.
@@ -88,8 +88,9 @@ export class StudioStore {
       ?readPrimaryStory(this.db,{revision:row.revision,document:row.document})
       :JSON.parse(row.document);
     assertPersistedStoryShape(state);
-    return {revision:row.revision,updatedAt:row.updated_at,
-      state:bindTimelineIds(normalizeState(state))};
+    const normalized=bindTimelineIds(normalizeState(state));
+    inspectStoryProjectionInput(normalized);
+    return {revision:row.revision,updatedAt:row.updated_at,state:normalized};
   }
 
   rebuildLoreIndex(entries) {
@@ -123,6 +124,9 @@ export class StudioStore {
   save(state, expectedRevision, { beforeCommit, beforeReplace } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new TypeError('Invalid revision');
     const validated = bindTimelineIds(normalizeState(state));
+    // Stable, non-colliding source IDs are required by event locks, memories
+    // and timeline forks even in legacy snapshot mode with no projection.
+    inspectStoryProjectionInput(validated);
     const fullPayload=JSON.stringify(validated);
     const primary=projectionPrimary(this.db);
     const payload=primary?JSON.stringify(compactPrimaryDocument(validated)):fullPayload;
