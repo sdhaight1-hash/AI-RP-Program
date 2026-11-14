@@ -38,24 +38,21 @@ export function gatherCharacterWorldContext({worldLibrary,worldId,character,lore
   const byId=new Map(entities.map(e=>[e.id,e]));
   const self=entities.filter(e=>e.sourceCharacterId===character.id);
   const social=relationships.filter(r=>self.some(e=>r.fromId===e.id||r.toId===e.id));
-  const prioritizedLocations=[...locations].sort((a,b)=>
-    Number([character.homeLocationId,character.workLocationId,...(character.frequentPlaces||[]).map(x=>x.locationId)].includes(b.id))-
-    Number([character.homeLocationId,character.workLocationId,...(character.frequentPlaces||[]).map(x=>x.locationId)].includes(a.id)));
+  const connectedIds=new Set([
+    character.homeLocationId,character.workLocationId,
+    ...(character.frequentPlaces||[]).map(p=>p.locationId)
+  ].filter(Boolean));
+  const linked=locations.filter(x=>connectedIds.has(x.id));
+  const otherPlaces=locations.filter(x=>!connectedIds.has(x.id));
   const lines=[`World: ${world.name}`,`Established setting: ${String(world.description||'').slice(0,900)}`];
-  if(prioritizedLocations.length)lines.push('Existing places (use identifiers rather than inventing substitutes):\n'+
-    prioritizedLocations.slice(0,24).map(x=>`[place:${x.id}] ${x.name} (${x.kind}) — ${String(x.description||'').slice(0,150)}`).join('\n'));
-  if(entities.length)lines.push('Existing people and institutions:\n'+
-    entities.slice(0,24).map(e=>`[entity:${e.id}] ${e.name} (${e.kind})`).join('\n'));
-  if(social.length)lines.push('Established relationships involving this character:\n'+
-    social.slice(0,16).map(r=>`${byId.get(r.fromId)?.name||r.fromId} → ${byId.get(r.toId)?.name||r.toId}: ${r.kind}; ${String(r.notes||'').slice(0,180)}`).join('\n'));
-  const assigned=[
-    ['Home',character.homeLocationId],['Workplace',character.workLocationId],
-    ...(character.frequentPlaces||[]).map(p=>['Frequent place ('+String(p.role||'visits').slice(0,50)+')',p.locationId])
-  ].flatMap(([role,id])=>{
-    const loc=locations.find(x=>x.id===id);
-    return loc?[`${role}: ${loc.name} [place:${loc.id}]`]:[];
-  });
-  if(assigned.length)lines.push('Character place links (usual associations, NOT current position):\n'+assigned.slice(0,12).join('\n'));
+  if(linked.length)lines.push('Established character places (usual associations, NOT their current position):\n'+
+    linked.slice(0,10).map(x=>`[place:${x.id}] ${x.name} (${x.kind}) — ${String(x.description||'').slice(0,180)}`).join('\n'));
+  if(social.length)lines.push('Existing relationships of this character (not automatically another person\'s private thoughts):\n'+
+    social.slice(0,12).map(r=>`${byId.get(r.fromId)?.name||r.fromId} → ${byId.get(r.toId)?.name||r.toId}: ${r.kind}; ${String(r.notes||'').slice(0,180)}`).join('\n'));
+  if(otherPlaces.length)lines.push('Other places available in this world (do not invent duplicates):\n'+
+    otherPlaces.slice(0,14).map(x=>`[place:${x.id}] ${x.name} (${x.kind}) — ${String(x.description||'').slice(0,110)}`).join('\n'));
+  if(entities.length)lines.push('People, groups and institutions already in this world:\n'+
+    entities.slice(0,16).map(e=>`[entity:${e.id}] ${e.name} (${e.kind})`).join('\n'));
   const relevantLore=lore.filter(e=>e && typeof e.content==='string' && !e.disabled && (!e.sessionIds || !e.sessionIds.length));
   if(relevantLore.length)lines.push('Approved world lore (creator-visible; never automatically NPC knowledge):\n'+
     relevantLore.slice(0,7).map(x=>`[lore:${x.id}] ${String(x.title||'').slice(0,100)}: ${x.content.slice(0,300)}`).join('\n'));
@@ -104,7 +101,7 @@ export function makeCharacterDraftRequest({character,target='full',guidance='',w
     `Established identity and adjacent traits (protected):\n${JSON.stringify(compact).slice(0,3200)}`,
     `Other filled fields, compressed for whole-character consistency:\n${JSON.stringify(remaining).slice(0,2500)}`,
     `Detailed existing fields most relevant to this request:\n${JSON.stringify(focused).slice(0,2900)}`,
-    `Selected world and grounded places/relationships (reference only):\n${worldContext.context.slice(0,3400)}`,
+    `Selected world and grounded places/relationships (reference only):\n${worldContext.context.slice(0,4500)}`,
     'If the references leave an important fact unknown, stay appropriately conditional instead of inventing precision. Keep the result in the requested compartment.',
   ].join('\n\n');
   return {worldId,target,fields,messages:[{role:'system',content:system},{role:'user',content:user}],
