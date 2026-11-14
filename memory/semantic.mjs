@@ -81,7 +81,11 @@ export function createLocalSemanticRetriever({
       // This is not a complete vector index: intermediate uncued memories can
       // still be missed, and the evaluation must measure that limitation.
       const mem=selectSemanticDialogueCandidates(store.db,{
-        timelineId,actorId,query,limit:room
+        timelineId,actorId,query,limit:room,
+        // The latest witnessed turns are already in direct conversation
+        // context. Re-embedding the user's current question produces trivial
+        // similarity=1 "memories" and false positives on unrelated topics.
+        excludeMessageIds:scene.messages.slice(-8).map(m=>m.id)
       });
       const candidates=[...facts,...mem];
       if(!candidates.length)return [];
