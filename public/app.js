@@ -718,9 +718,21 @@ async function requestEventDraft(npcReply) {
 
 function renderInspector() {
   const host = $('inspector-content'); const c = activeCharacter(); const s = activeSession();
-  document.querySelectorAll('[data-tab]').forEach(btn => { btn.classList.toggle('active', btn.dataset.tab === currentTab); btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab)); });
+  const allowed=visibleDetailTabs(activeWorkspace);
+  if(!allowed.includes(currentTab))currentTab=allowed[0];
+  document.querySelectorAll('[data-tab]').forEach(btn => {
+    btn.hidden=!allowed.includes(btn.dataset.tab);
+    btn.classList.toggle('active', btn.dataset.tab === currentTab);
+    btn.setAttribute('aria-selected', String(btn.dataset.tab === currentTab));
+  });
+  document.querySelectorAll('.inspector-tabs .tab-group').forEach(group=>{
+    group.hidden=![...group.querySelectorAll('[data-tab]')].some(tab=>!tab.hidden);
+  });
   const heading=document.querySelector(`[data-tab="${currentTab}"]`);$('inspector-heading').textContent=heading?.textContent?.trim()||'Details';
-  if ((!s || !c) && !['library','setup','worlds','atlas','relations'].includes(currentTab)) { host.innerHTML='<h2 class="panel-title">No active scene</h2><p class="help">Use + beside Characters or restore a scene in Library to resume.</p>'; return; }
+  if ((!s && ['cast','emotion','scene','memory','context'].includes(currentTab)) ||
+    (!c && currentTab==='character')) {
+    host.innerHTML='<h2 class="panel-title">Nothing selected yet</h2><p class="help">Create a character in Characters or start a scene in Play. Use Settings & tools → Library to restore archived content.</p>';return;
+  }
   if (currentTab === 'character') {
     host.innerHTML = `<h2 class="panel-title">${escapeHtml(c.name)}</h2>
       <div class="character-overview" id="character-overview"></div>
@@ -1144,6 +1156,10 @@ function workspaceRows(items,display){
 }
 function openDetailDesk(tab) {
   if(!document.querySelector(`[data-tab="${tab}"]`))return;
+  if(!visibleDetailTabs(activeWorkspace).includes(tab)){
+    const target=Object.keys(WORKSPACE_META).find(w=>w!=='encounters'&&visibleDetailTabs(w).includes(tab));
+    if(target)setWorkspace(target);
+  }
   currentTab=tab;
   renderInspector();
   // Full workspaces open their editor in a focused canvas, not the old
