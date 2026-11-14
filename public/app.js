@@ -2134,15 +2134,57 @@ async function generate(mode = 'normal') {
   }
 }
 
-function send() {
-  if (running) return;
+async function send() {
+  if(running||sending)return;
   if(pendingReply){showError('Review or discard the pending NPC draft before sending another message.');return;}
-  const message=$('message-input').value.trim();if(!message)return;
-  if(!activeSession()){showError('Create or restore a scene first.');return;}
-  const session=activeSession();const channel=getChannel(session.channelId);
-  const target=sceneActor({...session,messages:[...session.messages,{role:'user',content:message}]});
+  const content=$('message-input').value.trim();if(!content)return;
+  const session=activeSession();if(!session){showError('Create or restore a scene first.');return;}
+  const channel=getChannel(session.channelId);
+  const target=sceneActor({...session,messages:[...session.messages,{role:'user',content}]});
   const recipients=channel.id==='in_person'?[...session.castIds]:target?[target.id]:[];
-  session.messages.push({id:crypto.randomUUID(),role:'user',channelId:channel.id,content:message,sentAt:Date.now(),witnessIds:recipients});$('message-input').value='';session.updatedAt=Date.now();save();renderLists();renderMessages();generate();
+  const message={id:crypto.randomUUID(),role:'user',channelId:channel.id,content,
+    sentAt:Date.now(),witnessIds:recipients};
+  if(!serverStorage){
+    // Preserve the browser-backup fallback when SQLite is unavailable.
+    session.messages.push(message);$('message-input').value='';
+    session.updatedAt=Date.now();save();renderLists();renderMessages();void generate();
+    return;
+  }
+  sending=true;$('send').disabled=true;$('message-input').readOnly=true;showError();
+  const worldAtSend=activeWorldId,sceneAtSend=session.id;
+  try {
+    // Flush prior field edits so an append never races an unsaved profile.
+    await requireSavedStory();
+    if(worldAtSend!==activeWorldId || activeSession()?.id!==sceneAtSend ||
+      session.channelId!==channel.id)
+      throw new Error('World, scene or channel changed while preparing the message.');
+    const response=await fetch('/api/scene/messages/append',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({worldId:worldAtSend,sceneId:sceneAtSend,revision,message})});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.error||`Message append failed (${response.status})`);
+    if(result.worldId!==worldAtSend||result.sceneId!==sceneAtSend||
+      result.message?.id!==message.id||!Number.isSafeInteger(result.revision))
+      throw new Error('Server returned a different world, scene or message');
+    revision=result.revision;
+    session.messages.push(result.message);
+    session.updatedAt=Date.now();
+    $('message-input').value='';
+    // The append is committed. Update only the emergency local browser copy;
+    // do not queue a redundant full-document PUT to SQLite.
+    try{
+      localStorage.setItem(backupStateKey(),JSON.stringify(state));
+      localStorage.removeItem(pendingBackupKey());
+    }catch{showError('Browser backup quota unavailable; the turn is saved in SQLite.');}
+    renderLists();renderMessages();renderHeader();
+  }catch(error){
+    // Keep the unsent text in the composer. Do not auto-replay unknown writes.
+    showError(error.message+' The draft remains in the composer; reload if another tab changed the story.');
+    return;
+  }finally{
+    sending=false;$('send').disabled=running;$('message-input').readOnly=false;
+  }
+  void generate();
 }
 
 $('new-session').onclick=()=>openNewSceneDialog();
