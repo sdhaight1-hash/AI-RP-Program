@@ -435,7 +435,7 @@ async function refreshWorldLibrary() {
 // backup, or stale per-world state is allowed to cross it.
 async function switchWorld(worldId) {
   if (worldId === activeWorldId) { $('world-launcher')?.close();return; }
-  if (running || aiDraftController || fidelityController) throw new Error('Finish or cancel generation before switching worlds.');
+  if (running || aiDraftController || fidelityController || localEvalController || worldEntryController) throw new Error('Finish or cancel generation before switching worlds.');
   if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
   if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
   await requireSavedStory();
@@ -1067,6 +1067,7 @@ function renderBuilderPortrait() {
 }
 function openBuilder(c) {
   if (!c) return;
+  localEvalController?.abort();
   builderCharacterId = c.id; builderTab = 'identity';
   $('builder-ai-preview').classList.add('hidden'); $('builder-ai-status').textContent = '';
   $('builder-ai-guidance').value = '';
@@ -1180,7 +1181,7 @@ function renderCharacterLab(host, character) {
   const actions=el('div','','inline-actions');
   const run=el('button','✧ Generate test reply','primary-button');run.id='fidelity-run';
   const stop=el('button','Stop','subtle-button');stop.id='fidelity-stop';stop.classList.toggle('hidden',!fidelityController);
-  run.disabled=!!fidelityController || !!aiDraftController || running;
+  run.disabled=!!fidelityController || !!localEvalController || !!aiDraftController || running;
   run.onclick=()=>runFidelityProbe();stop.onclick=()=>fidelityController?.abort();actions.append(run,stop);
   const status=el('p',fidelityController?'Model is generating…':'Each run tests the currently saved profile. Comparisons are qualitative, not scientific personality scores.','builder-note');status.id='fidelity-status';
   host.append(label,select,prompt,objective,actions,status);
@@ -1353,7 +1354,7 @@ async function runLocalModelAssessment() {
 
 async function runFidelityProbe() {
   const c=builderCharacter();
-  if (!c || fidelityController || aiDraftController || running) return;
+  if (!c || fidelityController || localEvalController || aiDraftController || running) return;
   if(!state.settings.model){$('fidelity-status').textContent='Load a local model in Setup before running a test.';return;}
   const charId=c.id;
   const {probe,messages,profileFingerprint}=makeFidelityProbe({character:structuredClone(c),probeId:fidelitySelectedProbe,
@@ -1455,7 +1456,7 @@ function setupBuilderAI() {
   };
   $('builder-close').onclick = () => $('character-builder').close();
   $('character-builder').addEventListener('close', () => { aiDraftController?.abort(); worldEntryController?.abort(); fidelityController?.abort(); localEvalController?.abort(); });
-  document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { if (builderTab === 'lab' && btn.dataset.builderTab !== 'lab') fidelityController?.abort(); builderTab = btn.dataset.builderTab; renderBuilder(); });
+  document.querySelectorAll('[data-builder-tab]').forEach(btn => btn.onclick = () => { if (builderTab === 'lab' && btn.dataset.builderTab !== 'lab') {fidelityController?.abort();localEvalController?.abort();} builderTab = btn.dataset.builderTab; renderBuilder(); });
   $('portrait-upload-button').onclick = () => $('portrait-upload-file').click();
   $('portrait-upload-file').onchange = async event => {
     const file = event.target.files?.[0]; event.target.value='';
@@ -1549,7 +1550,7 @@ function renderCharacterWorldCandidates(items,request,version) {
 
 async function generateCharacterWorldEntries() {
   const c=builderCharacter(),status=$('builder-world-status');
-  if(!c||worldEntryController)return;
+  if(!c||worldEntryController||localEvalController)return;
   if(!state.settings.model){status.textContent='Load a local model in Setup first.';return;}
   const aborter=new AbortController();worldEntryController=aborter;
   $('builder-world-suggest').disabled=true;
@@ -1598,7 +1599,7 @@ async function generateCharacterWorldEntries() {
 }
 
 async function generateBuilderDraft() {
-  const c = builderCharacter(); if (!c || aiDraftController) return;
+  const c = builderCharacter(); if (!c || aiDraftController || localEvalController) return;
   if (!state.settings.model) { $('builder-ai-status').textContent = 'Load a model first in Setup.'; return; }
   const target = $('builder-ai-target').value;
   const guidance = $('builder-ai-guidance').value.trim();
