@@ -23,7 +23,8 @@ export function initializeStoryProjection(db) {
       format_version INTEGER NOT NULL CHECK(format_version=1),
       revision INTEGER NOT NULL,
       fingerprint TEXT NOT NULL,
-      core TEXT NOT NULL
+      core TEXT NOT NULL,
+      primary_mode INTEGER NOT NULL DEFAULT 0 CHECK(primary_mode IN (0,1))
     );
     CREATE TABLE IF NOT EXISTS story_projection_characters (
       character_id TEXT PRIMARY KEY,
@@ -43,6 +44,10 @@ export function initializeStoryProjection(db) {
       PRIMARY KEY(scene_id,position)
     );
   `);
+  // Shadow tables created before primary mode was introduced gain the flag
+  // transactionally; do not reinterpret existing records as primary.
+  if(!db.prepare('PRAGMA table_info(story_projection_meta)').all().some(x=>x.name==='primary_mode'))
+    db.exec('ALTER TABLE story_projection_meta ADD COLUMN primary_mode INTEGER NOT NULL DEFAULT 0 CHECK(primary_mode IN (0,1))');
 }
 
 export function inspectStoryProjectionInput(state) {
@@ -160,4 +165,46 @@ export function verifyStoryProjection(db,snapshot) {
 
 export function projectionEnabled(db) {
   return hasSchema(db)&&Boolean(db.prepare('SELECT 1 FROM story_projection_meta WHERE id=1').get());
+}
+
+export function projectionPrimary(db) {
+  if(!projectionEnabled(db))return false;
+  const fields=db.prepare('PRAGMA table_info(story_projection_meta)').all();
+  if(!fields.some(x=>x.name==='primary_mode'))return false;
+  return db.prepare('SELECT primary_mode AS active FROM story_projection_meta WHERE id=1').get()?.active===1;
+}
+
+export function compactPrimaryDocument(state) {
+  const {characters,sessions,...core}=state;
+  return {characters:[],sessions:[],...core};
+}
+
+// Reads the full story only from the verified, explicitly activated projection.
+// The smaller studio_state row still controls the monotonic revision and retains
+// core settings; it is NOT a fallback that may silently erase a timeline.
+export function readPrimaryStory(db,row) {
+  if(!projectionPrimary(db))throw Error('Normalized primary storage is not enabled');
+  const projected=readStoryProjection(db);
+  if(!projected||projected.revision!==row.revision)
+    throw Error('Normalized primary revision mismatch');
+  if(JSON.stringify(compactPrimaryDocument(projected.state))!==row.document)
+    throw Error('Normalized primary metadata differs from canonical revision');
+  return projected.state;
+}
+
+// Apply inside the same world SQLite transaction. Backup-gated CLI only.
+export function enablePrimaryProjection(db,snapshot) {
+  if(!db.isTransaction)throw Error('Primary cutover requires a SQLite transaction');
+  if(!projectionEnabled(db))throw Error('Stage and verify normalized shadow storage first');
+  if(projectionPrimary(db))throw Error('Normalized primary storage already active');
+  verifyStoryProjection(db,snapshot);
+  initializeStoryProjection(db);
+  const compact=JSON.stringify(compactPrimaryDocument(snapshot.state));
+  const update=db.prepare('UPDATE studio_state SET document=? WHERE id=1 AND revision=?')
+    .run(compact,snapshot.revision);
+  if(update.changes!==1)throw Error('Story revision changed during primary cutover');
+  db.prepare('UPDATE story_projection_meta SET primary_mode=1 WHERE id=1 AND revision=?')
+    .run(snapshot.revision);
+  readPrimaryStory(db,{revision:snapshot.revision,document:compact});
+  return {revision:snapshot.revision,compactBytes:Buffer.byteLength(compact,'utf8')};
 }
