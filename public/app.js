@@ -1,11 +1,10 @@
-import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, buildMessages, getActiveLore, importCharacter, THEMES, CHARACTER_FIELDS, parseCharacterDraft, EMOTION_BEATS, DEFAULT_EMOTION, applyEmotionBeat, settleEmotion, describeEmotion } from '/engine.mjs';
+import { STORAGE_KEY, createCharacter, createSession, makeInitialState, normalizeState, importCharacter, THEMES, CHARACTER_FIELDS, parseCharacterDraft, EMOTION_BEATS, DEFAULT_EMOTION, applyEmotionBeat, settleEmotion, describeEmotion } from '/engine.mjs';
 import { initAtmosphere } from '/scene.js';
-import { chooseSpeaker, createActorContext, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
+import { chooseSpeaker, archiveCharacter, archiveSession, duplicateSession, purgeArchived, createSceneEvent, actorVisibleEvents } from '/harness.mjs';
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 import { getChannel } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
 import { normalizeFrequentPlaces, importedEncounter } from '/character/schema.mjs';
-import { characterPlaceContext } from '/character/context.mjs';
 import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis } from '/character/authoring.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 
@@ -390,8 +389,7 @@ function renderHeader() {
   stageImage.classList.toggle('hidden', !c?.portrait);
   if (c?.portrait) stageImage.src = portraitSrc(c.portrait); else stageImage.removeAttribute('src');
   atmosphere(c?.color || '#a68dd6');
-  const lore = s && c ? getActiveLore(state.lore, s.messages,4,{actorId:c.id,sessionId:s.id}) : [];
-  $('lore-active').textContent = lore.length ? `Active lore: ${lore.map(l => l.title || l.keywords.join(', ')).join(' · ')}` : '';
+  $('lore-active').textContent = s && c ? 'World-scoped actor memory · inspect Context for retrieved evidence' : '';
 }
 
 function field(key, label, value, options = {}) {
@@ -1399,7 +1397,6 @@ async function generate(mode = 'normal') {
     }catch(err){showError(err.message);return;}
   }
   const actorId = retry ? (previous.speakerId || session.characterId) : character.id;
-  const history = retry ? session.messages.slice(0,-1) : session.messages;
   const originalVariants = retry ? (Array.isArray(previous.variants) && previous.variants.length ? [...previous.variants] : [previous.content]) : [];
   const basis=replyBasis(session);
   running=true;controller=new AbortController();
