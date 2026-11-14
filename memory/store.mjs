@@ -19,8 +19,10 @@ export function syncConversationMemories(db, state) {
   const people = new Map((state.characters || []).map(c => [c.id,c.name]));
   const expected = new Set();
   const upsert = db.prepare("INSERT INTO actor_memories(id,timeline_id,scene_id,actor_id,source_message_id,source_hash,text,occurred_at,origin) VALUES(?,?,?,?,?,?,?,?, 'direct') ON CONFLICT(id) DO UPDATE SET source_hash=excluded.source_hash,text=excluded.text,occurred_at=excluded.occurred_at");
-  const current = db.prepare('SELECT source_hash FROM actor_memories WHERE id=?');
-  const validTimeline = db.prepare('SELECT 1 FROM timeline_actors WHERE timeline_id=? AND actor_id=?');
+  // Read the small, bounded world snapshot once; avoid one SELECT per message
+  // on every debounced save of a long-running scene.
+  const existing = new Map(db.prepare("SELECT id,source_hash FROM actor_memories WHERE origin='direct'").all().map(row=>[row.id,row.source_hash]));
+  const validActors = new Set(db.prepare('SELECT timeline_id,actor_id FROM timeline_actors').all().map(a=>JSON.stringify([a.timeline_id,a.actor_id])));
   for (const scene of state.sessions || []) {
     if (!scene.timelineId) continue;
     const cast = new Set(scene.castIds || [scene.characterId]);
@@ -32,10 +34,10 @@ export function syncConversationMemories(db, state) {
       const holders = new Set([...witnesses, ...(speaker ? [speaker] : [])]);
       const sourceHash = digest(JSON.stringify([message.role,speaker,message.content,message.channelId,witnesses.slice().sort()]));
       for (const actorId of holders) {
-        if (!cast.has(actorId) || !people.has(actorId) || !validTimeline.get(scene.timelineId,actorId)) continue;
+        if (!cast.has(actorId) || !people.has(actorId) || !validActors.has(JSON.stringify([scene.timelineId,actorId]))) continue;
         const identifier = digest(JSON.stringify([scene.timelineId,scene.id,actorId,message.id]));
         expected.add(identifier);
-        if (current.get(identifier)?.source_hash === sourceHash) continue;
+        if (existing.get(identifier) === sourceHash) continue;
         const who = message.role === 'user' ? 'Player' : (speaker === actorId ? 'You' : people.get(speaker) || 'Another character');
         const text = who + ' said: ' + message.content.slice(0,1400);
         const occurredAt = Number.isFinite(message.sentAt) ? message.sentAt : Number(scene.updatedAt) || 0;
@@ -45,9 +47,8 @@ export function syncConversationMemories(db, state) {
   }
   // Removing a source message removes its derived dialogue memory, but never
   // erases an immutable memory snapshot held by a fork.
-  const direct = db.prepare("SELECT id FROM actor_memories WHERE origin='direct'").all();
   const remove = db.prepare("DELETE FROM actor_memories WHERE id=?");
-  for (const row of direct) if (!expected.has(row.id)) remove.run(row.id);
+  for (const id of existing.keys()) if (!expected.has(id)) remove.run(id);
 }
 
 // Forked timelines snapshot all memories known at the fork instant. Later
