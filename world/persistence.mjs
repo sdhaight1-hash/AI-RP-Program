@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { snapshotMemoriesForFork } from '../memory/store.mjs';
 import {
   LEGACY_WORLD_ID, LEGACY_CANON_ID, legacyTimelineId, playerActorId,
   newWorldRecord, newTimelineRecord, cleanTitle, assertActorAuthority,
@@ -198,6 +199,7 @@ export class WorldRepository {
       const insert=this.db.prepare('INSERT INTO timeline_positions(timeline_id,actor_id,location_id,updated_at) VALUES (?,?,?,?)');
       for(const position of this.actorLocations(timelineId))
         insert.run(record.id,position.actorId===oldPlayer ? newPlayer : position.actorId,position.locationId,now());
+      snapshotMemoriesForFork(this.db,timelineId,record.id);
       this.db.exec('COMMIT');
       return record;
     } catch(err){this.db.exec('ROLLBACK');throw err;}
