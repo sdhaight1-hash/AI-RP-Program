@@ -116,6 +116,5 @@ test('when native capacity is undiscoverable, server honors the explicitly confi
     assert.equal(response.metadata.countMethod,'estimated');
   }finally{
     await new Promise(resolve=>app.close(resolve));
-    store.close();
   }
 });
