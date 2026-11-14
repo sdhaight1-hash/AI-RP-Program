@@ -12,6 +12,23 @@ import { initializeMemorySchema, syncConversationMemories } from './memory/store
 import { initializeFactSchema } from './memory/facts.mjs';
 import { projectionEnabled,projectionPrimary,readPrimaryStory,compactPrimaryDocument,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
 
+function assertPersistedStoryShape(raw) {
+  // normalizeState intentionally repairs loosely structured browser imports.
+  // Do not use that fallback when reading a durable SQLite revision: it can
+  // silently replace a damaged world with demo data or discard invalid scenes.
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)||
+    !Array.isArray(raw.characters)||!Array.isArray(raw.sessions))
+    throw new Error('Stored story document is malformed; restore a verified world backup instead of overwriting it');
+  if(raw.characters.some(c=>!c||typeof c.id!=='string'||!c.id||
+    typeof c.name!=='string'))
+    throw new Error('Stored story contains a malformed character; restore a verified backup');
+  if(raw.sessions.some(scene=>!scene||typeof scene.id!=='string'||!scene.id||
+    typeof scene.characterId!=='string'||!scene.characterId||
+    !Array.isArray(scene.messages)||scene.messages.some(m=>
+      !m||!['user','assistant'].includes(m.role)||typeof m.content!=='string')))
+    throw new Error('Stored story contains a malformed scene or message; restore a verified backup');
+}
+
 export class StudioStore {
   constructor(filename = join(process.cwd(), '.data', 'studio.sqlite'), { scopeWorldId = null } = {}) {
     this.scopeWorldId = scopeWorldId;
@@ -43,7 +60,13 @@ export class StudioStore {
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS lore_fts USING fts5(id UNINDEXED, title, body, keywords, tokenize='unicode61')`);
     // Existing SQLite snapshots from earlier versions acquire a search index on first load.
-    const persisted = this.load().state;
+    let persisted;
+    try { persisted=this.load().state; }
+    catch(error) {
+      // Do not leak a write connection holding a Windows file lock when
+      // corrupt persisted data is deliberately rejected.
+      this.db.close();throw error;
+    }
     initializeWorldSchema(this.db, persisted, this.scopeWorldId);
     initializeEventLedger(this.db);
     initializeMemorySchema(this.db);
@@ -64,6 +87,7 @@ export class StudioStore {
     const state=projectionPrimary(this.db)
       ?readPrimaryStory(this.db,{revision:row.revision,document:row.document})
       :JSON.parse(row.document);
+    assertPersistedStoryShape(state);
     return {revision:row.revision,updatedAt:row.updated_at,
       state:bindTimelineIds(normalizeState(state))};
   }
