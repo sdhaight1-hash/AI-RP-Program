@@ -2,6 +2,7 @@
 // This is a subjective recollection, NOT a mutation of world canon.
 import { createHash,randomUUID } from 'node:crypto';
 import { sourceFingerprint } from '../world/event-ledger.mjs';
+import {projectionPrimary,readPrimaryStory} from '../storage/normalized.mjs';
 
 const kinds=new Set(['belief','promise','relationship','autobiography','observation']);
 const stableId=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -78,8 +79,12 @@ export function listActorFacts(store,{timelineId,actorId}){
 
 export function snapshotFactsForFork(db,parentId,childId){
   const rows=db.prepare("SELECT * FROM actor_facts WHERE timeline_id=? AND status='active'").all(parentId);
-  const saved=db.prepare('SELECT document FROM studio_state WHERE id=1').get()?.document;
-  const scenes=new Map((saved?JSON.parse(saved).sessions:[]).map(scene=>[scene.id,scene]));
+  const saved=db.prepare('SELECT revision,document FROM studio_state WHERE id=1').get();
+  // In normalized-primary mode the studio_state row intentionally contains
+  // no scenes. Validate and read the authoritative scene projection instead
+  // of mistaking every reviewed source for missing during a timeline fork.
+  const state=saved?(projectionPrimary(db)?readPrimaryStory(db,saved):JSON.parse(saved.document)):null;
+  const scenes=new Map((state?.sessions||[]).map(scene=>[scene.id,scene]));
   const insert=db.prepare("INSERT OR IGNORE INTO actor_facts(id,timeline_id,actor_id,scene_id,source_message_id,source_hash,kind,text,status,origin,supersedes_id,created_at) VALUES(?,?,?,?,?,?,?,?, 'active','inherited',NULL,?)");
   for(const row of rows){
     // Exclude unsupported/stale direct memories before freezing them into a fork.
