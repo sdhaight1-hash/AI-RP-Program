@@ -49,6 +49,29 @@ export function reconcileCharacterRecords(db, state, worldId) {
   return {removedCharacters:deleted};
 }
 
+export function reconcileRemovedSceneSources(db,state) {
+  if(!db.isTransaction)throw new Error('Scene reconciliation requires a transaction');
+  if(!state||!Array.isArray(state.sessions))throw new Error('A valid scene snapshot is required');
+  const present=new Set(state.sessions.map(scene=>scene.id));
+  const prior=new Set([
+    ...db.prepare('SELECT DISTINCT scene_id FROM actor_memories').all().map(x=>x.scene_id),
+    ...db.prepare('SELECT DISTINCT scene_id FROM actor_facts').all().map(x=>x.scene_id),
+    ...db.prepare('SELECT DISTINCT scene_id FROM event_proposals').all().map(x=>x.scene_id)
+  ]);
+  let removed=0;
+  for(const sceneId of prior){
+    if(present.has(sceneId))continue;
+    removed++;
+    // Only forgotten sources are removed. Forks with a live descendant scene
+    // are blocked from parent removal by purgeArchived. Accepted events are
+    // still independently committed world canon, not dialogue memories.
+    db.prepare('DELETE FROM actor_memories WHERE scene_id=?').run(sceneId);
+    db.prepare('DELETE FROM actor_facts WHERE scene_id=?').run(sceneId);
+    db.prepare("DELETE FROM event_proposals WHERE scene_id=? AND status!='accepted'").run(sceneId);
+  }
+  return {removedScenes:removed};
+}
+
 function removeEntityRelations(db,worldId,entityId) {
   db.prepare(`DELETE FROM character_world_relationship_sources WHERE world_id=?
     AND (source_entry_id=? OR relationship_id IN
