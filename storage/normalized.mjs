@@ -42,8 +42,6 @@ export function initializeStoryProjection(db) {
       document TEXT NOT NULL,
       PRIMARY KEY(scene_id,position)
     );
-    CREATE INDEX IF NOT EXISTS story_projection_messages_by_id
-      ON story_projection_messages(scene_id,message_id);
   `);
 }
 
@@ -108,7 +106,11 @@ export function writeStoryProjection(db,state,revision) {
   }
   const current=db.prepare('SELECT scene_id FROM story_projection_scenes').all();
   const deleteScene=db.prepare('DELETE FROM story_projection_scenes WHERE scene_id=?');
-  for(const row of current)if(!keepScenes.has(row.scene_id))deleteScene.run(row.scene_id);
+  const deleteMessages=db.prepare('DELETE FROM story_projection_messages WHERE scene_id=?');
+  for(const row of current)if(!keepScenes.has(row.scene_id)){
+    deleteMessages.run(row.scene_id); // Also safe when legacy SQLite foreign_keys is disabled.
+    deleteScene.run(row.scene_id);
+  }
   db.prepare(`INSERT INTO story_projection_meta(id,format_version,revision,fingerprint,core)
     VALUES(1,1,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,
     fingerprint=excluded.fingerprint,core=excluded.core`)
@@ -122,6 +124,9 @@ export function readStoryProjection(db) {
   const meta=db.prepare('SELECT format_version AS version,revision,fingerprint,core FROM story_projection_meta WHERE id=1').get();
   if(!meta)return null;
   if(meta.version!==1)throw new Error('Unknown normalized story projection version');
+  const orphan=db.prepare(`SELECT 1 FROM story_projection_messages m
+    WHERE NOT EXISTS(SELECT 1 FROM story_projection_scenes s WHERE s.scene_id=m.scene_id) LIMIT 1`).get();
+  if(orphan)throw new Error('Orphaned normalized message');
   const core=decode(meta.core);
   const characters=db.prepare('SELECT character_id,document FROM story_projection_characters ORDER BY position').all()
     .map(row=>{const item=decode(row.document);if(item.id!==row.character_id)throw Error('Character projection identity mismatch');return item;});
