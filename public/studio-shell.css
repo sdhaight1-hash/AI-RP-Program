@@ -746,3 +746,45 @@ body:not([data-workspace="story"]) .composer-area{display:none!important}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{transition-duration:0.01ms!important;animation-duration:0.01ms!important;scroll-behavior:auto!important}
 }
+
+
+/* Large, focused editors are essential for the Atlas, relationships and memory
+   inspectors; otherwise a sophisticated 2026 feature set is crammed into 340px. */
+.inspector-top-actions{display:flex;align-items:center;gap:6px}
+.inspector-expand{font-size:11px;padding:7px 10px}
+body.detail-focus .inspector{
+  position:fixed;
+  display:flex;
+  top:0;right:0;bottom:0;
+  width:min(800px,calc(100vw - 20px));
+  height:100dvh;
+  z-index:51;
+  box-shadow:-35px 0 90px #0009;
+}
+body.detail-focus .inspector-top{padding:18px 27px}
+body.detail-focus .inspector-close{display:inline-flex}
+body.detail-focus .stage{height:95px;flex-basis:95px}
+body.detail-focus .inspector-tabs{max-height:146px;padding:11px 25px;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 13px}
+body.detail-focus .inspector-body{padding:30px clamp(24px,5vw,70px) 50px}
+body.detail-focus .inspector-body>.panel-title{font-size:34px}
+body.detail-focus #inspector-scrim:not(.hidden){
+  display:block;
+  position:fixed;inset:0;
+  z-index:50;
+  background:#0009;
+  border:0;border-radius:0;
+}
+body.detail-focus .inspector-body .group{max-width:650px}
+body.detail-focus .inspector-body :where(input,textarea,select){font-size:13px}
+.builder-dialog[open]{display:flex;flex-direction:column}
+.builder-dialog[open] .builder-top{flex:0 0 auto}
+.builder-dialog[open] .builder-grid{flex:1;min-height:0;height:auto}
+.builder-dialog:not([open]){display:none}
+#builder-world-context{white-space:pre-line}
+@media(max-width:760px){
+  body.detail-focus .inspector{width:min(96vw,760px)}
+  body.detail-focus .inspector-tabs{grid-template-columns:1fr 1fr;max-height:166px;padding:12px 15px}
+  body.detail-focus .inspector-body{padding:20px 18px}
+  .builder-dialog[open] .builder-grid{overflow:auto;height:auto}
+  .inspector-expand{font-size:10px}
+}
