@@ -2,7 +2,13 @@
 
 An early, self-contained roleplay web app. The design draws on Character.AI's character-first conversations, NovelAI's story settings and alternative generations, and SillyTavern's character/persona/lorebook workflow. It is original software, not a clone of those apps.
 
-**Status: prototype v2.1 (actor-scoped dialogue recollection and context budgeting).** A local model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, autonomous NPC life, semantic memory consolidation, and full Tavern PNG/V2 card support are **not** implemented yet. Per-world SQLite storage, witnessed-dialogue recall, accepted-event knowledge, topic-sensitive identity context, safe Trash, indexed lore, and optional ComfyUI workflow execution are implemented.
+**Status: evolving local-first studio, Studio Experience v3 (November 2026).** Worlds are independent, character/world links require review, actor memory is witness-scoped, and the redesigned interface organizes these systems into five task-focused workspaces. A local model server is required for AI replies. The WebGL panel is atmospheric decoration, **not** a world renderer. World simulation, autonomous NPC life, semantic memory consolidation, and full Tavern PNG/V2 card support are **not** implemented yet. Per-world SQLite storage, witnessed-dialogue recall, accepted-event knowledge, topic-sensitive identity context, safe Trash, indexed lore, and optional ComfyUI workflow execution are implemented.
+
+## New Studio Experience
+
+The workspace shell now organizes features as **World & canon**, **Characters**, **Story room**, **Memory & review**, and **Models & lab**. Use the left navigation or **Ctrl+K / Cmd+K** to jump directly to tools, including Atlas, Relations, memory traces, Character Studio and Fidelity Lab. World editing and memory review can open in a wide focused detail panel. The world chooser is searchable, and Character Studio displays field completion plus established world context. The layout adapts to small screens and preserves existing color themes.
+
+See [the Studio Experience v3 architecture, interaction guide and verification checklist](docs/studio-experience-v3.md). For headless browser verification (optional ChromeDriver installation), run `npm run test:browser`; GitHub Actions on Node 22 archives desktop/mobile screenshots as `ui-review-screenshots`.
 
 ## Requirements
 
@@ -22,7 +28,7 @@ npm start
 
 To stop the server from the same terminal, type **`quit`** or **`exit`** and press Enter (or use **Ctrl+C**). The app closes its HTTP server and SQLite database cleanly.
 
-Then open **http://127.0.0.1:4173** in your browser. Start your local model server first (or start it later and click **Find local models** in the Setup tab). On Windows PowerShell, to use LM Studio instead of KoboldCpp:
+Then open **http://127.0.0.1:4173** in your browser. Start your local model server first (or start it later and click **Find local models** in Models & lab → Setup). On Windows PowerShell, to use LM Studio instead of KoboldCpp:
 
 ```powershell
 $env:INFERENCE_URL="http://127.0.0.1:1234/v1"
