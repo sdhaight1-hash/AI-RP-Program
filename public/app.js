@@ -4,7 +4,7 @@ import { chooseSpeaker, archiveCharacter, archiveSession, duplicateSession, purg
 import { DEFAULT_DISPOSITION, EMOTION_NAMES, createMind, normalizeMind, normalizeAppraisal, appraiseConfirmedEvent, advanceMindTime, describeMind } from '/psychology.mjs';
 import { getChannel } from '/interactions/channels.mjs';
 import { inspectNpcReply, replyBasis, isReplyBasisCurrent } from '/interactions/reply-review.mjs';
-import { normalizeFrequentPlaces, importedEncounter } from '/character/schema.mjs';
+import { normalizeFrequentPlaces, importedEncounter, CHARACTER_V2_FIELDS } from '/character/schema.mjs';
 import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterChanges, validateCharacterDraftBasis, characterDraftVersion, worldDraftVersion } from '/character/authoring.mjs';
 import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/character/world-bridge.mjs';
 import { proposedRelationshipKinds } from '/character/relationship-bridge.mjs';
@@ -19,6 +19,7 @@ const text = (s) => String(s ?? '');
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch { state = makeInitialState(); }
 let currentTab = 'character';
+let activeWorkspace = 'story';
 let worldLibrary = null;
 let loadingWorlds = false;
 let selectedWorldId = null;
@@ -1054,7 +1055,204 @@ async function checkComfyJob() {
     }
   }catch(err){status.textContent='ComfyUI job status: '+err.message;}
 }
-function render() { applyTheme(); renderLists(); renderHeader(); renderMessages(); renderInspector(); renderReadingMode(); }
+
+const WORKSPACE_META=Object.freeze({
+  world:{name:'World & canon',kicker:'THE UNIVERSE',title:'The world behind the story',
+    summary:'A consistent setting with its own places, people, relationships and independent timelines. Edit canon deliberately; scenes do not silently rewrite it.',
+    tab:'worlds'},
+  characters:{name:'Characters',kicker:'THE CAST',title:'People with lives beyond the scene',
+    summary:'Build distinct personalities, histories, routines and voices rooted in this world. Reviewed character details can inform new world canon without forcing it.',
+    tab:'character'},
+  story:{name:'Story room',kicker:'LIVE STORY',title:'Story room',summary:'',tab:'scene'},
+  memory:{name:'Memory & review',kicker:'EVIDENCE & CONTINUITY',title:'What each character can remember',
+    summary:'Witnessed dialogue, reviewed subjective beliefs and objective world events are different kinds of knowledge. Review the evidence before making it canon.',
+    tab:'context'},
+  tools:{name:'Models & lab',kicker:'LOCAL INFRASTRUCTURE',title:'Your private creative toolkit',
+    summary:'Choose a local model, inspect exactly what it sees, test character fidelity, evaluate semantic recall and manage visual workflows—all from this machine.',
+    tab:'setup'}
+});
+const workspaceButton=(label,action,primary=false)=>{
+  const button=el('button',label,primary?'primary-button workspace-link-button':'subtle-button workspace-link-button');
+  button.type='button';
+  button.onclick=action;
+  return button;
+};
+function workspaceCard({index,title,description,actions=[],featured=false,wide=false,content=null}){
+  const card=el('section','',`workspace-card${featured?' featured':''}${wide?' wide':''}`);
+  card.append(el('span',index,'workspace-card-index'),el('h2',title),el('p',description));
+  if(content)card.append(content);
+  const footer=el('div','','workspace-actions');
+  for(const [label,action,primary] of actions)footer.append(workspaceButton(label,action,Boolean(primary)));
+  if(actions.length)card.append(footer);
+  return card;
+}
+function workspaceStats(entries){
+  const grid=el('div','','workspace-stat-grid');
+  for(const [value,label] of entries){
+    const item=el('div','','workspace-stat');
+    item.append(el('div',String(value),'workspace-stat-number'),el('div',label,'workspace-stat-label'));
+    grid.append(item);
+  }
+  return grid;
+}
+function workspaceRows(items,display){
+  const wrap=el('div','','workspace-entity-list');
+  if(!items.length){wrap.append(el('p','Nothing established here yet.','empty-note'));return wrap;}
+  for(const item of items.slice(0,7)){
+    const [title,meta]=display(item),row=el('div','','workspace-entity-row');
+    row.append(el('span',title,'workspace-entity-name'),el('span',meta||'','workspace-entity-meta'));
+    wrap.append(row);
+  }
+  return wrap;
+}
+function openDetailDesk(tab) {
+  if(!document.querySelector(`[data-tab="${tab}"]`))return;
+  currentTab=tab;
+  renderInspector();
+  if(window.matchMedia('(max-width:1100px)').matches)setDetailDeskOpen(true);
+}
+function setDetailDeskOpen(isOpen){
+  const desk=$('inspector'),scrim=$('inspector-scrim');
+  desk.classList.toggle('inspector-open',Boolean(isOpen));
+  scrim.classList.toggle('hidden',!isOpen);
+  for(const id of ['open-inspector','open-workspace-inspector'])$(id)?.setAttribute('aria-expanded',String(Boolean(isOpen)));
+}
+function setWorkspace(mode){
+  if(!Object.hasOwn(WORKSPACE_META,mode))return;
+  activeWorkspace=mode;
+  currentTab=WORKSPACE_META[mode].tab;
+  setDetailDeskOpen(false);
+  renderWorkspace();
+  renderInspector();
+}
+function renderWorkspace(){
+  const mode=Object.hasOwn(WORKSPACE_META,activeWorkspace)?activeWorkspace:'story';
+  const chosen=WORKSPACE_META[mode];
+  document.body.dataset.workspace=mode;
+  document.querySelectorAll('button[data-workspace]').forEach(button=>{
+    const active=button.dataset.workspace===mode;
+    button.classList.toggle('active',active);
+    button.setAttribute('aria-pressed',String(active));
+  });
+  const world=worldLibrary?.worlds?.find(x=>x.id===activeWorldId);
+  const worldName=world?.name||'Choose a world';
+  $('top-world-name').textContent=worldName;
+  $('top-workspace-name').textContent=chosen.name;
+  const panel=$('workspace-overview');
+  panel.classList.toggle('hidden',mode==='story');
+  if(mode==='story')return;
+  $('workspace-kicker').textContent=chosen.kicker;
+  $('workspace-title').textContent=chosen.title;
+  $('workspace-summary').textContent=chosen.summary;
+  const host=$('workspace-content');host.replaceChildren();
+  const characters=state.characters.filter(c=>!c.trashedAt);
+  const scenes=state.sessions.filter(s=>!s.trashedAt);
+  const places=(worldLibrary?.locations||[]).filter(x=>x.worldId===activeWorldId);
+  const entities=(worldLibrary?.entities||[]).filter(x=>x.worldId===activeWorldId);
+  const relationships=(worldLibrary?.relationships||[]).filter(x=>x.worldId===activeWorldId);
+  const timelines=(worldLibrary?.timelines||[]).filter(x=>x.worldId===activeWorldId);
+  const scene=activeSession(),character=activeCharacter();
+  const grid=el('div','','workspace-grid');
+  if(mode==='world'){
+    host.append(workspaceStats([[places.length,'Established places'],[entities.length,'People & entities'],
+      [relationships.length,'Authored relationships'],[timelines.length,'Independent timelines']]));
+    grid.append(workspaceCard({index:'01 · WORLD LIBRARY',title:worldName,
+      featured:true,description:world?.description||'Define the setting, era, atmosphere and social fabric of this universe.',
+      actions:[['Manage world & timelines',()=>openDetailDesk('worlds'),true],
+        ['Switch universe',()=>{renderWorldLauncher();$('world-launcher').showModal();}]],
+      content:workspaceRows(timelines,x=>[x.name,'Timeline'])}));
+    grid.append(workspaceCard({index:'02 · GEOGRAPHY',title:'Places that matter',
+      description:'Build a navigable atlas. A usual location is not an actor’s current position in a scene.',
+      content:workspaceRows(places,x=>[x.name,x.kind]),
+      actions:[['Open World Atlas',()=>openDetailDesk('atlas'),true]]}));
+    grid.append(workspaceCard({index:'03 · SOCIAL FABRIC',title:'People & relationships',
+      description:'Known people, institutions, and their authored relationships belong to this world. They do not automatically know each other’s private thoughts.',
+      content:workspaceRows(relationships,x=>{
+        const from=entities.find(e=>e.id===x.fromId),to=entities.find(e=>e.id===x.toId);
+        return [`${from?.name||'?'} → ${to?.name||'?'}`,x.kind];
+      }),actions:[['Open relationship graph',()=>openDetailDesk('relations'),true]]}));
+    grid.append(workspaceCard({index:'04 · CREATIVE LOOP',title:'World ⇄ character',
+      description:'Character biography can propose named world entries with exact source quotes. Accepting a place or kinship remains a creator decision—not a model action.',
+      actions:[['Open Character Studio',()=>character&&openBuilder(character),true],
+        ['View world lore',()=>openDetailDesk('lore')]]}));
+  }else if(mode==='characters'){
+    const complete=characters.reduce((total,c)=>total+CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length,0);
+    host.append(workspaceStats([[characters.length,'Active characters'],[CHARACTER_V2_FIELDS.length,'Dedicated field contracts'],
+      [complete,'Completed profile fields'],[entities.filter(e=>e.kind==='character').length,'World people']]));
+    const roster=workspaceCard({index:'01 · CHARACTER LIBRARY',title:'Your cast',
+      featured:true,wide:true,
+      description:'A profile captures enduring identity, appearance, psychology and history. Current location and emotions belong to the active timeline.',
+      actions:[['Create character',()=>$('new-character').click(),true],
+        ['Open active character',()=>character&&openBuilder(character)]]});
+    const rosterList=el('div','','workspace-entity-list');
+    for(const c of characters.slice(0,10)){
+      const row=el('div','','workspace-entity-row');
+      const detail=el('span','', 'workspace-entity-name');
+      const name=el('span',c.name||'Unnamed character');
+      const percent=CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length;
+      const info=el('span',`${percent}/${CHARACTER_V2_FIELDS.length} core fields`,'workspace-entity-meta');
+      const edit=workspaceButton('Edit',()=>openBuilder(c));
+      detail.append(name,el('span',c.occupation||c.tagline||'Character in development','workspace-entity-meta'));
+      row.append(detail,info,edit);rosterList.append(row);
+    }
+    if(!characters.length)rosterList.append(el('p','Create your first character to begin.','empty-note'));
+    roster.append(rosterList);grid.append(roster);
+    grid.append(workspaceCard({index:'02 · CHARACTER WORKSHOP',title:'A complete inner life',
+      description:'Use field-specific AI assistance grounded in everything already established. Each field has a separate purpose and the full character stays coherent.',
+      actions:[['Edit character',()=>character&&openBuilder(character),true],
+        ['View character details',()=>openDetailDesk('character')]]}));
+    grid.append(workspaceCard({index:'03 · WORLD PARTICIPATION',title:'Their place in the world',
+      description:'Link homes, workplaces, frequent places and evidence-backed relatives. Reviewed character-origin details can become world canon.',
+      actions:[['Open relationships',()=>openDetailDesk('relations'),true],
+        ['Open cast',()=>openDetailDesk('cast')]]}));
+  }else if(mode==='memory'){
+    const pinned=(scene?.messages||[]).filter(x=>x.pinned).length;
+    host.append(workspaceStats([[scenes.length,'Story timelines / scenes'],[pinned,'Pinned scene moments'],
+      [state.lore?.length||0,'Authored lore records'],[scene?.castIds?.length||0,'Current scene witnesses']]));
+    grid.append(workspaceCard({index:'01 · ACTOR EVIDENCE',title:'Who knows what?',
+      featured:true,description:'Actor-owned recall only uses witnessed speech, reviewed personal memories, and allowed lore. Audit exactly which source IDs reached the model.',
+      actions:[['Inspect recall & context',()=>openDetailDesk('context'),true]]}));
+    grid.append(workspaceCard({index:'02 · SCENE JOURNAL',title:'Past events and notes',
+      description:'Pinned moments and summaries preserve narrative continuity without converting unreviewed NPC speech into facts.',
+      actions:[['Open story journal',()=>openDetailDesk('memory'),true],
+        ['Review world events',()=>openDetailDesk('scene')]]}));
+    grid.append(workspaceCard({index:'03 · REFERENCE KNOWLEDGE',title:'World lore',
+      description:'Creator-authored world knowledge is separate from actor belief. Visibility and triggering decide what a character can legitimately recall.',
+      actions:[['Manage lore',()=>openDetailDesk('lore'),true]]}));
+    grid.append(workspaceCard({index:'04 · TRUST BOUNDARIES',title:'Evidence before canon',
+      description:'Private messages stay private. Reviewed beliefs are subjective, and timeline forks keep earlier knowledge snapshots without inheriting future events.',
+      actions:[['View world timelines',()=>openDetailDesk('worlds'),true]]}));
+  }else if(mode==='tools'){
+    host.append(workspaceStats([[state.settings.model?'1':'0','Selected chat models'],
+      [state.settings.contextWindow||state.settings.context_window||4096,'Requested context tokens'],
+      [characters.length,'Characters available for testing'],
+      [state.settings.readingMode?'ON':'OFF','Reading view']]));
+    grid.append(workspaceCard({index:'01 · INFERENCE',title:'Local model setup',
+      featured:true,description:`Current model: ${state.settings.model||'none selected'}. Configure KoboldCpp or LM Studio and inspect the model’s loaded context budget.`,
+      actions:[['Configure local model',()=>openDetailDesk('setup'),true],
+        ['Inspect prompt context',()=>openDetailDesk('context')]]}));
+    grid.append(workspaceCard({index:'02 · CHARACTER QUALITY',title:'Fidelity & evaluation',
+      description:'Run repeatable sandbox probes for voice, personality consistency, agency, world grounding and local-model latency. No story state is modified.',
+      actions:[['Open Fidelity Lab',()=>{
+        if(!character)return;
+        builderCharacterId=character.id;builderTab='lab';openBuilder(character);
+        builderTab='lab';renderBuilder();
+      },true]]}));
+    grid.append(workspaceCard({index:'03 · VISUAL WORKFLOWS',title:'Portraits & imagery',
+      description:'Work with local ComfyUI workflows, character portraits, and generated visual assets independently of story canon.',
+      actions:[['Open visuals',()=>openDetailDesk('gallery'),true]]}));
+    grid.append(workspaceCard({index:'04 · DATA OWNERSHIP',title:'Library & backups',
+      description:'Keep your fiction portable. Export local backups and manage archived scenes without connecting to a cloud story account.',
+      actions:[['Open library',()=>openDetailDesk('library'),true],
+        ['Export backup',()=>$('export-data').click()]]}));
+  }
+  host.append(grid);
+  if(mode==='world' || mode==='memory')host.append(el('p',
+    'World canon, timeline state, actor memories, and unreviewed drafts are distinct. No AI suggestion changes an established world without your approval.',
+    'workspace-note'));
+}
+function render() { applyTheme(); renderLists(); renderHeader(); renderMessages(); renderInspector(); renderReadingMode(); renderWorkspace(); }
+
 function renderReadingMode() {
   document.body.classList.toggle('reading-mode', Boolean(state.settings.readingMode));
   $('reading-toggle').textContent = state.settings.readingMode ? '◫ Chat view' : '◫ Story view';
