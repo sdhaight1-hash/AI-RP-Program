@@ -68,6 +68,12 @@ export function inspectWorldStorage(dataDir) {
         entry.orphanedCharacterEntities=orphaned.length;
         if(orphaned.length)report.warnings.push({scope:row.id,
           detail:orphaned.length+' obsolete character projections; opening this world repairs them'});
+        const duplicates=db.prepare(`SELECT source_character_id AS characterId,count(*) AS copies
+          FROM world_entities WHERE world_id=? AND source_character_id IS NOT NULL
+          GROUP BY source_character_id HAVING count(*)>1`).all(row.id);
+        entry.duplicateCharacterMirrors=duplicates.length;
+        if(duplicates.length)report.warnings.push({scope:row.id,
+          detail:duplicates.length+' characters have duplicate world identities. Review and delete redundant entities in Relations; linked relationships may be affected.'});
         const timelineIds=new Set(db.prepare('SELECT id FROM timelines WHERE world_id=?').all(row.id).map(x=>x.id));
         if(parsed.sessions.some(s=>s.timelineId&&!timelineIds.has(s.timelineId)))
           fail('Scene references an unknown or foreign timeline');
