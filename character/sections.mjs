@@ -49,3 +49,13 @@ export const BUILDER_SECTIONS = {
     ['exampleDialogue','Example exchanges','textarea','Demonstrations of voice, not events assumed to have happened.'],
   ],
 };
+
+/** Count authored fields in one tab; UI-only accent colors are not profile facts. */
+export function builderSectionCompletion(character,section){
+  const fields=(BUILDER_SECTIONS[section]||[]).map(([key])=>key).filter(key=>key!=='color');
+  const filled=fields.filter(key=>{
+    const value=character?.[key];
+    return Array.isArray(value)?value.some(x=>String(x||'').trim()):String(value??'').trim().length>0;
+  }).length;
+  return {filled,total:fields.length};
+}
