@@ -3,6 +3,7 @@
 // incremental row is linked to that fingerprint with a collision-resistant
 // append chain. No world is enabled automatically.
 import {createHash} from 'node:crypto';
+import {syncAppendedPlayerMemory} from '../memory/store.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const seed=fingerprint=>hash('ai-rp-journal-v1:'+fingerprint);
@@ -99,6 +100,8 @@ export function appendVerifiedPlayerRow(db,{sceneId,message,expectedRevision,upd
      !message.id||message.id.length>160||typeof message.content!=='string'||
      !message.content.trim()||message.content.length>30000||
      typeof message.channelId!=='string'||!Array.isArray(message.witnessIds)||
+     !Number.isSafeInteger(message.sentAt)||message.sentAt<0||
+     Object.keys(message).some(key=>!['id','role','content','channelId','sentAt','witnessIds','pinned'].includes(key))||
      !Number.isSafeInteger(expectedRevision)||expectedRevision<0||
      !Number.isSafeInteger(updatedAt)||updatedAt<0)
     throw new Error('Invalid verified player message append');
@@ -108,8 +111,11 @@ export function appendVerifiedPlayerRow(db,{sceneId,message,expectedRevision,upd
     throw new Error('Story revision changed before append');
   const scene=db.prepare('SELECT document FROM story_projection_scenes WHERE scene_id=?').get(sceneId);
   const head=db.prepare('SELECT message_count FROM story_append_heads WHERE scene_id=?').get(sceneId);
-  if(!scene||!head||JSON.parse(scene.document).trashedAt)
-    throw new Error('Scene not found or archived');
+  if(!scene||!head)throw new Error('Scene not found');
+  const sceneMetadata=JSON.parse(scene.document);
+  if(sceneMetadata.trashedAt||sceneMetadata.channelId!==message.channelId||
+     !sceneMetadata.timelineId)
+    throw new Error('Scene archived, unsaved or its communication medium changed');
   if(db.prepare('SELECT 1 FROM story_projection_messages WHERE scene_id=? AND message_id=?').get(sceneId,message.id)||
     db.prepare('SELECT 1 FROM story_append_rows WHERE scene_id=? AND message_id=?').get(sceneId,message.id))
     throw new Error('Duplicate source message ID');
@@ -125,8 +131,11 @@ export function appendVerifiedPlayerRow(db,{sceneId,message,expectedRevision,upd
   const written=db.prepare('UPDATE studio_state SET revision=?,updated_at=? WHERE id=1 AND revision=?')
     .run(row.version,updatedAt,expectedRevision);
   if(written.changes!==1)throw new Error('Story changed during append');
-  // A journal-only message is new potential actor knowledge even when the
-  // full transcript is not reserialized; it must invalidate in-flight replies.
+  // Source memory + FTS is committed with the same journal row and revision,
+  // never deferred to a later full-history resave.
+  syncAppendedPlayerMemory(db,sceneMetadata,message);
+  // Even a zero-witness journal append (if explicitly permitted by a future
+  // checked API) is a world change relevant to another actor's reply basis.
   db.prepare('UPDATE world_epoch SET version=version+1 WHERE id=1').run();
   return {revision:row.version,message};
 }
