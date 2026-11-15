@@ -141,3 +141,24 @@ test('new encounter workspace is reachable without hunting through world inspect
   assert.match(javascript,/\['error','detail-error'\]/);
   assert.match(css,/\.detail-error/);
 });
+
+
+test('world editors are independently served and available inline, not bound to the hidden inspector',async()=>{
+  assert.match(javascript,/renderAtlasPanel\(editor,scene\)/);
+  assert.match(javascript,/renderRelationsPanel\(editor\)/);
+  assert.match(javascript,/worldEditorView='overview'/);
+  assert.match(javascript,/world-editor-nav/);
+  assert.match(css,/\.world-editor-content/);
+  const store=new StudioStore(':memory:');
+  const app=createApp({store,fetchImpl:async()=>{throw Error('Offline testing only');}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  try{
+    const r=await fetch('http://127.0.0.1:'+app.address().port+'/world-editors.mjs');
+    assert.equal(r.status,200);
+    assert.match(r.headers.get('content-type'),/javascript/);
+    const module=await r.text();
+    assert.match(module,/export function renderAtlasPanel/);
+    assert.match(module,/export function renderRelationsPanel/);
+    assert.match(module,/permanentlyDeleteWorldEntry/);
+  }finally{await new Promise(resolve=>app.close(resolve));}
+});
