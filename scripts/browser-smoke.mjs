@@ -222,17 +222,22 @@ async function main(){
     await screenshot('03-focused-world-editor');
     assert.equal(await script("document.querySelector('#close-inspector').click();return document.body.classList.contains('detail-focus')"),false);
 
-    assert.equal(await script(`
+    const atlasCommandResult=await script(`
       document.querySelector('#open-command').click();
       document.querySelector('#command-search').value='atlas';
       document.querySelector('#command-search').dispatchEvent(new Event('input',{bubbles:true}));
       const choices=[...document.querySelectorAll('.command-item')].map(x=>x.textContent);
       document.querySelector('.command-item').click();
-      return choices.some(x=>x.includes('Atlas'))&&!document.querySelector('#command-palette').open&&
-        document.body.dataset.workspace==='world'&&document.body.dataset.worldPane==='atlas'&&
-        !!document.querySelector('.world-editor-content #atlas-create')&&
-        !document.body.classList.contains('detail-focus');
-    `),true,'command palette should navigate into the inline Atlas editor');
+      return {choices,open:document.querySelector('#command-palette').open,
+        workspace:document.body.dataset.workspace,pane:document.body.dataset.worldPane,
+        editor:!!document.querySelector('.world-editor-content #atlas-create'),
+        focus:document.body.classList.contains('detail-focus')};
+    `);
+    console.log('World atlas command diagnostics:',JSON.stringify(atlasCommandResult));
+    assert.ok(atlasCommandResult.choices.some(x=>x.includes('Atlas')) &&
+      !atlasCommandResult.open && atlasCommandResult.workspace==='world' &&
+      atlasCommandResult.pane==='atlas' && atlasCommandResult.editor &&
+      !atlasCommandResult.focus,'command palette should navigate into inline Atlas');
     await script(`document.querySelector('button[data-workspace="characters"]').click();return true`);
     assert.equal(await script("return document.querySelector('#workspace-title').textContent"),'People with lives beyond the scene');
     await screenshot('04-character-workspace');
