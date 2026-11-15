@@ -3,6 +3,7 @@
 // errors or does not finish with [DONE] never produces a usable ticket.
 export function createReplyStreamReader(){
   let buffer='',text='',done=false,error=null;
+  const decoder=new TextDecoder();
   const frame=source=>{
     const rows=source.split('\n');
     const data=rows.filter(line=>line.startsWith('data:'))
@@ -22,7 +23,7 @@ export function createReplyStreamReader(){
   };
   return {
     feed(chunk){
-      buffer+=(typeof chunk==='string'?chunk:new TextDecoder().decode(chunk)).replace(/\r\n/g,'\n');
+      buffer+=(typeof chunk==='string'?chunk:decoder.decode(chunk,{stream:true})).replace(/\r\n/g,'\n');
       const parts=buffer.split('\n\n');
       buffer=parts.pop()||'';
       for(const part of parts)frame(part);
