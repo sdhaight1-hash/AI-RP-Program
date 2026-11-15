@@ -35,6 +35,12 @@ export function sourcesFor({state={},library={},worldId}){
         add('character',person.id,field,value,'profile');
     }
   }
+  for(const place of (library.locations||[]).filter(x=>x.worldId===worldId).slice(0,1500))
+    add('location',place.id,'description',place.description,'established');
+  for(const entity of (library.entities||[]).filter(x=>x.worldId===worldId).slice(0,1500))
+    add('entity',entity.id,'description',entity.description,'established');
+  for(const relationship of (library.relationships||[]).filter(x=>x.worldId===worldId).slice(0,1500))
+    add('relationship',relationship.id,'notes',relationship.notes,'established');
   for(const entry of (state.lore||[]).slice(0,1500)){
     if(entry.worldId&&entry.worldId!==worldId)continue;
     for(const field of ['title','content','body','description'])add('lore',entry.id,field,entry[field],
@@ -93,7 +99,8 @@ export function discoverUniverseMentions({worldId,library,state={},focus='locati
       candidate.mentions++;
       if(candidate.evidence.length<4&&!candidate.evidence.some(e=>e.type===source.type&&e.id===source.id&&e.field===source.field)){
         candidate.evidence.push({type:source.type,id:source.id,field:source.field,trust:source.trust,
-          quote:quotesFrom(source.text,match.index,match.index+match[0].length)});
+          quote:quotesFrom(source.text,match.index,match.index+match[0].length),
+          ...(source.fingerprint?{fingerprint:source.fingerprint}:{})});
       }
     }
   }
