@@ -82,8 +82,8 @@ test('quick navigation keeps every workspace, editor and primary creator action 
   assert.match(javascript,/command-search/);
   assert.match(javascript,/event\.ctrlKey\|\|event\.metaKey/);
   for(const feature of [
-    'World & canon','Characters','Story room','Memory & review','Models & lab',
-    'World Library & timelines','Atlas & places','World relationships',
+    'Connical Universe & canon','Characters','Story room','Memory & review','Models & lab',
+    'Connical Universe library & timelines','Atlas & places','World relationships',
     'Scene direction & event review','Authored lore','Actor memory trace',
     'Character Studio · edit active character','Character Fidelity Lab',
     'Local model setup','Create a character','Start a new scene'

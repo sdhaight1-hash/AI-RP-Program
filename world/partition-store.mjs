@@ -6,7 +6,7 @@ import { mkdirSync, existsSync, readdirSync, renameSync, copyFileSync, rmSync } 
 import { join, dirname, basename } from 'node:path';
 import { StudioStore } from '../storage.mjs';
 import { projectionPrimary } from '../storage/normalized.mjs';
-import { legacyTimelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID } from './canon.mjs';
+import { legacyTimelineId, LEGACY_WORLD_ID, LEGACY_CANON_ID, cleanTitle } from './canon.mjs';
 import { makeEmptyWorldState } from '../engine.mjs';
 import { reconcileCharacterRecords,reconcileRemovedSceneSources,purgeSceneSourceRecords,deleteWorldRecord } from './deletion.mjs';
 import { assertExplicitPurges } from './conflict-guards.mjs';
@@ -117,6 +117,7 @@ export class WorldPartitionStore {
     return {
       list: () => ({...this.current.worlds.list(),worlds:catalogRows(this.registry),activeWorldId:this.activeWorldId}),
       createWorld: input => this.createWorld(input),
+      updateWorld: input => this.updateWorld(input),
       createTimeline: input => {this.assertWorld(input.worldId);return this.current.worlds.createTimeline(input);},
       forkTimeline: input => this.current.worlds.forkTimeline(input),
       createLocation: input => {this.assertWorld(input.worldId);return this.current.worlds.createLocation(input);},
@@ -241,8 +242,14 @@ export class WorldPartitionStore {
     }
   }
   repairWorldRecords(target,worldId) {
+    // The registry owns the public universe label. Recover any interrupted
+    // two-file metadata update when opening a world after a crash.
+    const canonical=this.registry.prepare('SELECT name,description FROM world_catalog WHERE id=?').get(worldId);
+    if(!canonical)throw Error('Connical Universe not found in registry');
     target.db.exec('BEGIN IMMEDIATE');
     try{
+      target.db.prepare('UPDATE worlds SET name=?,description=? WHERE id=? AND (name<>? OR description<>?)')
+        .run(canonical.name,canonical.description,worldId,canonical.name,canonical.description);
       const loaded=target.load().state;
       this.ensureCharacterEntities(loaded?.characters||[],target,worldId,loaded,{
         repairOrphans:true
@@ -273,6 +280,53 @@ export class WorldPartitionStore {
     previous?.close();
     return this.load();
   }
+  updateWorld({worldId,name,description,expectedName,expectedDescription}={}) {
+    this.assertWorld(worldId);
+    const previous=this.registry.prepare('SELECT id,name,description,created_at AS createdAt FROM world_catalog WHERE id=?')
+      .get(worldId);
+    if(!previous)throw Error('Connical Universe not found');
+    if(typeof expectedName!=='string'||typeof expectedDescription!=='string'||
+       previous.name!==expectedName||previous.description!==expectedDescription)
+      throw Error('Universe details changed; reload and review before saving');
+    const title=cleanTitle(name,'Universe name');
+    if(typeof description!=='string'||description.length>4000)
+      throw Error('Universe foundation must be 4,000 characters or fewer');
+    const foundation=description.trim();
+    if(title===previous.name&&foundation===previous.description)return previous;
+    // Two SQLite files cannot share a native transaction. Make the catalog
+    // authoritative, stage its transaction, update the scoped file, then
+    // commit the registry. Opening the universe reconciles crash windows.
+    this.registry.exec('BEGIN IMMEDIATE');
+    try {
+      this.current.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.current.worlds.updateWorldIdentity({
+          worldId,name:title,description:foundation,
+          expectedName:previous.name,expectedDescription:previous.description
+        });
+        this.current.db.exec('COMMIT');
+      }catch(error){
+        if(this.current.db.isTransaction)this.current.db.exec('ROLLBACK');
+        throw error;
+      }
+      const updated=this.registry.prepare(
+        'UPDATE world_catalog SET name=?,description=? WHERE id=? AND name=? AND description=?'
+      ).run(title,foundation,worldId,previous.name,previous.description);
+      if(updated.changes!==1)throw Error('Universe identity changed during save');
+      this.registry.exec('COMMIT');
+      return {...previous,name:title,description:foundation};
+    }catch(error){
+      if(this.registry.isTransaction)this.registry.exec('ROLLBACK');
+      // If the per-world transaction committed first, restore its canonical
+      // metadata immediately. A restart also repairs from the registry.
+      try{
+        this.current.db.prepare('UPDATE worlds SET name=?,description=? WHERE id=?')
+          .run(previous.name,previous.description,worldId);
+      }catch{/* Open-time repair handles interruptions and temporary locks. */}
+      throw error;
+    }
+  }
+
   createWorld(input) {
     const tempDir=join(this.dataDir,'worlds',`.new-${randomUUID()}`);
     mkdirSync(tempDir,{recursive:true});

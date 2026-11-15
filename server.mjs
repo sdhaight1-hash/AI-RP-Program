@@ -192,6 +192,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try { return json(res,201,store.worlds.createWorld(data)); }
         catch(err) { return json(res,400,{error:err.message}); }
       }
+      if (req.method === 'PATCH' && path === '/api/worlds') {
+        const input=await readJson(req,20000);
+        requireWorldScope(input.worldId);
+        try{return json(res,200,store.worlds.updateWorld(input));}
+        catch(error){
+          const stale=/changed|reload and review/.test(error.message);
+          return json(res,stale?409:422,{error:error.message});
+        }
+      }
       if (req.method === 'POST' && path === '/api/timelines') {
         const data=await readJson(req,3000);
         requireWorldScope(data.worldId);

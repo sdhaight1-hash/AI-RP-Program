@@ -1,41 +1,43 @@
-import {makeWorldAuthoringRequest} from '../authoring/world-scene.mjs';
+import {makeWorldAuthoringRequest,makeUniverseRevisionRequest} from '../authoring/world-scene.mjs';
 import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
 
 // The workspace is rebuilt after world-catalog refreshes. Keep the local,
 // uncommitted creation draft outside the disposable DOM, not in world canon.
 let pendingWorldDraft={name:'',description:''};
 let creatingWorld=false;
+let editingUniverse=false;
+let pendingUniverseRevision=null;
 // World and timeline editor presentation, wired to explicit world-scoped
 // callbacks. Avoids mutating the browser's active-world selection implicitly.
 export function renderWorldTimelineEditor(host,s,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
     activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
-    save,renderInspector,showError,running,fetch,getModel,beforeCreateWorld,getCurrentWorldId}=api;
+    save,renderInspector,showError,running,fetch,getModel,beforeCreateWorld,getCurrentWorldId,beforeUpdateUniverse}=api;
 
   host.innerHTML = `
   <div class="world-creation-shell">
     <header class="world-editor-hero">
       <span class="eyebrow">UNIVERSE WORKSPACE</span>
-      <h2 class="panel-title">Worlds & timelines</h2>
-      <p>Every world is an independent continuity. Create a setting, then develop its people, places and timelines inside that world. AI suggestions are drafts until you approve them.</p>
+      <h2 class="panel-title">Connical Universes & timelines</h2>
+      <p>Every Connical Universe is an independent continuity. Create a setting, then develop its people, places and timelines inside that world. AI suggestions are drafts until you approve them.</p>
     </header>
     <div class="world-composer-layout">
       <section class="world-create-composer" aria-labelledby="world-compose-heading">
         <div class="world-section-heading">
           <span class="world-step">01 / CREATE</span>
-          <h3 id="world-compose-heading">Begin a new world</h3>
-          <p>Start with a seed idea or write everything yourself. Nothing is copied from another world.</p>
+          <h3 id="world-compose-heading">Begin a new Connical Universe</h3>
+          <p>Start with a seed idea or write everything yourself. Nothing is copied from another Connical Universe.</p>
         </div>
         <div class="world-composer-grid">
           <div class="world-composer-fields">
-            <label class="field-label" for="world-new-name">World identity</label>
+            <label class="field-label" for="world-new-name">Universe identity</label>
             <input id="world-new-name" maxlength="120" placeholder="Name your universe…" autocomplete="off"/>
             <label class="field-label" for="world-new-description">Setting foundation</label>
             <textarea id="world-new-description" rows="9" maxlength="4000" placeholder="The time period, geography, cultures, ordinary life, tensions, atmosphere…"></textarea>
             <p class="help">This establishes the world's starting premise—not its complete history. You can develop locations, people and relationships afterward.</p>
             <div class="world-create-action">
               <span class="world-save-note">Separate continuity · No automatic canon changes</span>
-              <button class="primary-button" id="world-create">Create & open world</button>
+              <button class="primary-button" id="world-create">Create & open universe</button>
             </div>
           </div>
           <div class="world-composer-assist" id="world-ai-slot" aria-label="World creation writing partner"></div>
@@ -44,12 +46,33 @@ export function renderWorldTimelineEditor(host,s,api) {
       <aside class="world-existing-list" aria-labelledby="world-existing-heading">
         <div class="world-section-heading">
           <span class="world-step">02 / EXPLORE</span>
-          <h3 id="world-existing-heading">Your universes <span id="world-library-count" class="world-count"></span></h3>
-          <p>Open an existing world without merging its story or canon into another.</p>
+          <h3 id="world-existing-heading">Your Connical Universes <span id="world-library-count" class="world-count"></span></h3>
+          <p>Open an existing universe without merging its story or canon into another.</p>
         </div>
         <div id="world-library-list" class="world-library-entries"></div>
       </aside>
     </div>
+    <section class="world-create-composer universe-identity-editor" id="universe-identity-editor" aria-labelledby="universe-identity-heading">
+      <div class="world-section-heading">
+        <span class="world-step">CURRENT CONTINUITY / EDIT</span>
+        <h3 id="universe-identity-heading">Edit this Connical Universe</h3>
+        <p>Rename or revise this universe without replacing its ID, characters, timelines, or established events.</p>
+      </div>
+      <div class="world-composer-grid">
+        <div class="world-composer-fields">
+          <label class="field-label" for="universe-edit-name">Universe name</label>
+          <input id="universe-edit-name" maxlength="120" autocomplete="off"/>
+          <label class="field-label" for="universe-edit-description">Canonical foundation</label>
+          <textarea id="universe-edit-description" maxlength="4000" rows="9"></textarea>
+          <p class="help">Change universe-level descriptions here. Manage places, people, and events in their own workspaces.</p>
+          <div class="world-create-action">
+            <span class="world-save-note" id="universe-edit-state" role="status">No unsaved changes</span>
+            <button class="primary-button" id="universe-edit-save">Save universe changes</button>
+          </div>
+        </div>
+        <div class="world-composer-assist" id="universe-edit-ai-slot" aria-label="AI assistance for the current universe"></div>
+      </div>
+    </section>
     <section class="world-timeline-tools" aria-labelledby="world-timeline-heading">
       <div class="world-section-heading">
         <span class="world-step">CURRENT WORLD</span>
@@ -133,6 +156,72 @@ export function renderWorldTimelineEditor(host,s,api) {
     return;
   }
   $('world-library-count').textContent='('+worldLibrary.worlds.length+')';
+  const currentUniverse=worldLibrary.worlds.find(x=>x.id===activeWorldId);
+  const identitySection=$('universe-identity-editor');
+  identitySection.hidden=!currentUniverse;
+  if(currentUniverse){
+    if(!pendingUniverseRevision||pendingUniverseRevision.worldId!==activeWorldId){
+      pendingUniverseRevision={
+        worldId:activeWorldId,expectedName:currentUniverse.name,
+        expectedDescription:currentUniverse.description,
+        name:currentUniverse.name,description:currentUniverse.description
+      };
+    }
+    const draft=pendingUniverseRevision;
+    const editName=$('universe-edit-name'),editDescription=$('universe-edit-description');
+    editName.value=draft.name;editDescription.value=draft.description;
+    const indicate=()=>{
+      const changed=draft.name!==draft.expectedName||draft.description!==draft.expectedDescription;
+      $('universe-edit-state').textContent=changed?'Unsaved universe changes':'No unsaved changes';
+      $('universe-edit-save').disabled=editingUniverse||!changed;
+    };
+    const remember=()=>{
+      draft.name=editName.value;draft.description=editDescription.value;indicate();
+    };
+    editName.oninput=remember;editDescription.oninput=remember;indicate();
+    mountWorldSceneAssistant($('universe-edit-ai-slot'),{
+      mode:'universe',getModel,
+      isCurrent:()=>identitySection.isConnected&&getCurrentWorldId()===draft.worldId&&!editingUniverse,
+      beforeGenerate:beforeUpdateUniverse,
+      getRequest:(target,guidance)=>makeUniverseRevisionRequest({
+        worldId:draft.worldId,library:worldLibrary,
+        name:editName.value,description:editDescription.value,target,guidance
+      }),
+      onApply:patch=>{
+        if(patch.name!==undefined)editName.value=patch.name;
+        if(patch.description!==undefined)editDescription.value=patch.description;
+        remember();
+      }
+    });
+    $('universe-edit-save').onclick=async()=>{
+      if(editingUniverse)return;
+      editingUniverse=true;indicate();
+      try{
+        if(!serverStorage)throw Error('Connect SQLite before editing a Connical Universe');
+        await beforeUpdateUniverse();
+        if(draft.worldId!==getCurrentWorldId())throw Error('Universe changed during save. Reopen the correct universe.');
+        const response=await fetch('/api/worlds',{
+          method:'PATCH',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            worldId:draft.worldId,name:editName.value,description:editDescription.value,
+            expectedName:draft.expectedName,expectedDescription:draft.expectedDescription
+          })
+        });
+        const data=await response.json();
+        if(!response.ok)throw Error(data.error||'Unable to save universe details');
+        pendingUniverseRevision=null;
+        await refreshWorldLibrary();
+        showError();
+      }catch(error){showError(error.message);}
+      finally{
+        editingUniverse=false;
+        if($('universe-edit-save')?.isConnected){
+          $('universe-edit-save').disabled=false;
+          if(pendingUniverseRevision?.worldId===activeWorldId)indicate();
+        }
+      }
+    };
+  }
   const timelineSelect=$('timeline-select');
   for(const world of worldLibrary.worlds){
      const card=el('div','','lore-card');

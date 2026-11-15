@@ -242,6 +242,31 @@ async function main(){
     `);
     assert.ok(worldComposer.create&&worldComposer.assistant&&worldComposer.library&&worldComposer.administration,
       'World creation, co-author, library and administration must be separate panels');
+    // Editing universe identity must not allocate a replacement universe,
+    // alter scene IDs, or change the user's active continuity.
+    const initialUniverse=store.worlds.list().worlds.find(w=>w.id===store.activeWorldId);
+    const initialWorldCount=store.worlds.list().worlds.length;
+    assert.equal(await script(`
+      const section=document.querySelector('#universe-identity-editor');
+      const name=document.querySelector('#universe-edit-name');
+      const description=document.querySelector('#universe-edit-description');
+      if(!section||!name||!description)return false;
+      name.value='Revised Browser Connical Universe';
+      name.dispatchEvent(new Event('input',{bubbles:true}));
+      description.value='A preserved continuity with a revised introductory foundation.';
+      description.dispatchEvent(new Event('input',{bubbles:true}));
+      return !document.querySelector('#universe-edit-save').disabled;
+    `),true,'existing universe identity must be directly editable');
+    await script("document.querySelector('#universe-edit-save').click();return true");
+    await until(async()=>store.worlds.list().worlds.some(x=>x.id===initialUniverse.id&&
+      x.name==='Revised Browser Connical Universe'),'universe rename persisted');
+    assert.equal(store.worlds.list().worlds.length,initialWorldCount,
+      'in-place revision cannot create another universe');
+    assert.equal(store.activeWorldId,initialUniverse.id,
+      'editing the universe must not switch or replace continuity');
+    assert.equal(store.forWorld(initialUniverse.id).db.prepare(
+      'SELECT name FROM worlds WHERE id=?').get(initialUniverse.id).name,'Revised Browser Connical Universe');
+    await screenshot('03b-in-place-universe-revision');
     await screenshot('03-world-timelines-editor');
     const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
       encodeURIComponent(store.activeWorldId))).json()).revision;
@@ -421,7 +446,7 @@ async function main(){
     const firstLabel=await script("return document.querySelector('#world-label')?.textContent");
     assert.notEqual(firstLabel,'Parallel Browser World','the first tab must keep its own world');
     await request('POST','/session/'+sessionId+'/refresh',{});
-    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'first tab world reload');
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='Revised Browser Connical Universe'"),'first tab world reload');
     const firstTimelineCatalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
     const firstTimelineIds=firstTimelineCatalog.timelines
       .filter(t=>t.worldId===store.activeWorldId).map(t=>t.id).sort();
@@ -468,7 +493,7 @@ async function main(){
       'Character biography must not leak into the other world');
     await screenshot('06d-character-history-saved');
     await request('POST','/session/'+sessionId+'/refresh',{});
-    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'world after character save reload');
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='Revised Browser Connical Universe'"),'world after character save reload');
 
 
     // The relationship codex must delete a real SQLite entry, not just hide a

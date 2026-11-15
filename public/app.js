@@ -473,7 +473,7 @@ async function refreshWorldLibrary() {
     worldLibrary=received;
     selectedWorldId=activeWorldId || selectedWorldId || worldLibrary.worlds[0]?.id || null;
     if(!activeWorldId && worldLibrary.activeWorldId)activeWorldId=worldLibrary.activeWorldId;
-    const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active world';
+    const label=$('world-label'); if(label)label.textContent=worldLibrary.worlds.find(w=>w.id===activeWorldId)?.name || 'No active universe';
     if(['worlds','atlas','relations'].includes(currentTab))renderInspector();
     renderHeader();
     renderWorkspace();
@@ -619,6 +619,7 @@ const renderWorldTimelineEditor=(host,s)=>drawTimelines(host,s,{
   activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
   save,renderInspector,showError,running,fetch,getModel:()=>state.settings.model,
   getCurrentWorldId:()=>activeWorldId,
+  beforeUpdateUniverse:requireSavedStory,
   beforeCreateWorld:async()=>{
     if(switchingWorld||destructiveActionInFlight||running||aiDraftController||
        fidelityController||localEvalController||worldEntryController)
@@ -771,7 +772,7 @@ function renderInspector() {
     $('import-character').onclick = () => $('character-upload').click();
     $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } e.target.value=''; };
   } else if (currentTab === 'worlds') {
-    host.innerHTML='<h2 class="panel-title">World administration</h2><p class="help">Manage worlds, timelines, fictional clocks and scene assignment directly in the World workspace.</p><button id="open-world-admin" class="primary-button">Open World & timelines</button>';
+    host.innerHTML='<h2 class="panel-title">Connical Universe administration</h2><p class="help">Manage worlds, timelines, fictional clocks and scene assignment directly in the World workspace.</p><button id="open-world-admin" class="primary-button">Open Connical Universe & timelines</button>';
     $('open-world-admin').onclick=()=>openWorldEditor('timelines');
   } else if (currentTab === 'atlas') {
     renderAtlasPanel(host,s);
@@ -1101,14 +1102,14 @@ function studioCommands(){
     run:()=>{setWorkspace(workspace);openDetailDesk(tab);}
   });
   return [
-    {label:'World & canon',detail:'Workspace',keywords:'universe overview',run:()=>setWorkspace('world')},
+    {label:'Connical Universe & canon',detail:'Workspace',keywords:'universe overview',run:()=>setWorkspace('world')},
     {label:'Characters',detail:'Workspace',keywords:'cast profiles identity',run:()=>setWorkspace('characters')},
     {label:'Encounters',detail:'Workspace',keywords:'template starter webcam video call social media email',run:()=>setWorkspace('encounters')},
     {label:'Manage encounter templates',detail:'Encounters',keywords:'remove edit delete encounter dependency blocked purge',run:()=>openEncounterManager()},
     {label:'Story room',detail:'Workspace',keywords:'chat conversation scene',run:()=>setWorkspace('story')},
     {label:'Memory & review',detail:'Workspace',keywords:'recall evidence',run:()=>setWorkspace('memory')},
     {label:'Models & lab',detail:'Workspace',keywords:'inference setup tools',run:()=>setWorkspace('tools')},
-    {label:'World Library & timelines',detail:'World',keywords:'world switch clocks encounters fictional time',run:()=>openWorldEditor('timelines')},
+    {label:'Connical Universe library & timelines',detail:'Universe',keywords:'world switch clocks encounters fictional time',run:()=>openWorldEditor('timelines')},
     {label:'Atlas & places',detail:'World',keywords:'geography location map edit place',
       run:()=>openWorldEditor('atlas')},
     {label:'World relationships',detail:'World',keywords:'kinships social graph entities',
@@ -1138,7 +1139,7 @@ function studioCommands(){
       run:()=>openNewSceneDialog()},
     {label:'Create encounter template',detail:'New',keywords:'new scenario setup webcam social',
       run:()=>openEncounterManager()},
-    {label:'Choose a world',detail:'Worlds',keywords:'switch universe',
+    {label:'Choose a Connical Universe',detail:'Universes',keywords:'switch universe',
       run:()=>{renderWorldLauncher();$('world-launcher').showModal();}}
   ];
 }

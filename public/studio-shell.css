@@ -1202,3 +1202,9 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
   .scene-composer-footer .inline-actions{width:100%}
   .scene-composer-footer button{flex:1;min-width:0}
 }
+
+/* Keep the active universe identity editor visually distinct from new-universe creation. */
+.universe-identity-editor{border-color:color-mix(in srgb,var(--accent) 36%,var(--ux-line))}
+.universe-identity-editor[hidden]{display:none}
+.universe-identity-editor #universe-edit-description{min-height:170px}
+.universe-identity-editor #universe-edit-state{overflow-wrap:anywhere}
