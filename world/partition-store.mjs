@@ -118,7 +118,8 @@ export class WorldPartitionStore {
     return {
       list: () => ({...this.current.worlds.list(),worlds:catalogRows(this.registry),
         activeWorldId:this.activeWorldId,
-        blueprint:this.current.worlds.getBlueprint(this.activeWorldId)}),
+        blueprint:this.current.worlds.getBlueprint(this.activeWorldId),
+        entryProvenance:listUniverseEntryProvenance(this.current.db,this.activeWorldId)}),
       createWorld: input => this.createWorld(input),
       updateWorld: input => this.updateWorld(input),
       saveBlueprint: input => {this.assertWorld(input.worldId);return this.current.worlds.saveBlueprint(input);},
