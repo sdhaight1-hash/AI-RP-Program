@@ -268,3 +268,22 @@ test('World timeline editor offers scoped read-only deletion impact, never a del
     assert.doesNotMatch(source,/api\/worlds\/delete|api\/timelines\/delete/);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test('actor memory editor is world scoped, independently served and preserves source-review guards',async()=>{
+  assert.match(javascript,/renderActorMemoryEditor\(host,s,\{/);
+  assert.match(javascript,/getActiveWorldId:\(\)=>activeWorldId/);
+  assert.match(javascript,/getRevision:\(\)=>revision/);
+  const store=new StudioStore(':memory:');
+  const app=createApp({store,fetchImpl:async()=>{throw Error('No inference')}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch('http://127.0.0.1:'+app.address().port+'/actor-memory-editor.mjs');
+    assert.equal(response.status,200);
+    const module=await response.text();
+    assert.match(module,/export function renderActorMemoryEditor/);
+    assert.match(module,/getActiveWorldId\(\)!==requestedWorld/);
+    assert.match(module,/sourceMessageId:source\.value/);
+    assert.match(module,/m\.witnessIds\|\|\[\]/);
+    assert.match(module,/Remember this detail/);
+  }finally{await new Promise(resolve=>app.close(resolve));}
+});
