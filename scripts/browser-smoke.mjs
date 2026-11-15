@@ -689,7 +689,7 @@ async function main(){
       const ai=document.querySelector('#world-create').parentElement;
       const target=ai.querySelector('select[aria-label="AI generation focus"]');
       target.value='description';target.dispatchEvent(new Event('change'));
-      ai.querySelector('button.subtle-button').click();
+      ai.querySelector('.ai-draft-generate').click();
       return true;
     `);
     await until(async()=>script(`
@@ -698,7 +698,7 @@ async function main(){
     `),'new-world AI draft rendered for review');
     await script(`
       const ai=document.querySelector('#world-create').parentElement;
-      ai.querySelector('button.primary-button').click();
+      ai.querySelector('.ai-draft-apply').click();
       return true;
     `);
     assert.equal(await script(`
@@ -775,7 +775,7 @@ async function main(){
       document.querySelector('#new-session').click();
       const target=document.querySelector('#new-scene-ai-host select[aria-label="AI generation focus"]');
       if(!target)return false;
-      const button=document.querySelector('#new-scene-ai-host button.subtle-button');
+      const button=document.querySelector('#new-scene-ai-host .ai-draft-generate');
       button.click();
       return true;
     `);
@@ -785,7 +785,7 @@ async function main(){
     `),'scene AI draft rendered for review');
     assert.equal(await script(`
       document.querySelector('#new-scene-draft-title').value;
-      const apply=document.querySelector('#new-scene-ai-host button.primary-button');
+      const apply=document.querySelector('#new-scene-ai-host .ai-draft-apply');
       apply.click();
       return document.querySelector('#new-scene-draft-title').value==='Harbor Call at Dusk'
         &&document.querySelector('#new-scene-draft-direction').value.includes('unsigned harbor map');
