@@ -2044,7 +2044,7 @@ async function renderApprovedWorldRelationships() {
 }
 
 async function generateCharacterWorldEntries() {
-  const c=builderCharacter(),status=$('builder-world-status');
+  const c=builderCharacter(),status=$('builder-world-status'),startedWorldId=activeWorldId;
   if(!c||worldEntryController||localEvalController)return;
   if(!state.settings.model){status.textContent='Load a local model in Setup first.';return;}
   const aborter=new AbortController();worldEntryController=aborter;
@@ -2055,6 +2055,8 @@ async function generateCharacterWorldEntries() {
   try {
     await requireSavedStory();
     await refreshWorldLibrary();
+    if(aborter.signal.aborted||worldEntryController!==aborter||builderCharacter()?.id!==c.id||
+      activeWorldId!==startedWorldId)throw new DOMException('Superseded','AbortError');
     const request=makeWorldEntryDraftRequest({character:c,worldId:activeWorldId,worldLibrary});
     const savedRevision=revision;
     const response=await fetch('/api/chat',{method:'POST',signal:aborter.signal,
@@ -2066,6 +2068,7 @@ async function generateCharacterWorldEntries() {
     if(!response.body)throw new Error('Local model returned no response stream');
     const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',out='',done=false;
     const onFrame=frame=>{
+      if(aborter.signal.aborted||worldEntryController!==aborter)return;
       const payload=frame.split('\n').filter(x=>x.startsWith('data:')).map(x=>x.slice(5).trim()).join('\n');
       if(payload==='[DONE]'){done=true;return;}
       if(!payload)return;
@@ -2077,7 +2080,8 @@ async function generateCharacterWorldEntries() {
     while(!done){const part=await reader.read();if(part.done)break;
       buffer=parseSSE(buffer+decoder.decode(part.value,{stream:true}),onFrame);}
     parseSSE(buffer+decoder.decode()+'\n\n',onFrame);
-    if(aborter.signal.aborted)throw new DOMException('Cancelled','AbortError');
+    if(aborter.signal.aborted||worldEntryController!==aborter)
+      throw new DOMException('Cancelled','AbortError');
     if(builderCharacter()?.id!==c.id||revision!==savedRevision||activeWorldId!==request.worldId||
       characterDraftVersion(c)!==request.profileVersion||
       worldDraftVersion(worldLibrary)!==request.worldVersion)
@@ -2088,17 +2092,26 @@ async function generateCharacterWorldEntries() {
     status.textContent=entries.length
       ?`${entries.length} source-backed suggestion(s). Nothing will be added until you approve an entry.`
       :'No new named world entries were supported by the saved profile.';
-  }catch(error){status.textContent=error.name==='AbortError'?'World discovery cancelled.':error.message;}
-  finally{worldEntryController=null;$('builder-world-suggest').disabled=false;
-    $('builder-world-stop').classList.add('hidden');}
+  }catch(error){
+    if(builderCharacter()?.id===c.id&&activeWorldId===startedWorldId&&worldEntryController===aborter)
+      status.textContent=error.name==='AbortError'?'World discovery cancelled.':error.message;
+  }finally{
+    if(worldEntryController===aborter){
+      worldEntryController=null;$('builder-world-suggest').disabled=false;
+      $('builder-world-stop').classList.add('hidden');
+    }
+  }
 }
 
 async function generateBuilderDraft() {
   const c = builderCharacter(); if (!c || aiDraftController || localEvalController) return;
   if (!state.settings.model) { $('builder-ai-status').textContent = 'Load a model first in Setup.'; return; }
+  const startedWorldId=activeWorldId;
   const target = $('builder-ai-target').value;
   const guidance = $('builder-ai-guidance').value.trim();
   try{if(!worldLibrary)await refreshWorldLibrary();}catch(err){$('builder-ai-status').textContent=err.message;return;}
+  // Catalog refresh can yield to another character/world selection.
+  if(builderCharacter()?.id!==c.id || activeWorldId!==startedWorldId)return;
   let request;
   try{request=makeCharacterDraftRequest({character:c,target,guidance,worldLibrary,worldId:activeWorldId,lore:state.lore});}
   catch(err){$('builder-ai-status').textContent=err.message;return;}
@@ -2120,6 +2133,8 @@ async function generateBuilderDraft() {
     if (!response.ok) { const error=await response.json().catch(()=>({}));throw new Error(error.error || `Model returned HTTP ${response.status}`); }
     const reader = response.body.getReader(); const decoder=new TextDecoder();let remaining='',done=false;
     const onFrame = frame => {
+      // Abort is not a guarantee that already buffered frames will stop.
+      if(aiDraftController!==aiController || aiDraftRequest!==request || aiController.signal.aborted)return;
       const data=frame.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trim()).join('\n');
       if (!data) return;
       if (data === '[DONE]') { done = true; return; }
@@ -2130,6 +2145,7 @@ async function generateBuilderDraft() {
     };
     while (!done) { const chunk=await reader.read();if (chunk.done)break;remaining=parseSSE(remaining+decoder.decode(chunk.value,{stream:true}),onFrame); }
     parseSSE(remaining+decoder.decode()+'\n\n',onFrame);
+    if(aiDraftController!==aiController || aiDraftRequest!==request || aiController.signal.aborted)throw new Error('Draft was superseded or canceled.');
     if (!draft.value.trim()) throw new Error('The model returned no suggestion.');
     if(builderCharacter()?.id!==c.id || !validateCharacterDraftBasis({character:c,worldLibrary,worldId:activeWorldId,lore:state.lore,request}))throw new Error('Character or world changed; discard the stale suggestion.');
     renderBuilderAIChanges();
@@ -2139,11 +2155,15 @@ async function generateBuilderDraft() {
     if(aiDraftRequest===request){
       aiDraftRequest=null; aiDraftTarget=null;
       $('builder-ai-preview').classList.add('hidden');
+      // An aborted draft for another character must not overwrite its status.
+      if(builderCharacter()?.id===c.id)
+        $('builder-ai-status').textContent = err.name === 'AbortError' ? 'Suggestion canceled.' : err.message;
     }
-    $('builder-ai-status').textContent = err.name === 'AbortError' ? 'Suggestion canceled.' : err.message;
   } finally {
-    aiDraftController = null;$('builder-ai-generate').disabled=false;
-    $('builder-ai-target').disabled=false;$('builder-ai-stop').classList.add('hidden');
+    if(aiDraftController===aiController){
+      aiDraftController=null;$('builder-ai-generate').disabled=false;
+      $('builder-ai-target').disabled=false;$('builder-ai-stop').classList.add('hidden');
+    }
   }
 }
 function safeName(name) { return String(name).toLowerCase().replace(/[^a-z0-9-_]+/g,'-').slice(0,60)||'character'; }
