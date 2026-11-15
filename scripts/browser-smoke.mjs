@@ -29,14 +29,23 @@ async function main(){
   const store=new WorldPartitionStore(join(workDir,'worlds'));
   let modelAvailable=false;
   const browserReply='Ticketed NPC reply committed from the local-model stream.';
-  const server=createApp({store,fetchImpl:async url=>{
+  const worldProposal=JSON.stringify({entries:[{type:'entity',kind:'character',
+    name:'Nessa',description:'The character’s aunt named in the saved family history.',
+    sourceField:'familyHistory',
+    sourceQuote:'Her aunt Nessa ran the Lantern House near Seabrook.'}]});
+  const server=createApp({store,fetchImpl:async (url,options={})=>{
     if(!modelAvailable)throw Error('Offline local model expected in browser QA');
     const target=String(url);
     if(target.endsWith('/models'))return Response.json({data:[{id:'browser-leased-model'}]});
     if(target.endsWith('/api/extra/true_max_context_length'))return Response.json({value:4096});
     if(target.endsWith('/api/extra/tokencount'))return Response.json({value:400});
-    if(target.endsWith('/chat/completions'))
-      return new Response('data: '+JSON.stringify({choices:[{delta:{content:browserReply}}]})+'\n\ndata: [DONE]\n\n');
+    if(target.endsWith('/chat/completions')){
+      const payload=JSON.parse(options.body||'{}');
+      const isWorld=String(payload.messages?.[0]?.content||'')
+        .includes('OPTIONAL world-atlas additions');
+      const content=isWorld?worldProposal:browserReply;
+      return new Response('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\n\ndata: [DONE]\n\n');
+    }
     throw Error('Unexpected local model probe: '+target);
   }});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -401,6 +410,10 @@ async function main(){
       const field=document.querySelector('#builder-familyHistory');
       field.value=${JSON.stringify(familyText)};
       field.dispatchEvent(new Event('input',{bubbles:true}));
+      document.querySelector('[data-builder-tab="identity"]').click();
+      const name=document.querySelector('#builder-name');
+      name.value='Browser Source Review Character';
+      name.dispatchEvent(new Event('input',{bubbles:true}));
       return {open:document.querySelector('#character-builder').open,value:field.value};
     `);
     assert.equal(edited.open,true);
@@ -642,6 +655,68 @@ async function main(){
       const state=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
       return state.settings.model==='browser-leased-model';
     },'model choice persisted before actor generation');
+
+    // The Character Studio world bridge must retain human approval and source
+    // provenance in an actual browser, not just a unit-test simulation.
+    assert.equal(await script(`
+      document.querySelector('#close-inspector').click();
+      document.querySelector('button[data-workspace="characters"]').click();
+      const row=[...document.querySelectorAll('#character-list .character-row')]
+        .find(x=>x.querySelector('strong')?.textContent==='Browser Source Review Character');
+      if(!row)return false;
+      row.querySelector('button.character-item').click();
+      return document.querySelector('#character-builder').open &&
+        document.querySelector('#builder-familyHistory')===null;
+    `),true,'open the existing world-bound source character');
+    await script("document.querySelector('#builder-world-suggest').click();return true");
+    await until(async()=>script(`
+      return [...document.querySelectorAll('#builder-world-items .lore-card')]
+        .some(x=>x.querySelector('input')?.value==='Nessa');
+    `),'character-world source candidate in browser');
+    assert.equal(await script(`
+      const card=[...document.querySelectorAll('#builder-world-items .lore-card')]
+        .find(x=>x.querySelector('input')?.value==='Nessa');
+      if(!card)return false;
+      const quote=card.querySelector('.help')?.textContent||'';
+      if(!quote.includes('Her aunt Nessa ran the Lantern House'))return false;
+      card.querySelector('button.primary-button').click();
+      return true;
+    `),true,'source-backed person requires explicit approval');
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld))).json();
+      return catalog.entities.some(e=>e.worldId===editableWorld&&e.name==='Nessa'&&e.kind==='character');
+    },'approved person entered only the intended World Atlas');
+    await until(async()=>script(`
+      return [...document.querySelectorAll('#builder-world-links .reviewed-link')]
+        .some(x=>x.textContent.includes('Nessa')&&
+          [...x.querySelectorAll('button')].some(b=>b.textContent.includes('Approve directed relationship')));
+    `),'approved person exposes a relationship candidate');
+    assert.equal(await script(`
+      const card=[...document.querySelectorAll('#builder-world-links .reviewed-link')]
+        .find(x=>x.textContent.includes('Nessa'));
+      if(!card)return false;
+      const selector=card.querySelector('select');
+      if(selector?.value!=='aunt')return false;
+      card.querySelector('button').click();
+      return true;
+    `),true,'approved biography explicitly supports an aunt relationship');
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld))).json();
+      return catalog.relationships.some(edge=>edge.worldId===editableWorld&&edge.kind==='aunt');
+    },'human-reviewed source relationship committed');
+    const sourceCharacter=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json())
+      .state.characters.find(c=>c.name==='Browser Source Review Character');
+    const sourceResponse=await fetch(base+'/api/character/world-entries/sources?worldId='+
+      encodeURIComponent(editableWorld)+'&characterId='+encodeURIComponent(sourceCharacter.id));
+    assert.equal(sourceResponse.status,200);
+    const sourceData=await sourceResponse.json();
+    assert.ok(sourceData.sources.some(x=>x.entryName==='Nessa'&&x.relationshipId&&
+      x.sourceQuote==='Her aunt Nessa ran the Lantern House near Seabrook.'));
+    const otherCatalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(parallel.id))).json();
+    assert.ok(!otherCatalog.entities.some(x=>x.name==='Nessa'),
+      'the approved person cannot leak to the second world');
+    await screenshot('07a-reviewed-character-world-relationship');
+    await script("document.querySelector('#builder-close').click();return true");
     await script(`
       document.querySelector('#close-inspector').click();
       document.querySelector('button[data-workspace="story"]').click();
