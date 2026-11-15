@@ -30,6 +30,7 @@ async function main(){
   let modelAvailable=false;
   const browserReply='Ticketed NPC reply committed from the local-model stream.';
   const newWorldDraft=JSON.stringify({description:'An independent harbor civilization shaped by seasonal trade.'});
+  const ongoingSceneDraft=JSON.stringify({direction:'Keep the harbor conversation grounded in Nessa’s independent decisions.'});
   const newSceneDraft=JSON.stringify({title:'Harbor Call at Dusk',
     direction:'The player calls Nessa about an unsigned harbor map.',
     atmosphere:'Muffled gull cries and a quiet electrical hum.',
@@ -50,6 +51,7 @@ async function main(){
         .includes('OPTIONAL world-atlas additions');
       const system=String(payload.messages?.[0]?.content||'');
       const content=system.includes('NEW, isolated world')?newWorldDraft:
+        system.includes('CURRENT direction of an ongoing')?ongoingSceneDraft:
         system.includes('STARTING CONFIGURATION')?newSceneDraft:
         isWorld?worldProposal:browserReply;
       return new Response('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\n\ndata: [DONE]\n\n');
@@ -868,7 +870,43 @@ async function main(){
       return facts.facts?.some(f=>f.text===reviewedMemory&&f.sourceMessageId===witnessedPlayer.id&&f.validSource);
     },'source-verified subjective memory stored without world-canon mutation');
     await screenshot('09-source-verified-actor-memory');
-    console.log('Browser UI smoke: reviewed world sources, actor memory provenance, responsive worlds, and ticketed NPC commit passed.');
+
+    // Approved AI scene direction never inserts dialog or a witnessed event.
+    const beforeSceneEdit=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(editableWorld))).json()).state;
+    const beforeEditable=beforeSceneEdit.sessions.find(scene=>scene.title==='Harbor Call at Dusk');
+    assert.ok(beforeEditable);
+    const priorMessageIds=beforeEditable.messages.map(m=>m.id);
+    const priorEvents=JSON.stringify(beforeEditable.sceneEvents);
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="story"]').click();
+      document.querySelector('[data-tab="scene"]').click();
+      const widget=document.querySelector('#inspector-content select[aria-label="AI generation focus"]');
+      if(!widget)return false;
+      widget.value='direction';widget.dispatchEvent(new Event('change'));
+      document.querySelector('#inspector-content .ai-draft-generate').click();
+      return true;
+    `),true,'ongoing scene director exposes a field-scoped AI co-author');
+    await until(async()=>script(`
+      return document.querySelector('#inspector-content textarea[aria-label="Editable model JSON"]')
+        ?.value.includes('grounded in Nessa');
+    `),'ongoing scene AI reviewed result');
+    assert.equal(await script(`
+      document.querySelector('#inspector-content .ai-draft-apply').click();
+      return document.querySelector('#field-direction')?.value
+        .includes('Nessa’s independent decisions.');
+    `),true,'scene direction must change only after review');
+    await until(async()=>{
+      const story=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
+      return story.sessions.some(x=>x.id===beforeEditable.id&&
+        x.direction.includes('Nessa’s independent decisions.'));
+    },'approved scene direction saved');
+    const afterEditable=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(editableWorld))).json()).state.sessions.find(x=>x.id===beforeEditable.id);
+    assert.deepEqual(afterEditable.messages.map(x=>x.id),priorMessageIds);
+    assert.equal(JSON.stringify(afterEditable.sceneEvents),priorEvents);
+    await screenshot('10-reviewed-ongoing-scene-direction');
+    console.log('Browser UI smoke: reviewed world/scene creation, ongoing scene, source memory and ticketed NPC commit passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');
