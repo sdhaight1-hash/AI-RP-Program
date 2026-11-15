@@ -24,7 +24,8 @@ export function renderWorldTimelineEditor(host,s,api) {
       card.append(open);
       for(const timeline of worldLibrary.timelines.filter(t=>t.worldId===world.id)) {
         const label=el('p',`${timeline.name}${timeline.id===s?.timelineId?' · current scene':''}`,'help');
-        card.append(label);timelineSelect.add(new Option(`${world.name} — ${timeline.name}`,timeline.id));
+        card.append(label);
+        if(world.id===activeWorldId)timelineSelect.add(new Option(timeline.name,timeline.id));
       }
       report.append(card);
     }
@@ -32,22 +33,25 @@ export function renderWorldTimelineEditor(host,s,api) {
     if(!worldLibrary.worlds.length)report.append(el('p','Create your first world to begin.','empty-note'));
     if(activeWorldId)worldSelect.value=activeWorldId;
     worldSelect.onchange=()=>{void switchWorld(worldSelect.value).catch(error=>showError(error.message));};
-    if(s?.timelineId && worldLibrary.timelines.some(t=>t.id===s.timelineId)) timelineSelect.value=s.timelineId;
+    if(s?.timelineId && worldLibrary.timelines.some(t=>t.id===s.timelineId&&t.worldId===activeWorldId))
+      timelineSelect.value=s.timelineId;
     const fillClock=()=>{
       const clock=worldLibrary.clocks?.find(c=>c.timelineId===timelineSelect.value);
-      if(!clock)return;
-      $('timeline-clock-utc').value=new Date(clock.instantMs).toISOString().slice(0,16);
-      $('timeline-clock-zone').value=clock.timeZone;
+      $('timeline-clock-utc').value=clock?new Date(clock.instantMs).toISOString().slice(0,16):'';
+      $('timeline-clock-zone').value=clock?.timeZone||'UTC';
     };
     timelineSelect.onchange=fillClock;
     if(timelineSelect.value)fillClock();
     $('timeline-clock-save').disabled=!timelineSelect.value;
     $('timeline-clock-save').onclick=async()=>{
       try{
+        const timelineId=$('timeline-select').value;
+        if(!worldLibrary.timelines.some(t=>t.id===timelineId&&t.worldId===activeWorldId))
+          throw Error('Choose a timeline belonging to the current world.');
         const raw=$('timeline-clock-utc').value;
         if(!raw)throw Error('Choose a fictional UTC date and time.');
         const instant=new Date(`${raw}:00Z`).toISOString();
-        await postWorld('/api/timelines/clock',{timelineId:timelineSelect.value,instant,timeZone:$('timeline-clock-zone').value});
+        await postWorld('/api/timelines/clock',{worldId:activeWorldId,timelineId,instant,timeZone:$('timeline-clock-zone').value});
         showError();renderHeader();
       }catch(err){showError(err.message);}
     };
@@ -72,7 +76,8 @@ export function renderWorldTimelineEditor(host,s,api) {
     $('timeline-assign').onclick=()=>{
       if(!s||running)return;
       const value=$('timeline-select').value;
-      if(!worldLibrary.timelines.some(t=>t.id===value))return showError('Select a valid timeline first.');
+      if(!worldLibrary.timelines.some(t=>t.id===value&&t.worldId===activeWorldId))
+        return showError('Select a timeline within this world; scenes cannot cross world boundaries.');
       s.timelineId=value;save();renderInspector();showError();
     };
 }
