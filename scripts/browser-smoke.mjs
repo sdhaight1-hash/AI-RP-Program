@@ -755,7 +755,56 @@ async function main(){
         .some(node=>node.textContent.includes('Ticketed NPC reply committed'));
     `),true,'browser must render the committed model response');
     await screenshot('08-ticketed-model-reply-committed');
-    console.log('Browser UI smoke: deletion, responsive navigation, cross-world isolation, and server-ticketed NPC streaming commit passed.');
+
+    // Actor memory review uses actual witnessed source IDs, never the other
+    // world's dialogue. Creating a subjective fact cannot mutate world canon.
+    const witnessedState=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(editableWorld))).json()).state;
+    const witnessedScene=witnessedState.sessions.find(scene=>
+      scene.messages.some(m=>m.role==='assistant'&&m.content===browserReply));
+    const witnessedPlayer=witnessedScene.messages.find(m=>m.role==='user'&&
+      m.content==='Do you hear the character speaking?');
+    const witnessedActor=witnessedScene.speakerId||witnessedScene.characterId;
+    assert.ok(witnessedPlayer?.id,'the actor fact must cite a real message ID');
+    await script(`
+      document.querySelector('button[data-workspace="memory"]').click();
+      document.querySelector('[data-tab="context"]').click();
+      return true;
+    `);
+    await until(async()=>script("return !!document.querySelector('#fact-source') && !!document.querySelector('#context-text')"),
+      'server-assembled actor context and witnessed source picker');
+    assert.equal(await script(`
+      return [...document.querySelector('#fact-source').options]
+        .some(x=>x.value===${JSON.stringify(witnessedPlayer.id)});
+    `),true,'player line actually witnessed by this actor must be a valid memory source');
+    const foreignState=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(parallel.id))).json()).state;
+    const foreignIds=foreignState.sessions.flatMap(scene=>scene.messages.map(m=>m.id));
+    const candidateIds=await script(`
+      return [...document.querySelector('#fact-source').options].map(option=>option.value);
+    `);
+    assert.ok(candidateIds.every(id=>!foreignIds.includes(id)),
+      'actor memory source selector must not leak foreign-world message IDs');
+    const reviewedMemory='This visitor asked whether I could hear my own voice.';
+    assert.equal(await script(`
+      const source=document.querySelector('#fact-source');
+      source.value=${JSON.stringify(witnessedPlayer.id)};
+      document.querySelector('#fact-kind').value='belief';
+      document.querySelector('#fact-note').value=${JSON.stringify(reviewedMemory)};
+      const button=[...document.querySelectorAll('#inspector-content button.primary-button')]
+        .find(x=>x.textContent==='Remember this detail');
+      if(!button)return false;
+      button.click();return true;
+    `),true,'reviewed actor memory requires explicit source selection');
+    await until(async()=>{
+      const query=base+'/api/actor/facts?worldId='+encodeURIComponent(editableWorld)+
+        '&timelineId='+encodeURIComponent(witnessedScene.timelineId)+
+        '&actorId='+encodeURIComponent(witnessedActor);
+      const facts=await(await fetch(query)).json();
+      return facts.facts?.some(f=>f.text===reviewedMemory&&f.sourceMessageId===witnessedPlayer.id&&f.validSource);
+    },'source-verified subjective memory stored without world-canon mutation');
+    await screenshot('09-source-verified-actor-memory');
+    console.log('Browser UI smoke: reviewed world sources, actor memory provenance, responsive worlds, and ticketed NPC commit passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');
