@@ -544,7 +544,7 @@ async function main(){
       window.confirm=()=>true;
       const card=[...document.querySelectorAll('#relations-list .lore-card')]
         .find(row=>row.querySelector('strong')?.textContent===${JSON.stringify(disposableName)});
-      const button=card?.querySelector('button');
+      const button=[...card?.querySelectorAll('button')||[]].find(b=>b.textContent==='Permanently delete entity');
       if(!button)return false;
       button.click();
       return true;
