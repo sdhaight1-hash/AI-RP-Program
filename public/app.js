@@ -1068,7 +1068,7 @@ function openDetailDesk(tab) {
   // Atlas and relationships now have one authoritative editor surface.
   // Keeping their old inspector copies open would duplicate DOM IDs and make
   // writes target whichever form document.getElementById finds first.
-  if(tab==='atlas'||tab==='relations')return openWorldEditor(tab);
+  if(tab==='atlas'||tab==='relations'||tab==='worlds')return openWorldEditor(tab==='worlds'?'timelines':tab);
   if(!document.querySelector(`[data-tab="${tab}"]`))return;
   if(!visibleDetailTabs(activeWorkspace).includes(tab)){
     const target=Object.keys(WORKSPACE_META).find(w=>w!=='encounters'&&visibleDetailTabs(w).includes(tab));
@@ -1097,7 +1097,7 @@ function openEncounterManager(templateId=null,returnToTrash=false){
   $('encounter-title')?.focus();
 }
 function openWorldEditor(section){
-  if(!['overview','atlas','relations'].includes(section))return;
+  if(!['overview','atlas','relations','timelines'].includes(section))return;
   activeWorkspace='world';currentTab='worlds';worldEditorView=section;
   setDetailDeskOpen(false);renderWorkspace();renderInspector();
 }
@@ -1127,7 +1127,7 @@ function studioCommands(){
     {label:'Story room',detail:'Workspace',keywords:'chat conversation scene',run:()=>setWorkspace('story')},
     {label:'Memory & review',detail:'Workspace',keywords:'recall evidence',run:()=>setWorkspace('memory')},
     {label:'Models & lab',detail:'Workspace',keywords:'inference setup tools',run:()=>setWorkspace('tools')},
-    desk('World Library & timelines','world','worlds','world switch clocks encounters'),
+    {label:'World Library & timelines',detail:'World',keywords:'world switch clocks encounters fictional time',run:()=>openWorldEditor('timelines')},
     {label:'Atlas & places',detail:'World',keywords:'geography location map edit place',
       run:()=>openWorldEditor('atlas')},
     {label:'World relationships',detail:'World',keywords:'kinships social graph entities',
@@ -1232,7 +1232,7 @@ function renderWorkspace(){
   if(mode==='world'){
     const nav=el('nav','','world-editor-nav');
     nav.setAttribute('aria-label','World editor sections');
-    for(const [section,label] of [['overview','Overview'],['atlas','Places & atlas'],['relations','People & relationships']]){
+    for(const [section,label] of [['overview','Overview'],['atlas','Places & atlas'],['relations','People & relationships'],['timelines','Worlds & timelines']]){
       const button=el('button',label,worldEditorView===section?'world-editor-tab active':'world-editor-tab');
       button.type='button';button.dataset.worldView=section;
       button.setAttribute('aria-pressed',String(worldEditorView===section));
@@ -1244,7 +1244,8 @@ function renderWorkspace(){
       const editor=el('section','','world-editor-content');
       host.append(editor);
       if(worldEditorView==='atlas')renderAtlasPanel(editor,scene);
-      else renderRelationsPanel(editor);
+      else if(worldEditorView==='relations')renderRelationsPanel(editor);
+      else renderWorldTimelineEditor(editor,scene);
       return;
     }
   }
@@ -1289,7 +1290,7 @@ function renderWorkspace(){
       [relationships.length,'Authored relationships'],[timelines.length,'Independent timelines']]));
     grid.append(workspaceCard({index:'01 · WORLD LIBRARY',title:worldName,
       featured:true,description:world?.description||'Define the setting, era, atmosphere and social fabric of this universe.',
-      actions:[['Manage world & timelines',()=>openDetailDesk('worlds'),true],
+      actions:[['Manage world & timelines',()=>openWorldEditor('timelines'),true],
         ['Switch universe',()=>{renderWorldLauncher();$('world-launcher').showModal();}]],
       content:workspaceRows(timelines,x=>[x.name,'Timeline'])}));
     grid.append(workspaceCard({index:'02 · GEOGRAPHY',title:'Places that matter',
