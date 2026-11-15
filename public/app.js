@@ -2184,27 +2184,47 @@ function parseSSE(buffer, onFrame) {
 // Provisional NPC drafts are deliberately not part of state.sessions or SQLite.
 // Flagged replies require explicit approval, and every approval rechecks the
 // same immutable conversation basis used when the request was created.
-function commitNpcReply(record, reviewed = false) {
-  const session = state.sessions.find(s => s.id === record.sessionId && !s.trashedAt);
-  if (!isReplyBasisCurrent(session,record.basis)) return false;
-  if (record.retry) {
-    const last=session.messages.at(-1);
-    const choices=[...record.originalVariants];
-    if (!choices.includes(record.message.content)) choices.push(record.message.content);
-    last.content=record.message.content;
-    last.variants=choices.slice(-20);
-    last.variantIndex=last.variants.indexOf(last.content);
-    if(last.variantIndex<0)last.variantIndex=last.variants.length-1;
-  } else {
-    const final={...record.message}; delete final.provisional;
-    if (reviewed) final.reviewedDraft=true;
-    session.messages.push(final);
-    if(session.castIds.length>1)session.emotionByActor[record.actorId]=settleEmotion(session.emotionByActor[record.actorId]||session.emotion);
-    else session.emotion=settleEmotion(session.emotion);
+let npcCommitInFlight=false;
+async function persistNpcReply(record,reviewed=false){
+  const target=state.sessions.find(s=>s.id===record.sessionId&&!s.trashedAt);
+  if(npcCommitInFlight||!isReplyBasisCurrent(target,record.basis)){
+    showError('Scene changed before the NPC reply could be committed. Generate again.');
+    return false;
   }
-  if (reviewed && record.retry) session.messages.at(-1).reviewedDraft=true;
-  session.updatedAt=Date.now();
-  return true;
+  npcCommitInFlight=true;
+  const originalWorld=activeWorldId;
+  try{
+    await requireSavedStory();
+    if(activeWorldId!==originalWorld || !isReplyBasisCurrent(
+      state.sessions.find(s=>s.id===record.sessionId&&!s.trashedAt),record.basis))
+      throw Error('Scene or active world changed before reply confirmation');
+    const savedRevision=revision,originalSnapshot=JSON.stringify(state);
+    const response=await fetch('/api/actor/reply/commit',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({worldId:originalWorld,ticket:record.ticket,reviewed})
+    });
+    const data=await response.json();
+    if(!response.ok)throw Error(data.error||'The NPC reply was not saved');
+    // Never overwrite browser edits made while the commit was in flight.
+    // If they race, preserve the local copy for export instead of erasing it.
+    if(originalWorld!==activeWorldId||savedRevision!==revision||
+      originalSnapshot!==JSON.stringify(state)||pendingSnapshot!==null){
+      serverStorage=false;
+      showError('Reply saved to SQLite, but browser edits raced its confirmation. Export this local copy before reloading the world.');
+      return false;
+    }
+    clearTimeout(writeTimer);pendingSnapshot=null;
+    revision=data.revision;state=normalizeState(data.state);
+    try{
+      localStorage.setItem(backupStateKey(),JSON.stringify(state));
+      localStorage.removeItem(pendingBackupKey());
+    }catch{/* Saved world remains authoritative */}
+    pendingReply=null;streamingReply=null;
+    render();showError();return true;
+  }catch(error){
+    showError(error.message+' The uncommitted NPC draft was not added to story history.');
+    return false;
+  }finally{npcCommitInFlight=false;}
 }
 
 function renderReplyReview() {
@@ -2228,10 +2248,12 @@ function renderReplyReview() {
   host.append(warnings);
   const actions=el('div','','inline-actions');
   const accept=el('button','Keep reply anyway','subtle-button');
-  accept.onclick=()=>{
+  accept.onclick=async()=>{
     const draft=pendingReply;if(!draft)return;
-    if(!commitNpcReply(draft,true)){pendingReply=null;renderMessages();showError('The story changed while the draft was pending. It cannot be applied; generate another reply.');return;}
-    pendingReply=null;save();renderLists();renderMessages();renderHeader();showError();
+    accept.disabled=true;
+    const saved=await persistNpcReply(draft,true);
+    if(!saved) {pendingReply=null;renderMessages();}
+    accept.disabled=false;
   };
   const again=el('button','Regenerate draft','primary-button');
   again.onclick=()=>{
@@ -2273,6 +2295,7 @@ async function generate(mode = 'normal') {
   $('send').disabled=true; $('regenerate').disabled=true; $('continue').disabled=true;
   $('stop').classList.remove('hidden');showError();
   let assistantText='';let errorMessage='';let succeeded=false;let issues=[];
+  let modelDone=false,replyTicket=null;
   const message={id:retry?previous.id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,
     channelId:retry?getChannel(previous.channelId).id:getChannel(session.channelId).id,sentAt:Date.now(),
     witnessIds:retry?[...(previous.witnessIds||[])]:channelAudience(session.channelId)==='cast'?[...session.castIds]:[actorId],provisional:true};
@@ -2289,21 +2312,34 @@ async function generate(mode = 'normal') {
     if (!response.body) throw new Error('Model server returned no response stream');
     streamingReply={sessionId:session.id,message};
     renderMessages();
-    const reader=response.body.getReader();const decode=new TextDecoder();let pending='';let done=false;
-    const onFrame=(frame)=>{
-      const data=frame.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n');
-      if (!data) return;
-      if (data==='[DONE]') {done=true;return;}
-      try {
+    const reader=response.body.getReader();const decode=new TextDecoder();let pending='';
+    const onFrame=frame=>{
+      const data=frame.split('\n').filter(line=>line.startsWith('data:'))
+        .map(line=>line.slice(5).trimStart()).join('\n');
+      if(!data)return;
+      if(data==='[DONE]'){modelDone=true;return;}
+      try{
         const obj=JSON.parse(data);
+        if(frame.split('\n').some(line=>line.trim()==='event: rp_complete')){
+          replyTicket=obj.ticket;return;
+        }
         if(obj.error){errorMessage=typeof obj.error==='string'?obj.error:JSON.stringify(obj.error);return;}
         const delta=obj.choices?.[0]?.delta?.content;
-        if(typeof delta==='string'&&delta){assistantText+=delta;message.content=assistantText;const messages=$('messages');const last=messages.lastElementChild?.querySelector('.message-text');if(last)last.textContent=assistantText; messages.scrollTop=messages.scrollHeight;}
-      }catch{/* Ignore malformed events, not the surrounding stream. */}
+        if(typeof delta==='string'&&delta){
+          assistantText+=delta;message.content=assistantText;
+          const messages=$('messages'),last=messages.lastElementChild?.querySelector('.message-text');
+          if(last)last.textContent=assistantText;
+          messages.scrollTop=messages.scrollHeight;
+        }
+      }catch{/* Incomplete/malformed frames cannot supply a completion ticket. */}
     };
-    while(!done){const item=await reader.read();if(item.done)break;pending=parseSSE(pending+decode.decode(item.value,{stream:true}),onFrame);}
+    // The model's [DONE] is NOT proof the world stayed unchanged. Continue
+    // reading until the local server issues a separate rp_complete ticket.
+    while(true){const item=await reader.read();if(item.done)break;pending=parseSSE(pending+decode.decode(item.value,{stream:true}),onFrame);}
     parseSSE(pending+decode.decode()+'\n\n',onFrame);
     if(errorMessage)throw new Error(errorMessage);
+    if(!modelDone||typeof replyTicket!=='string'||!replyTicket)
+      throw new Error('World or scene changed while generating, or the model stream ended early. Nothing was saved.');
     if(!assistantText.trim())throw new Error('The model returned an empty reply. Try another model or generation preset.');
     issues=inspectNpcReply(message.channelId,assistantText,state.characters.find(c=>c.id===actorId)?.name||'');
     succeeded=true;
@@ -2312,13 +2348,13 @@ async function generate(mode = 'normal') {
   } finally {
     streamingReply=null;
     if(succeeded){
-      const record={sessionId:session.id,basis,actorId,mode,retry,originalVariants,
+      const record={ticket:replyTicket,sessionId:session.id,basis,actorId,mode,retry,originalVariants,
         message:{...message,content:assistantText},issues};
       if(issues.length)pendingReply=record;
-      else if(!commitNpcReply(record))showError('Scene changed before the NPC reply could be saved. Please try again.');
+      else await persistNpcReply(record);
     }
     running=false;controller=null;$('send').disabled=false;$('regenerate').disabled=false;$('continue').disabled=false;
-    $('stop').classList.add('hidden');save();renderLists();renderMessages();renderHeader();
+    $('stop').classList.add('hidden');renderLists();renderMessages();renderHeader();
   }
 }
 

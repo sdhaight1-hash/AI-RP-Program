@@ -175,7 +175,7 @@ export class WorldPartitionStore {
     this.assertWorld(options.worldId);
     return this.current.searchLore(query, options);
   }
-  save(state,revision,{worldId,purgedSceneId=null,purgedCharacterId=null}={}) {
+  save(state,revision,{worldId,purgedSceneId=null,purgedCharacterId=null,verifyBeforeReplace=null}={}) {
     if (worldId !== this.activeWorldId) throw new Error('World changed; this save belongs to another world');
     const scoped=structuredClone(state);
     const locations=new Set(this.current.worlds.list().locations.map(x=>x.id));
@@ -205,9 +205,10 @@ export class WorldPartitionStore {
       if((encounter.characterIds||[]).some(id => !characterIds.has(id)))throw new Error('Encounter references a character outside this world');
     }
     return this.current.save(scoped, revision, {
-      beforeReplace: (previous,validated) => assertExplicitPurges(previous,validated,{
-        purgedSceneId,purgedCharacterId
-      }),
+      beforeReplace: (previous,validated) => {
+        assertExplicitPurges(previous,validated,{purgedSceneId,purgedCharacterId});
+        if(verifyBeforeReplace)verifyBeforeReplace(previous,validated);
+      },
       beforeCommit: validated => {
         this.ensureCharacterEntities(validated.characters,this.current,this.activeWorldId,
           validated,{removedCharacterId:purgedCharacterId});

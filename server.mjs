@@ -17,6 +17,10 @@ import {assertExplicitPurges,DeletionConflictError} from './world/conflict-guard
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
 import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
+import {readWorldEpoch} from './world/epoch.mjs';
+import {replyBasis,isReplyBasisCurrent} from './interactions/reply-review.mjs';
+import {applyCompletedNpcReply} from './interactions/reply-commit.mjs';
+import {createReplyStreamReader} from './interactions/stream-reader.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -100,6 +104,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
   const semantic=semanticModel?createLocalSemanticRetriever({
     baseUrl:semanticUrl,model:semanticModel,fetchImpl:semanticFetchImpl
   }):null;
+  // One-use reply tickets exist only for the life of this server process.
+  // A restart invalidates outstanding drafts; the world epoch remains durable.
+  const replyLeases=new Map();
+  const cleanReplyLeases=()=>{
+    const now=Date.now();
+    for(const [id,record] of replyLeases)
+      if(record.expiresAt<=now)replyLeases.delete(id);
+    while(replyLeases.size>=64)replyLeases.delete(replyLeases.keys().next().value);
+  };
   // The server binds localhost by default; this additional check rejects cross-site writes.
   const server = http.createServer(async (req, res) => {
     // A scoped store belongs to this request, never to a process-global tab.
@@ -426,6 +439,42 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           return json(res,201,addActorFact(store,data));
         }catch(error){return json(res,422,{error:error.message});}
       }
+      if (req.method === 'POST' && path === '/api/actor/reply/commit') {
+        const data=await readJson(req,1200);
+        requireWorldScope(data?.worldId);
+        if(typeof data?.ticket!=='string'||data.ticket.length>100||typeof data.reviewed!=='boolean')
+          return json(res,400,{error:'Valid completed reply ticket and review choice required'});
+        const lease=replyLeases.get(data.ticket);
+        if(!lease||lease.expiresAt<=Date.now()||lease.worldId!==data.worldId)
+          return json(res,409,{error:'NPC reply ticket expired or belongs to another world. Generate again.'});
+        // Consume regardless of the result: no replay or concurrent duplicate
+        // commits, including a failed conflict-validation attempt.
+        replyLeases.delete(data.ticket);
+        // The storage beforeReplace callback receives the *prior state*,
+        // not the outer {revision,state} envelope. Query revision inside the
+        // same BEGIN IMMEDIATE boundary as the definitive epoch check.
+        const verify=previousState=>{
+          const actualRevision=store.db.prepare('SELECT revision FROM studio_state WHERE id=1').get()?.revision;
+          if(actualRevision!==lease.revision)
+            throw new Error('Story revision changed since generation. The stale NPC reply was not saved.');
+          if(readWorldEpoch(store.db)!==lease.epoch)
+            throw new Error('World knowledge changed since generation. The stale NPC reply was not saved.');
+          if(!isReplyBasisCurrent(previousState?.sessions?.find(s=>s.id===lease.sceneId),lease.basis))
+            throw new Error('Acting scene context changed since generation. The stale NPC reply was not saved.');
+        };
+        try{
+          const existing=store.load();
+          verify(existing.state);
+          const next=structuredClone(existing.state);
+          applyCompletedNpcReply(next,lease,{reviewed:data.reviewed});
+          const saved=typeof baseStore.forWorld==='function'
+            ?store.save(next,lease.revision,{worldId:data.worldId,
+              verifyBeforeReplace:verify})
+            :store.save(next,lease.revision,{beforeReplace:verify});
+          if(!saved)return json(res,409,{error:'Story was edited in another tab before the NPC reply could be saved'});
+          return json(res,200,{...saved,worldId:data.worldId,state:store.load().state});
+        }catch(error){return json(res,409,{error:error.message});}
+      }
       if (req.method === 'POST' && (path === '/api/actor/context' || path === '/api/actor/reply')) {
         const data=await readJson(req,3000);
         requireWorldScope(data.worldId);
@@ -443,6 +492,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           maxOutput:responseTokens};
         const startingRevision=store.load().revision;
         const startingMutation=worldMutationStamp(store);
+        const startingEpoch=readWorldEpoch(store.db);
         let prompt,semanticEvidence=[],semanticStatus=semantic?'no-match':'disabled';
         try {
           prompt=buildActorContext(contextArgs);
@@ -480,6 +530,18 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if (typeof data.model !== 'string' || !data.model || data.model.length>250 ||
             !Number.isFinite(data.temperature) || data.temperature<0 || data.temperature>2)
           return json(res,400,{error:'Select a valid local model and temperature'});
+        if(!['normal','retry','continue'].includes(data.mode||'normal'))
+          return json(res,400,{error:'Unsupported NPC reply mode'});
+        const basisScene=store.load().state?.sessions?.find(s=>s.id===data.sceneId);
+        if(!basisScene)return json(res,409,{error:'Scene disappeared during context assembly'});
+        const basis=replyBasis(basisScene);
+        // Constant-cost per-chunk guard: never parse the entire world story
+        // once per generated token. Full scene/source validation happens again
+        // within the final SQLite save transaction.
+        const streamCurrent=()=>
+          store.db.prepare('SELECT revision FROM studio_state WHERE id=1').get()?.revision===startingRevision &&
+          readWorldEpoch(store.db)===startingEpoch &&
+          worldMutationStamp(store)===startingMutation;
         const aborter=new AbortController();
         res.on('close',()=>aborter.abort());
         let upstream;
@@ -490,18 +552,50 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
               max_tokens:responseTokens,stream:true})
           });
         } catch(error) {return json(res,502,{error:'Local model unavailable: '+error.message});}
+        if(!streamCurrent()){
+          aborter.abort();
+          return json(res,409,{error:'World or scene changed while waiting for the model; generate again'});
+        }
         if(!upstream.ok)return json(res,502,{error:'Model server returned '+upstream.status+': '+(await upstream.text()).slice(0,800)});
         if(!upstream.body)return json(res,502,{error:'Model server returned an empty stream'});
         res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','X-Content-Type-Options':'nosniff'});
+        const reader=createReplyStreamReader();
+        const streamError=message=>{
+          if(!res.destroyed)res.write('event: error\ndata: '+JSON.stringify({error:message})+'\n\n');
+          aborter.abort();
+        };
         try {
           for await(const chunk of upstream.body) {
             if(res.destroyed)break;
+            if(!streamCurrent()){
+              streamError('World or actor knowledge changed while the NPC was replying. This draft was not saved; generate again.');
+              break;
+            }
+            reader.feed(chunk);
+            if(reader.error){streamError(reader.error);break;}
             if(!res.write(chunk))await new Promise(resolve=>{
               const done=()=>{res.off('drain',done);res.off('close',done);resolve();};
               res.once('drain',done);res.once('close',done);
             });
           }
-        } catch(error) {if(!res.destroyed)res.write('event: error\ndata: '+JSON.stringify({error:error.message})+'\n\n');}
+        } catch(error) {if(!res.destroyed)streamError(error.message);}
+        // The terminal event is issued ONLY after a completed model stream
+        // with unchanged world epoch and story revision. Even a partial reply
+        // already shown in the UI cannot become authoritative without it.
+        if(!res.destroyed&&reader.completed()&&streamCurrent()&&!aborter.signal.aborted){
+          cleanReplyLeases();
+          const ticket=randomUUID();
+          const completedAt=Date.now();
+          replyLeases.set(ticket,{
+            worldId:data.worldId,sceneId:data.sceneId,actorId:data.actorId,
+            mode:data.mode||'normal',revision:startingRevision,epoch:startingEpoch,
+            basis,text:reader.text,messageId:randomUUID(),completedAt,
+            expiresAt:completedAt+15*60_000
+          });
+          res.write('event: rp_complete\ndata: '+JSON.stringify({ticket})+'\n\n');
+        }else if(!res.destroyed&&!aborter.signal.aborted){
+          streamError('Local model did not finish with a valid, current response. Nothing was saved.');
+        }
         if(!res.destroyed)res.end();
         return;
       }
