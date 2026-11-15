@@ -287,3 +287,27 @@ test('actor memory editor is world scoped, independently served and preserves so
     assert.match(module,/Remember this detail/);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test('world and scene creation have separate composed editing, model review and final commit surfaces',()=>{
+  const world=readFileSync(resolve(root,'public/world-timelines.mjs'),'utf8');
+  const assist=readFileSync(resolve(root,'public/world-scene-assist.mjs'),'utf8');
+  assert.match(world,/world-composer-layout/);
+  assert.match(world,/id="world-ai-slot"/);
+  assert.match(world,/id="world-library-list"/);
+  assert.match(world,/world-timeline-tools/);
+  assert.match(world,/world-admin-tools/);
+  assert.match(world,/mountWorldSceneAssistant\(\$\('world-ai-slot'\)/);
+  assert.match(html,/class="scene-composer-grid"/);
+  assert.match(html,/class="scene-setup-panel"/);
+  assert.match(html,/class="scene-draft-panel"/);
+  assert.match(html,/class="scene-assist-panel"/);
+  assert.match(html,/class="scene-composer-footer"/);
+  assert.match(html,/id="new-scene-world-context"/);
+  assert.match(javascript,/new-scene-context-summary/);
+  assert.match(assist,/ai-authoring-advanced/);
+  assert.match(assist,/Review suggested changes/);
+  assert.match(assist,/raw\.oninput=renderChanges/);
+  assert.match(assist,/selectReviewedSuggestions/);
+  assert.match(css,/\.new-scene-dialog\[open\]\{display:grid\}/);
+  assert.match(css,/@media\(max-width:820px\)/);
+});
