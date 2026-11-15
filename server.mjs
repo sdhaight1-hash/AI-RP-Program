@@ -524,6 +524,14 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if (typeof data.model !== 'string' || !data.model || data.model.length>250 ||
             !Number.isFinite(data.temperature) || data.temperature<0 || data.temperature>2)
           return json(res,400,{error:'Select a valid local model and temperature'});
+        if(!['normal','retry','continue'].includes(data.mode||'normal'))
+          return json(res,400,{error:'Unsupported NPC reply mode'});
+        const basisScene=store.load().state?.sessions?.find(s=>s.id===data.sceneId);
+        if(!basisScene)return json(res,409,{error:'Scene disappeared during context assembly'});
+        const basis=replyBasis(basisScene);
+        const streamCurrent=()=>store.load().revision===startingRevision &&
+          readWorldEpoch(store.db)===startingEpoch &&
+          worldMutationStamp(store)===startingMutation;
         const aborter=new AbortController();
         res.on('close',()=>aborter.abort());
         let upstream;
@@ -534,18 +542,50 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
               max_tokens:responseTokens,stream:true})
           });
         } catch(error) {return json(res,502,{error:'Local model unavailable: '+error.message});}
+        if(!streamCurrent()){
+          aborter.abort();
+          return json(res,409,{error:'World or scene changed while waiting for the model; generate again'});
+        }
         if(!upstream.ok)return json(res,502,{error:'Model server returned '+upstream.status+': '+(await upstream.text()).slice(0,800)});
         if(!upstream.body)return json(res,502,{error:'Model server returned an empty stream'});
         res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','X-Content-Type-Options':'nosniff'});
+        const reader=createReplyStreamReader();
+        const streamError=message=>{
+          if(!res.destroyed)res.write('event: error\\ndata: '+JSON.stringify({error:message})+'\\n\\n');
+          aborter.abort();
+        };
         try {
           for await(const chunk of upstream.body) {
             if(res.destroyed)break;
+            if(!streamCurrent()){
+              streamError('World or actor knowledge changed while the NPC was replying. This draft was not saved; generate again.');
+              break;
+            }
+            reader.feed(chunk);
+            if(reader.error){streamError(reader.error);break;}
             if(!res.write(chunk))await new Promise(resolve=>{
               const done=()=>{res.off('drain',done);res.off('close',done);resolve();};
               res.once('drain',done);res.once('close',done);
             });
           }
-        } catch(error) {if(!res.destroyed)res.write('event: error\ndata: '+JSON.stringify({error:error.message})+'\n\n');}
+        } catch(error) {if(!res.destroyed)streamError(error.message);}
+        // The terminal event is issued ONLY after a completed model stream
+        // with unchanged world epoch and story revision. Even a partial reply
+        // already shown in the UI cannot become authoritative without it.
+        if(!res.destroyed&&reader.completed()&&streamCurrent()&&!aborter.signal.aborted){
+          cleanReplyLeases();
+          const ticket=randomUUID();
+          const completedAt=Date.now();
+          replyLeases.set(ticket,{
+            worldId:data.worldId,sceneId:data.sceneId,actorId:data.actorId,
+            mode:data.mode||'normal',revision:startingRevision,epoch:startingEpoch,
+            basis,text:reader.text,messageId:randomUUID(),completedAt,
+            expiresAt:completedAt+15*60_000
+          });
+          res.write('event: rp_complete\\ndata: '+JSON.stringify({ticket})+'\\n\\n');
+        }else if(!res.destroyed&&!aborter.signal.aborted){
+          streamError('Local model did not finish with a valid, current response. Nothing was saved.');
+        }
         if(!res.destroyed)res.end();
         return;
       }
