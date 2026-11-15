@@ -24,6 +24,6 @@ The World workspace previously showed static preview cards while the actual Plac
 
 ## Remaining UX work
 
-World overview's **timeline and clock** configuration still uses a focused World Library panel. Character authoring and memory/fidelity diagnostics also have complex dedicated editors. Continue extracting them incrementally under Issue #33 with browser and cross-world tests; do not rewrite their business logic just to simplify the surface.
+World creation, timelines, and fictional clocks have now also moved into the main World workspace; see [World timelines & clocks](world-timelines-v6.md). Character authoring and memory/fidelity diagnostics still have complex dedicated editors. Continue extracting these incrementally under Issue #33 with browser and cross-world tests; do not rewrite their business logic just to simplify the surface.
 
 No local Windows database is modified by this GitHub development pass. Updating the app serves the new editor while preserving existing world records.

@@ -1027,15 +1027,35 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
    World Library editor visible in a third column at desktop widths. */
 @media(min-width:1101px){
   body[data-workspace="world"][data-world-pane="atlas"]:not(.detail-focus) .shell,
-  body[data-workspace="world"][data-world-pane="relations"]:not(.detail-focus) .shell{
+  body[data-workspace="world"][data-world-pane="relations"]:not(.detail-focus) .shell,
+  body[data-workspace="world"][data-world-pane="timelines"]:not(.detail-focus) .shell{
     grid-template-columns:256px minmax(0,1fr);
   }
   body[data-workspace="world"][data-world-pane="atlas"]:not(.detail-focus) .inspector,
-  body[data-workspace="world"][data-world-pane="relations"]:not(.detail-focus) .inspector{display:none}
+  body[data-workspace="world"][data-world-pane="relations"]:not(.detail-focus) .inspector,
+  body[data-workspace="world"][data-world-pane="timelines"]:not(.detail-focus) .inspector{display:none}
 }
 @media(min-width:1101px) and (max-width:1360px){
   body[data-workspace="world"][data-world-pane="atlas"]:not(.detail-focus) .shell,
-  body[data-workspace="world"][data-world-pane="relations"]:not(.detail-focus) .shell{
+  body[data-workspace="world"][data-world-pane="relations"]:not(.detail-focus) .shell,
+  body[data-workspace="world"][data-world-pane="timelines"]:not(.detail-focus) .shell{
     grid-template-columns:234px minmax(0,1fr);
   }
+}
+
+/* Direct World & timelines management. */
+.world-editor-content > #world-library-list{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px
+}
+.world-editor-content > #world-library-list .lore-card{margin:0;min-width:0}
+.world-editor-content > .group{
+  width:100%;max-width:760px;
+  padding:15px 18px;background:var(--ux-faint);
+  border:1px solid var(--ux-line);border-radius:12px;
+}
+.world-editor-content > .group textarea{width:100%}
+@media(max-width:760px){
+  .world-editor-nav{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .world-editor-content > #world-library-list{grid-template-columns:1fr}
+  .world-editor-content > .group{padding:13px}
 }

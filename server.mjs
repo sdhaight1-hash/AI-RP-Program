@@ -32,6 +32,7 @@ const ALLOWED = new Map([
   ['/studio-navigation.mjs', ['studio-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/encounter-studio.mjs', ['encounter-studio.mjs', 'text/javascript; charset=utf-8']],
   ['/world-editors.mjs', ['world-editors.mjs', 'text/javascript; charset=utf-8']],
+  ['/world-timelines.mjs', ['world-timelines.mjs', 'text/javascript; charset=utf-8']],
   ['/encounters/library.mjs', ['../encounters/library.mjs', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/studio-shell.css', ['studio-shell.css', 'text/css; charset=utf-8']],

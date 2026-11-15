@@ -198,17 +198,51 @@ async function main(){
     }
     await script(`document.querySelector('button[data-workspace="world"]').click();return true`);
 
-    const focused=await script(`
+    const timelinesView=await script(`
       document.querySelector('.workspace-card.featured button').click();
-      return {focus:document.body.classList.contains('detail-focus'),
-        width:document.querySelector('#inspector').getBoundingClientRect().width,
-        active:document.querySelector('[data-tab="worlds"]').classList.contains('active')};
+      return {
+        pane:document.body.dataset.worldPane,
+        create:!!document.querySelector('.world-editor-content #world-create'),
+        clock:!!document.querySelector('.world-editor-content #timeline-clock-save'),
+        nav:!!document.querySelector('.world-editor-nav [data-world-view="overview"]'),
+        focused:document.body.classList.contains('detail-focus')
+      };
     `);
-    assert.equal(focused.focus,true);
-    assert.equal(focused.active,true);
-    assert.ok(focused.width>=600,'Atlas editor should expand beyond the original 338px detail column');
-    await screenshot('03-focused-world-editor');
-    assert.equal(await script("document.querySelector('#close-inspector').click();return document.body.classList.contains('detail-focus')"),false);
+    assert.deepEqual(timelinesView,{pane:'timelines',create:true,clock:true,nav:true,focused:false},
+      'World & timelines must be an inline editor, not a second focused overlay');
+    await screenshot('03-world-timelines-editor');
+    const timelineName='Browser Independent Timeline';
+    await script(`
+      document.querySelector('#timeline-new-name').value=${JSON.stringify(timelineName)};
+      document.querySelector('#timeline-create').click();return true;
+    `);
+    let createdTimeline;
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
+      createdTimeline=catalog.timelines.find(t=>t.worldId===store.activeWorldId&&t.name===timelineName);
+      return !!createdTimeline;
+    },'new timeline persisted within active world');
+    await until(async()=>script(`
+      return [...document.querySelector('#timeline-select')?.options||[]].some(
+        x=>x.value===${JSON.stringify(createdTimeline.id)});
+    `),'new timeline available in inline world editor');
+    await script(`
+      document.querySelector('#timeline-select').value=${JSON.stringify(createdTimeline.id)};
+      document.querySelector('#timeline-clock-utc').value='2026-01-01T12:00';
+      document.querySelector('#timeline-clock-zone').value='UTC';
+      document.querySelector('#timeline-clock-save').click();return true;
+    `);
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
+      return catalog.clocks.some(c=>c.timelineId===createdTimeline.id&&c.isExplicit&&
+        c.instantMs===Date.parse('2026-01-01T12:00:00Z')&&c.timeZone==='UTC');
+    },'fictional timeline clock saved to SQLite');
+    await screenshot('03a-timeline-clock-persisted');
+    assert.equal(await script(`
+      document.querySelector('.world-editor-nav [data-world-view="overview"]').click();
+      return document.body.dataset.worldPane==='overview' &&
+        document.querySelectorAll('.workspace-card').length===4;
+    `),true,'return from timeline editor to World overview');
 
     const atlasCommandResult=await script(`
       document.querySelector('#open-command').click();
@@ -341,6 +375,17 @@ async function main(){
     assert.notEqual(firstLabel,'Parallel Browser World','the first tab must keep its own world');
     await request('POST','/session/'+sessionId+'/refresh',{});
     await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'first tab world reload');
+    const firstTimelineCatalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
+    const firstTimelineIds=firstTimelineCatalog.timelines
+      .filter(t=>t.worldId===store.activeWorldId).map(t=>t.id).sort();
+    const timelineChoices=await script(`
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-world-view="timelines"]').click();
+      return [...document.querySelector('#timeline-select').options].map(x=>x.value).sort();
+    `);
+    assert.deepEqual(timelineChoices,firstTimelineIds,
+      'first world must never offer a second world timeline for scene assignment or clock edits');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
     await request('POST','/session/'+sessionId+'/window',{handle:secondTab.handle});
     await request('DELETE','/session/'+sessionId+'/window');
     await request('POST','/session/'+sessionId+'/window',{handle:firstHandle});
