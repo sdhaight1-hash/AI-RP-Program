@@ -19,7 +19,7 @@ const likelyName=s=>{
 export function sourcesFor({state={},library={},worldId}){
   const sources=[];
   const add=(type,id,field,value,trust)=>{if(typeof value==='string'&&value.trim())
-    sources.push({type,id,field,text:value.slice(0,9000),trust});};
+    sources.push({type,id,field,text:value.slice(0,12000),trust});};
   const world=library.worlds?.find(w=>w.id===worldId);
   if(world)add('universe',worldId,'description',world.description,'established');
   if(library.blueprint?.worldId===worldId)
