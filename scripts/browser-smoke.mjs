@@ -700,7 +700,9 @@ async function main(){
       document.querySelector('#close-inspector').click();
       document.querySelector('button[data-workspace="world"]').click();
       document.querySelector('[data-world-view="timelines"]').click();
-      document.querySelector('#world-new-name').value='Browser Saltlands';
+      const name=document.querySelector('#world-new-name');
+      name.value='Browser Saltlands';
+      name.dispatchEvent(new Event('input',{bubbles:true}));
       const ai=document.querySelector('#world-ai-slot');
       const target=ai.querySelector('select[aria-label="AI generation focus"]');
       target.value='description';target.dispatchEvent(new Event('change'));
@@ -722,6 +724,25 @@ async function main(){
     assert.equal(store.worlds.list().worlds.length,countBeforeWorldDraft,
       'AI approval must not create a world without separate Create world action');
     await screenshot('07b-ai-reviewed-new-world-draft');
+
+    // Refreshing the catalog must not erase a typed, uncommitted world seed.
+    await script(`
+      document.querySelector('#timeline-new-name').value='Creation UI refresh test';
+      document.querySelector('#timeline-create').click();
+      return true;
+    `);
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld))).json();
+      return catalog.timelines.some(t=>t.worldId===editableWorld&&t.name==='Creation UI refresh test');
+    },'timeline catalog refresh during world drafting');
+    await until(async()=>script(`
+      return document.querySelector('#world-new-name')?.value==='Browser Saltlands' &&
+        document.querySelector('#world-new-description')?.value===
+        'An independent harbor civilization shaped by seasonal trade.';
+    `),'world creation inputs survive catalog re-render');
+    assert.equal(store.worlds.list().worlds.length,countBeforeWorldDraft,
+      'catalog refresh cannot commit an unapproved world');
+    await screenshot('07b1-preserved-world-draft');
 
     // AI drafts an Atlas place against this world's existing locations;
     // reviewing the JSON alone must not create a persistent location.
@@ -865,7 +886,16 @@ async function main(){
       return document.querySelector('#new-scene-draft-title').value==='Harbor Call at Dusk'
         &&document.querySelector('#new-scene-draft-direction').value.includes('unsigned harbor map');
     `),true,'reviewed scene AI must populate editable fields');
-    await script("document.querySelector('#new-scene-confirm').click();return true");
+    const scenesBeforeStart=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(editableWorld))).json()).state.sessions.length;
+    const locked=await script(`
+      const button=document.querySelector('#new-scene-confirm');
+      button.click();button.click();
+      return button.disabled &&
+        document.querySelector('#new-scene-cancel').disabled;
+    `);
+    assert.equal(locked,true,'Scene creation is locked during the SQLite commit');
+    await until(async()=>script("return !document.querySelector('#new-scene-dialog').open"),'scene dialog closed only after durable save');
     await until(async()=>script("return document.body.dataset.workspace==='story' && !!document.querySelector('#message-input')"),'live scene editor');
     await until(async()=>{
       const state=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
@@ -874,6 +904,8 @@ async function main(){
     const reviewedScene=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state
       .sessions.find(scene=>scene.title==='Harbor Call at Dusk');
     assert.ok(reviewedScene,'reviewed title must be part of the created scene');
+    assert.equal((await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state.sessions.length,
+      scenesBeforeStart+1,'rapid double submission cannot create two scenes');
     assert.equal(reviewedScene.direction,'The player calls Nessa about an unsigned harbor map.');
     assert.equal(reviewedScene.atmosphere,'Muffled gull cries and a quiet electrical hum.');
     assert.equal(reviewedScene.authorNote,'Keep the conversation grounded and exploratory.');
@@ -979,7 +1011,34 @@ async function main(){
     assert.deepEqual(afterEditable.messages.map(x=>x.id),priorMessageIds);
     assert.equal(JSON.stringify(afterEditable.sceneEvents),priorEvents);
     await screenshot('10-reviewed-ongoing-scene-direction');
-    console.log('Browser UI smoke: reviewed world/scene creation, ongoing scene, source memory and ticketed NPC commit passed.');
+
+    // Double-clicking Create world must register exactly one universe and
+    // open it only once earlier world state has reached SQLite.
+    const worldsBeforeCreate=store.worlds.list().worlds.length;
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-world-view="timelines"]').click();
+      const field=document.querySelector('#world-new-name');
+      if(!field)return false;
+      field.value='Reliable Browser World';
+      field.dispatchEvent(new Event('input',{bubbles:true}));
+      const button=document.querySelector('#world-create');
+      button.click();button.click();
+      return button.disabled;
+    `),true,'world creation must lock immediately');
+    await until(async()=>script(`
+      return document.querySelector('#top-world-name')?.textContent==='Reliable Browser World';
+    `),'newly created world opened after SQLite commit');
+    assert.equal(store.worlds.list().worlds.length,worldsBeforeCreate+1,
+      'rapid world submission cannot create duplicate universes');
+    const resultingWorld=store.worlds.list().worlds.find(w=>w.name==='Reliable Browser World');
+    assert.ok(resultingWorld,'world creation survives registry persistence');
+    assert.deepEqual((await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(resultingWorld.id))).json()).state.sessions,[],
+      'new world must not inherit old scene history');
+    await screenshot('11-reliable-world-create');
+
+    console.log('Browser UI smoke: world and scene creation survive refresh, double-clicks and verified SQLite persistence.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');
