@@ -690,18 +690,18 @@ async function main(){
       document.querySelector('button[data-workspace="world"]').click();
       document.querySelector('[data-world-view="timelines"]').click();
       document.querySelector('#world-new-name').value='Browser Saltlands';
-      const ai=document.querySelector('#world-create').parentElement;
+      const ai=document.querySelector('#world-ai-slot');
       const target=ai.querySelector('select[aria-label="AI generation focus"]');
       target.value='description';target.dispatchEvent(new Event('change'));
       ai.querySelector('.ai-draft-generate').click();
       return true;
     `);
     await until(async()=>script(`
-      return document.querySelector('#world-create')?.parentElement?.querySelector('textarea[aria-label="Editable model JSON"]')
+      return document.querySelector('#world-ai-slot')?.querySelector('textarea[aria-label="Editable model JSON"]')
         ?.value.includes('independent harbor civilization');
     `),'new-world AI draft rendered for review');
     await script(`
-      const ai=document.querySelector('#world-create').parentElement;
+      const ai=document.querySelector('#world-ai-slot');
       ai.querySelector('.ai-draft-apply').click();
       return true;
     `);
