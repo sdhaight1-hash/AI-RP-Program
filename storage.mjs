@@ -10,6 +10,7 @@ import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } fro
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
 import { initializeFactSchema } from './memory/facts.mjs';
+import {initializeWorldEpoch} from './world/epoch.mjs';
 import { inspectStoryProjectionInput,projectionEnabled,projectionPrimary,readPrimaryStory,compactPrimaryDocument,writeStoryProjection,verifyStoryProjection } from './storage/normalized.mjs';
 
 function assertPersistedStoryShape(raw) {
@@ -71,6 +72,7 @@ export class StudioStore {
     initializeEventLedger(this.db);
     initializeMemorySchema(this.db);
     initializeFactSchema(this.db);
+    initializeWorldEpoch(this.db);
     this.worlds = new WorldRepository(this.db);
     this.events = new EventLedger(this);
     this.rebuildLoreIndex(persisted?.lore || []);
