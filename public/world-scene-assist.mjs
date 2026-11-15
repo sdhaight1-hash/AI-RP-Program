@@ -90,7 +90,7 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
       const draft=getRequest(target.value,guidance.value);
       const response=await fetch('/api/chat',{method:'POST',signal:controller.signal,
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({worldId:draft.worldId,model,temperature:0.45,max_tokens:1400,messages:draft.messages})});
+        body:JSON.stringify({worldId:draft.worldId,model,temperature:0.45,max_tokens:mode==='blueprint'?2048:1400,messages:draft.messages})});
       if(!response.ok){const error=await response.json().catch(()=>({}));throw Error(error.error||'Local model unavailable');}
       if(!response.body)throw Error('Model did not return a stream');
       const reader=response.body.getReader(),decoder=new TextDecoder();
