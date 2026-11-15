@@ -10,7 +10,7 @@ function consumeFrames(text,emit){
   return {remaining:frames.pop(),frames:frames.filter(Boolean).map(frame=>
     frame.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n')).filter(Boolean)};
 }
-export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurrent,onApply,beforeGenerate=async()=>{}}){
+export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurrent,onApply,beforeGenerate=async()=>{},applyMessage='Approved fields applied to the editor. Save or create explicitly to persist them.'}){
   if(!AUTHORING_CONTRACTS[mode])throw Error('Unknown AI authoring mode');
   const contracts=AUTHORING_CONTRACTS[mode];
   let active=null,request=null;
@@ -36,7 +36,7 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
   panel.append(title,help,make('label','What to develop','field-label'),target,reference,
     make('label','Creative direction','field-label'),guidance,actions,status,preview);
   host.append(panel);
-  const current=()=>host.isConnected&&isCurrent();
+  const current=()=>panel.isConnected&&host.contains(panel)&&isCurrent();
   const showPurpose=()=>{
     reference.textContent=target.value==='all'
       ?Object.values(contracts).map(x=>x.label+': '+x.purpose+'.').join(' ')
@@ -125,7 +125,7 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
       if(!confirm('Apply '+Object.keys(patch).join(', ')+' to the editable draft? No other fields will change.'))return;
       onApply(patch,request);
       preview.hidden=true;request=null;
-      status.textContent='Approved fields applied to the editor. Save or create explicitly to persist them.';
+      status.textContent=applyMessage;
     }catch(error){status.textContent=error.message;}
   };
   return {cancel:()=>active?.abort(),element:panel};
