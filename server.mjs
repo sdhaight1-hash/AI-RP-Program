@@ -189,7 +189,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/worlds') {
         // UI allows 4,000 Unicode code units; UTF-8 JSON may exceed 5 KB.
-        const data=await readJson(req,36000);
+        const data=await readJson(req,64000);
         try { return json(res,201,store.worlds.createWorld(data)); }
         catch(err) { return json(res,400,{error:err.message}); }
       }
