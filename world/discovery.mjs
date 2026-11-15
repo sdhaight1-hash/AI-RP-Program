@@ -15,7 +15,7 @@ const likelyName=s=>{
     !STOP.has(tokens[0])&&!tokens.every(t=>STOP.has(t))&&
     !/[<>\n\r]/u.test(s);
 };
-function sourcesFor({state={},library={},worldId}){
+export function sourcesFor({state={},library={},worldId}){
   const sources=[];
   const add=(type,id,field,value,trust)=>{if(typeof value==='string'&&value.trim())
     sources.push({type,id,field,text:value.slice(0,9000),trust});};
@@ -24,7 +24,7 @@ function sourcesFor({state={},library={},worldId}){
   if(library.blueprint?.worldId===worldId)
     for(const [field,value] of Object.entries(library.blueprint.sections||{}))
       add('blueprint',worldId,field,value,'established');
-  for(const person of (state.characters||[]).filter(c=>!c.trashedAt&&(!c.worldId||c.worldId===worldId)).slice(0,400)){
+  for(const person of (state.characters||[]).filter(c=>!c.trashedAt&&(!c.worldId||c.worldId===worldId)).slice(0,1000)){
     for(const field of ['description','backstory','personality','occupation','family','relationships','preferredEnvironment','frequentPlacesText','history','goals','fears','secrets']){
       add('character',person.id,field,person[field],'profile');
     }
@@ -35,14 +35,14 @@ function sourcesFor({state={},library={},worldId}){
         add('character',person.id,field,value,'profile');
     }
   }
-  for(const entry of (state.lore||[]).slice(0,350)){
+  for(const entry of (state.lore||[]).slice(0,1500)){
     if(entry.worldId&&entry.worldId!==worldId)continue;
     for(const field of ['title','content','body','description'])add('lore',entry.id,field,entry[field],
       entry.private?'private':'lore');
   }
-  for(const scene of (state.sessions||[]).filter(s=>!s.trashedAt&&(!s.worldId||s.worldId===worldId)).slice(-100)){
+  for(const scene of (state.sessions||[]).filter(s=>!s.trashedAt&&(!s.worldId||s.worldId===worldId)).slice(-800)){
     for(const field of ['direction','publicSummary','location','atmosphere'])add('scene',scene.id,field,scene[field],'scene');
-    for(const message of (scene.messages||[]).slice(-60))
+    for(const message of (scene.messages||[]).slice(-250))
       add('dialogue',message.id,'content',message.content,'unverified');
   }
   return sources;
@@ -65,7 +65,7 @@ function matchesExisting(text,names){
  * 'locations' or 'groups' controls which recommendations appear in an editor.
  * All sources and established entries are constrained to the supplied world.
  */
-export function discoverUniverseMentions({worldId,library,state={},focus='locations',limit=14}={}){
+export function discoverUniverseMentions({worldId,library,state={},focus='locations',limit=14,sourcesOverride=null}={}){
   if(!worldId||library?.activeWorldId!==worldId)throw Error('Open the correct Connical Universe');
   if(!['locations','groups'].includes(focus))throw Error('Unsupported discovery focus');
   const established=focus==='locations'
@@ -73,7 +73,7 @@ export function discoverUniverseMentions({worldId,library,state={},focus='locati
     :(library.entities||[]).filter(x=>x.worldId===worldId);
   const byName=new Set(established.map(x=>keyOf(x.name)));
   const candidates=new Map();
-  const sources=sourcesFor({state,library,worldId});
+  const sources=sourcesOverride||sourcesFor({state,library,worldId});
   for(const source of sources){
     const pattern=focus==='locations'?PLACE:COLLECTIVE;
     pattern.lastIndex=0;
