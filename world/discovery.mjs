@@ -3,10 +3,10 @@
 const SPACES=/\s+/gu;
 const keyOf=s=>String(s||'').normalize('NFKC').toLocaleLowerCase().replace(/[’]/gu,"'").replace(SPACES,' ').trim();
 const NAME="([A-Z][\\p{L}\\p{N}’'-]*(?:[ \\t]+(?:[A-Z][\\p{L}\\p{N}’'-]*|of|the|and|&)){0,3})";
-const PLACE=new RegExp("(?:\\b(?:at|in|near|from|inside|visited|visits|located in|based in|works at|lives in|grew up in)\\s+(?:the\\s+)?|\\b(?:place called|town named|district called|building named)\\s+)"+NAME,"gu");
-const COLLECTIVE=new RegExp("\\b(?:[Tt]he[ \\t]+)?"+NAME+"[ \\t]+(Family|House|Clan|Guild|Council|Circle|Order|Society|Company|Corporation|Collective|Union|Community|Faction|Cult|Club|School|Syndicate|Network|Culture|People)\\b","gu");
+const PLACE=new RegExp("(?:\\b(?:at|in|near|about|from|inside|visited|visits|located in|based in|works at|lives in|grew up in)\\s+(?:the\\s+)?|\\b(?:place called|town named|district called|building named)\\s+)"+NAME,"gu");
+const COLLECTIVE=new RegExp("\\b(?:[Tt]he[ \\t]+)?"+NAME+"[ \\t]+(Family|Clan|Guild|Council|Circle|Order|Society|Company|Corporation|Collective|Union|Community|Faction|Cult|Club|School|Syndicate|Network|Culture|People)\\b","gu");
 const STOP=new Set(['I','We','She','He','They','The','This','That','Her','His','Their','It','My','Our','A','An','And','But','When','Then','After','Before','Because','At','In','On','From','To','With','There','Here','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Today','Tomorrow','Yesterday']);
-const suffixKinds={Family:'family',House:'family',Clan:'family',Guild:'organization',Council:'organization',Circle:'group',Order:'organization',Society:'organization',Company:'organization',Corporation:'organization',Collective:'community',Union:'organization',Community:'community',Faction:'faction',Cult:'organization',Club:'group',School:'organization',Syndicate:'organization',Network:'group',Culture:'culture',People:'culture'};
+const suffixKinds={Family:'family',Clan:'family',Guild:'organization',Council:'organization',Circle:'group',Order:'organization',Society:'organization',Company:'organization',Corporation:'organization',Collective:'community',Union:'organization',Community:'community',Faction:'faction',Cult:'organization',Club:'group',School:'organization',Syndicate:'organization',Network:'group',Culture:'culture',People:'culture'};
 const quotesFrom=(text,start,end)=>String(text).slice(Math.max(0,start-65),Math.min(text.length,end+85)).trim();
 const normalizeName=s=>String(s||'').trim().replace(/[.,!?;:]+$/gu,'').replace(SPACES,' ');
 const likelyName=s=>{
