@@ -140,7 +140,7 @@ async function main(){
     },'inline Atlas place persisted');
     console.log('Inline Atlas after save:',JSON.stringify(await script(`
       return {
-        workspace:document.body.dataset.workspace,view:document.body.dataset.worldView,
+        workspace:document.body.dataset.workspace,view:document.body.dataset.worldPane,
         editor:!!document.querySelector('.world-editor-content'),
         atlas:!!document.querySelector('#atlas-places'),
         names:[...document.querySelectorAll('#atlas-places .lore-card strong')].map(x=>x.textContent),
@@ -229,7 +229,7 @@ async function main(){
       const choices=[...document.querySelectorAll('.command-item')].map(x=>x.textContent);
       document.querySelector('.command-item').click();
       return choices.some(x=>x.includes('Atlas'))&&!document.querySelector('#command-palette').open&&
-        document.body.dataset.workspace==='world'&&document.body.dataset.worldView==='atlas'&&
+        document.body.dataset.workspace==='world'&&document.body.dataset.worldPane==='atlas'&&
         !!document.querySelector('.world-editor-content #atlas-create')&&
         !document.body.classList.contains('detail-focus');
     `),true,'command palette should navigate into the inline Atlas editor');
