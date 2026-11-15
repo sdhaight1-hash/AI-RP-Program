@@ -103,6 +103,15 @@
     <label class="field-label" for="new-scene-encounter">Starting situation</label><select id="new-scene-encounter"></select>
     <label class="field-label" for="new-scene-channel">Communication medium</label><select id="new-scene-channel"></select>
     <p id="new-scene-channel-hint" class="help">Choose how participants communicate. Saved templates select their own medium.</p>
+    <div class="group" id="new-scene-draft">
+      <h3 class="builder-subtitle">Scene foundations</h3>
+      <p class="help">These are starting conditions, not NPC dialogue or events that have already happened. Edit them yourself or review local AI suggestions.</p>
+      <label class="field-label" for="new-scene-draft-title">Title</label><input id="new-scene-draft-title" maxlength="150" placeholder="Optional scene title"/>
+      <label class="field-label" for="new-scene-draft-direction">Situation and hooks</label><textarea id="new-scene-draft-direction" rows="3" maxlength="2500" placeholder="What is happening as the scene begins?"></textarea>
+      <label class="field-label" for="new-scene-draft-atmosphere">Atmosphere</label><textarea id="new-scene-draft-atmosphere" rows="2" maxlength="900" placeholder="Only details available through the chosen medium"></textarea>
+      <label class="field-label" for="new-scene-draft-authorNote">Temporary author direction</label><textarea id="new-scene-draft-authorNote" rows="2" maxlength="1800" placeholder="Pacing, tone and focus; not world canon"></textarea>
+    </div>
+    <div id="new-scene-ai-host"></div>
     <button id="new-scene-manage-encounters" class="subtle-button">Manage encounter templates</button>
     <div class="inline-actions"><button id="new-scene-confirm" class="primary-button">Start scene</button><button id="new-scene-cancel" class="subtle-button">Cancel</button></div>
   </dialog>

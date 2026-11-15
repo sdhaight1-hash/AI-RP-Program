@@ -1,11 +1,24 @@
+import {makeWorldAuthoringRequest} from '../authoring/world-scene.mjs';
+import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
 // World and timeline editor presentation, wired to explicit world-scoped
 // callbacks. Avoids mutating the browser's active-world selection implicitly.
 export function renderWorldTimelineEditor(host,s,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
     activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
-    save,renderInspector,showError,running,fetch}=api;
+    save,renderInspector,showError,running,fetch,getModel}=api;
 
   host.innerHTML = `<h2 class="panel-title">Worlds, timelines & fictional clocks</h2><p class="help">Every world has independent canon and timelines. Open a world explicitly before creating or editing its timelines. Places and relationships are in the adjacent World sections.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><label class="field-label" for="world-new-description">World description</label><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="timeline-new-name">New timeline in the current world</label><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Timeline in this world</label><select id="timeline-select"></select><p class="help">Selecting a timeline lets you set its clock below. Applying it to the active scene is a separate action.</p><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><div class="group" id="world-deletion-impact"><h3 class="builder-subtitle">Deletion impact — read only</h3><p class="help">Inspect which records depend on a world or timeline before any future permanent removal. The preview cannot delete or modify anything; world and timeline destruction are not yet enabled.</p><div class="inline-actions"><button id="world-impact-preview" class="subtle-button">Preview this world</button><button id="timeline-impact-preview" class="subtle-button">Preview selected timeline</button></div><div id="world-impact-report" aria-live="polite"></div></div><div class="group"><h3 class="builder-subtitle">Encounter templates</h3><p class="help">Reusable openings and communication modes live in their own Encounters workspace. Use it to remove templates blocking permanent character deletion.</p><button id="world-manage-encounters" class="subtle-button">Manage encounters</button></div><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
+  // Drafting a world never imports another world's private canon.
+  mountWorldSceneAssistant($('world-create').parentElement,{
+    mode:'world',getModel,isCurrent:()=>host.isConnected&&!running,
+    getRequest:(target,guidance)=>makeWorldAuthoringRequest({
+      name:$('world-new-name').value,description:$('world-new-description').value,target,guidance
+    }),
+    onApply:patch=>{
+      if(patch.name!==undefined)$('world-new-name').value=patch.name;
+      if(patch.description!==undefined)$('world-new-description').value=patch.description;
+    }
+  });
   const report = $('world-library-list');
   if (!worldLibrary) {
     report.append(el('p','Loading your local worlds...','help'));
