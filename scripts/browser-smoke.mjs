@@ -375,6 +375,17 @@ async function main(){
     assert.notEqual(firstLabel,'Parallel Browser World','the first tab must keep its own world');
     await request('POST','/session/'+sessionId+'/refresh',{});
     await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'first tab world reload');
+    const firstTimelineCatalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
+    const firstTimelineIds=firstTimelineCatalog.timelines
+      .filter(t=>t.worldId===store.activeWorldId).map(t=>t.id).sort();
+    const timelineChoices=await script(`
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-world-view="timelines"]').click();
+      return [...document.querySelector('#timeline-select').options].map(x=>x.value).sort();
+    `);
+    assert.deepEqual(timelineChoices,firstTimelineIds,
+      'first world must never offer a second world timeline for scene assignment or clock edits');
+    await script("document.querySelector('button[data-workspace=story]').click();return true");
     await request('POST','/session/'+sessionId+'/window',{handle:secondTab.handle});
     await request('DELETE','/session/'+sessionId+'/window');
     await request('POST','/session/'+sessionId+'/window',{handle:firstHandle});
