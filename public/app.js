@@ -1259,7 +1259,7 @@ function renderWorkspace(){
   const mode=Object.hasOwn(WORKSPACE_META,activeWorkspace)?activeWorkspace:'story';
   const chosen=WORKSPACE_META[mode];
   document.body.dataset.workspace=mode;
-  document.body.dataset.worldView=mode==='world'?worldEditorView:'overview';
+  document.body.dataset.worldPane=mode==='world'?worldEditorView:'overview';
   document.querySelectorAll('button[data-workspace]').forEach(button=>{
     const active=button.dataset.workspace===mode;
     button.classList.toggle('active',active);
