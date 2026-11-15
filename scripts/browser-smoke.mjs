@@ -138,18 +138,6 @@ async function main(){
       const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
       return catalog.locations.some(l=>l.name===atlasName);
     },'inline Atlas place persisted');
-    console.log('Inline Atlas after save:',JSON.stringify(await script(`
-      return {
-        workspace:document.body.dataset.workspace,view:document.body.dataset.worldPane,
-        editor:!!document.querySelector('.world-editor-content'),
-        atlas:!!document.querySelector('#atlas-places'),
-        names:[...document.querySelectorAll('#atlas-places .lore-card strong')].map(x=>x.textContent),
-        detail:document.querySelector('#inspector-heading')?.textContent,
-        error:document.querySelector('#error')?.textContent,
-        selectedWorld:document.querySelector('#atlas-world')?.value,
-        currentWorld:document.querySelector('#world-label')?.textContent
-      };
-    `)));
     await until(async()=>script(`
       return document.querySelector('[data-world-view="atlas"]')?.getAttribute('aria-pressed')==='true' &&
         [...document.querySelectorAll('#atlas-places .lore-card strong')]
@@ -233,7 +221,6 @@ async function main(){
         editor:!!document.querySelector('.world-editor-content #atlas-create'),
         focus:document.body.classList.contains('detail-focus')};
     `);
-    console.log('World atlas command diagnostics:',JSON.stringify(atlasCommandResult));
     assert.ok(atlasCommandResult.choices.some(x=>x.includes('Atlas')) &&
       !atlasCommandResult.open && atlasCommandResult.workspace==='world' &&
       atlasCommandResult.pane==='atlas' && atlasCommandResult.editor &&
