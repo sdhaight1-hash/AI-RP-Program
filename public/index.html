@@ -98,22 +98,65 @@
   </div>
   <dialog id="world-launcher" class="world-launcher" aria-labelledby="world-launcher-title"><div class="world-launcher-head"><h2 id="world-launcher-title">Your Worlds</h2><button id="world-launcher-close" class="subtle-button">Close</button></div><p class="help">Each world is a separate universe with its own canon, cast, memory, places, relationships and story timelines. Switching worlds never imports another world's private memories.</p><label class="field-label" for="world-filter">Find a world</label><input id="world-filter" type="search" placeholder="Search worlds by name or setting…" autocomplete="off" /><p id="world-list-count" class="help" role="status"></p><div id="world-launcher-list" class="world-launcher-list"></div><button id="world-launcher-create" class="primary-button">Create a New World</button></dialog>
   <dialog id="new-scene-dialog" class="new-scene-dialog" aria-labelledby="new-scene-title">
-    <h2 id="new-scene-title">Start an interaction</h2><p class="help">Choose an optional encounter template or start an unscripted conversation.</p>
-    <label class="field-label" for="new-scene-character">Character</label><select id="new-scene-character"></select>
-    <label class="field-label" for="new-scene-encounter">Starting situation</label><select id="new-scene-encounter"></select>
-    <label class="field-label" for="new-scene-channel">Communication medium</label><select id="new-scene-channel"></select>
-    <p id="new-scene-channel-hint" class="help">Choose how participants communicate. Saved templates select their own medium.</p>
-    <div class="group" id="new-scene-draft">
-      <h3 class="builder-subtitle">Scene foundations</h3>
-      <p class="help">These are starting conditions, not NPC dialogue or events that have already happened. Edit them yourself or review local AI suggestions.</p>
-      <label class="field-label" for="new-scene-draft-title">Title</label><input id="new-scene-draft-title" maxlength="150" placeholder="Optional scene title"/>
-      <label class="field-label" for="new-scene-draft-direction">Situation and hooks</label><textarea id="new-scene-draft-direction" rows="3" maxlength="2500" placeholder="What is happening as the scene begins?"></textarea>
-      <label class="field-label" for="new-scene-draft-atmosphere">Atmosphere</label><textarea id="new-scene-draft-atmosphere" rows="2" maxlength="900" placeholder="Only details available through the chosen medium"></textarea>
-      <label class="field-label" for="new-scene-draft-authorNote">Temporary author direction</label><textarea id="new-scene-draft-authorNote" rows="2" maxlength="1800" placeholder="Pacing, tone and focus; not world canon"></textarea>
+    <header class="scene-composer-top">
+      <div>
+        <span class="eyebrow">SCENE WORKSHOP · WORLD-AWARE AUTHORING</span>
+        <h2 id="new-scene-title">Start an interaction</h2>
+        <p class="help">Choose the participants and medium, shape the opening situation, then start the scene. AI suggestions require your review.</p>
+      </div>
+      <span id="new-scene-world-context" class="scene-world-context" role="status">Current world</span>
+    </header>
+    <div class="scene-composer-grid">
+      <section class="scene-setup-panel" aria-labelledby="scene-setup-heading">
+        <div class="scene-composer-section-head">
+          <span class="world-step">01 / SETUP</span>
+          <h3 id="scene-setup-heading">Who's here?</h3>
+          <p class="help">Cast and communication determine what each person can perceive.</p>
+        </div>
+        <label class="field-label" for="new-scene-character">Lead character</label>
+        <select id="new-scene-character"></select>
+        <label class="field-label" for="new-scene-encounter">Starting situation</label>
+        <select id="new-scene-encounter"></select>
+        <label class="field-label" for="new-scene-channel">Communication medium</label>
+        <select id="new-scene-channel"></select>
+        <p id="new-scene-channel-hint" class="help">Choose how participants communicate. Saved templates select their own medium.</p>
+        <div class="scene-setup-summary" aria-live="polite">
+          <span class="eyebrow">SCENE CONTEXT</span>
+          <p id="new-scene-context-summary">Choose a character to begin.</p>
+        </div>
+        <button id="new-scene-manage-encounters" class="subtle-button">Manage encounter templates</button>
+      </section>
+      <section class="scene-draft-panel" id="new-scene-draft" aria-labelledby="scene-foundation-heading">
+        <div class="scene-composer-section-head">
+          <span class="world-step">02 / SHAPE</span>
+          <h3 id="scene-foundation-heading">Set the scene</h3>
+          <p class="help">Describe the initial conditions. No outcomes, NPC dialogue or past events are invented by this form.</p>
+        </div>
+        <label class="field-label" for="new-scene-draft-title">Scene title</label>
+        <input id="new-scene-draft-title" maxlength="150" placeholder="A call from the harbor…"/>
+        <label class="field-label" for="new-scene-draft-direction">Situation & opening hooks</label>
+        <textarea id="new-scene-draft-direction" rows="5" maxlength="2500" placeholder="What is happening as the scene begins?"></textarea>
+        <label class="field-label" for="new-scene-draft-atmosphere">Atmosphere & observable cues</label>
+        <textarea id="new-scene-draft-atmosphere" rows="3" maxlength="900" placeholder="Details perceptible through the selected medium"></textarea>
+        <label class="field-label" for="new-scene-draft-authorNote">Temporary author direction</label>
+        <textarea id="new-scene-draft-authorNote" rows="3" maxlength="1800" placeholder="Pacing, tone and focus; not established world canon"></textarea>
+      </section>
+      <aside class="scene-assist-panel" aria-label="AI co-author for scene setup">
+        <div class="scene-composer-section-head">
+          <span class="world-step">03 / COLLABORATE</span>
+          <h3>Writing partner</h3>
+          <p class="help">Optional local-model help, grounded in your chosen world, cast and communication medium.</p>
+        </div>
+        <div id="new-scene-ai-host"></div>
+      </aside>
     </div>
-    <div id="new-scene-ai-host"></div>
-    <button id="new-scene-manage-encounters" class="subtle-button">Manage encounter templates</button>
-    <div class="inline-actions"><button id="new-scene-confirm" class="primary-button">Start scene</button><button id="new-scene-cancel" class="subtle-button">Cancel</button></div>
+    <footer class="scene-composer-footer">
+      <span class="scene-composer-safety">Suggestions change editable fields only · Start is a separate action</span>
+      <div class="inline-actions">
+        <button id="new-scene-cancel" class="subtle-button">Cancel</button>
+        <button id="new-scene-confirm" class="primary-button">Create & enter scene</button>
+      </div>
+    </footer>
   </dialog>
   <dialog id="character-builder" class="builder-dialog" aria-labelledby="builder-title">
     <div class="builder-top"><div><div class="eyebrow">CHARACTER WORKSHOP · WORLD-AWARE AUTHORING</div><h2 id="builder-title">Shape a living character</h2><p>One person, grounded in their world. Review every AI-assisted change before it becomes established.</p><div id="builder-progress"><span id="builder-progress-label">Profile fields</span><span id="builder-progress-track" role="progressbar" aria-label="Completed character fields" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="builder-progress-fill"></span></span></div></div><button id="builder-close" class="subtle-button" aria-label="Close character builder">✕ Close</button></div>

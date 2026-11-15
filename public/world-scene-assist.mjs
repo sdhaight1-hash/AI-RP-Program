@@ -14,27 +14,37 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
   if(!AUTHORING_CONTRACTS[mode])throw Error('Unknown AI authoring mode');
   const contracts=AUTHORING_CONTRACTS[mode];
   let active=null,request=null;
-  const panel=make('section','','group');
-  const title=make('h3','✦ Context-aware AI co-author','builder-subtitle');
-  const help=make('p','Suggestions use your loaded local model. Review and edit every field; nothing is saved or canonized automatically.','help');
-  const target=make('select');target.setAttribute('aria-label','AI generation focus');
+  const panel=make('section','','ai-authoring-panel');
+  panel.dataset.aiMode=mode;
+  const title=make('h3','✦ AI co-author','ai-authoring-heading');
+  const help=make('p','Grounded in the information you have already entered. Your choices remain authoritative.','help');
+  const target=make('select');target.setAttribute('aria-label','AI generation focus');target.id=mode+'-ai-focus';
   target.add(new Option('Develop all fields','all'));
   for(const [key,contract] of Object.entries(contracts))target.add(new Option(contract.label,key));
-  const guidance=make('textarea');guidance.rows=3;guidance.maxLength=1400;
+  const guidance=make('textarea');guidance.rows=4;guidance.maxLength=1400;guidance.id=mode+'-ai-direction';
   guidance.placeholder='Optional creative direction…';
-  const reference=make('p','','help');
+  const reference=make('p','','ai-authoring-purpose');
   const actions=make('div','','inline-actions');
   const generate=make('button','Generate suggestions','subtle-button');generate.type='button';generate.classList.add('ai-draft-generate');
   const stop=make('button','Stop','subtle-button');stop.type='button';stop.classList.add('hidden');
   actions.append(generate,stop);
   const status=make('p','','help');status.setAttribute('role','status');
-  const preview=make('div','','group');preview.hidden=true;
+  const preview=make('div','','ai-authoring-review');preview.hidden=true;
   const raw=make('textarea');raw.rows=5;raw.maxLength=16000;raw.setAttribute('aria-label','Editable model JSON');
-  const changes=make('div','','group');
+  const changes=make('div','','ai-authoring-changes');
   const apply=make('button','Review and apply checked fields','primary-button');apply.type='button';apply.classList.add('ai-draft-apply');
-  preview.append(make('label','AI response (editable JSON)','field-label'),raw,changes,apply);
-  panel.append(title,help,make('label','What to develop','field-label'),target,reference,
-    make('label','Creative direction','field-label'),guidance,actions,status,preview);
+  const rawDetails=make('details','','ai-authoring-advanced');
+  rawDetails.append(make('summary','Advanced · Edit raw JSON'),
+    make('label','Structured response (editable)','field-label'),raw);
+  const reviewHeader=make('div','','ai-authoring-review-head');
+  reviewHeader.append(make('strong','Review suggested changes'),
+    make('p','Uncheck anything you do not want. Edit the rest before approving.','help'));
+  preview.append(reviewHeader,changes,rawDetails,apply);
+  const fields=make('div','','ai-authoring-fields');
+  const focusLabel=make('label','Focus','field-label');focusLabel.htmlFor=target.id;
+  const directionLabel=make('label','Creative direction','field-label');directionLabel.htmlFor=guidance.id;
+  fields.append(focusLabel,target,reference,directionLabel,guidance,actions,status);
+  panel.append(title,help,fields,preview);
   host.append(panel);
   const current=()=>panel.isConnected&&host.contains(panel)&&isCurrent();
   const showPurpose=()=>{
@@ -51,8 +61,8 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
     try{suggestions=parseAuthoringSuggestions(raw.value,request);}
     catch(error){changes.append(make('p',error.message,'help'));return;}
     for(const [key,value] of Object.entries(suggestions)){
-      const contract=contracts[key],row=make('div','','builder-ai-change');
-      const label=make('label','','field-label'),toggle=make('input');
+      const contract=contracts[key],row=make('div','','ai-authoring-change');
+      const label=make('label','','ai-authoring-checkbox'),toggle=make('input');
       toggle.type='checkbox';toggle.checked=true;toggle.dataset.reviewKey=key;
       label.append(toggle,document.createTextNode(' '+contract.label));
       const edit=make('textarea');edit.rows=key==='description'||key==='direction'?5:3;
@@ -107,7 +117,7 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
         throw Error('Context changed during generation; regenerate the draft.');
       parseAuthoringSuggestions(result,draft);
       request=draft;raw.value=result;preview.hidden=false;renderChanges();
-      status.textContent='Review each checked field. Unchecked fields are never applied.';
+      status.textContent='Suggestions ready. Select and edit the changes you want to apply.';
     }catch(error){
       if(active===controller&&current())status.textContent=controller.signal.aborted?'Generation canceled.':error.message;
     }finally{resetActivity(controller);}

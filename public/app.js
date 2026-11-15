@@ -263,13 +263,24 @@ function openNewSceneDialog() {
     }
     const selected=$('new-scene-channel');
     selected.value='in_person';
+    const updateContext=()=>{
+      const worldName=worldLibrary?.worlds?.find(w=>w.id===activeWorldId)?.name||'Current world';
+      const person=actors.find(c=>c.id===chosen.value);
+      const medium=getChannel(selected.value);
+      const encounter=(state.encounters||[]).find(e=>e.id===template.value);
+      $('new-scene-world-context').textContent=worldName;
+      $('new-scene-context-summary').textContent=
+        (person?.name||'No character selected')+' · '+medium.label+
+        (encounter?' · '+encounter.title:' · Unscripted opening');
+    };
     const showMedium=()=>{
       const item=(state.encounters||[]).find(e=>e.id===template.value);
       selected.disabled=Boolean(item);
       if(item)selected.value=getChannel(item.channelId).id;
       $('new-scene-channel-hint').textContent=getChannel(selected.value).description + (item?' · Set by the template.':' · Change this for an unscripted scene.');
+      updateContext();
     };
-    template.onchange=showMedium;selected.onchange=showMedium;
+    template.onchange=showMedium;selected.onchange=()=>{showMedium();updateContext();};
     showMedium();
   };
   chosen.onchange=refresh;refresh();
