@@ -206,3 +206,9 @@ test('character sections expose direct, explicitly reviewed AI assistance',()=>{
   assert.match(javascript,/\$\('builder-ai-target'\)\.disabled=false/);
   assert.match(css,/\.builder-field-assist/);
 });
+
+test('failed, canceled or stale character drafts cannot remain approvable',()=>{
+  assert.match(javascript,/if\(aiDraftRequest===request\)\{[\s\S]*?aiDraftRequest=null; aiDraftTarget=null;[\s\S]*?builder-ai-preview/);
+  assert.match(javascript,/validateCharacterDraftBasis\(\{character:c,worldLibrary,worldId:activeWorldId,lore:state\.lore,request\}\)/);
+  assert.match(javascript,/selectCharacterChanges\(\{character:c,worldLibrary,worldId:activeWorldId,lore:state\.lore,request:aiDraftRequest,changes:accepted\}\)/);
+});
