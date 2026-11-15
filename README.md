@@ -216,7 +216,7 @@ Includes prompt/backup tests, character import, multi-cast privacy and turn sele
 
 ## Known limits / next milestones
 
-- SQLite state is currently a single atomic JSON snapshot plus a real FTS5 lore index, not a normalized world/entity/event schema. Split out durable indexed records when simulation needs them.
+- World canon, actor memories, reviewed facts and events have independent SQLite tables. Story persistence still uses full-document saves by default; optional normalized-primary mode remains backup-gated and does not, by itself, speed up long-scene resaves. An [internal sealed-base append journal](docs/primary-append-journal.md) is tested but is **not** enabled by normal startup or yet wired to browser/NPC turns. The next milestone is its fully authorized and benchmarked end-to-end integration (Issue #31).
 - Add tokenizer-accurate prompt budgeting, explicit source tracing, controlled summary generation, and evidence-linked auto-memory proposals.
 - Extend the manual emotion simulation into character-specific appraisal driven by verified events, bounded traits, individual beliefs, and separate relationships. Do **not** infer player intent through keyword sentiment.
 - Build on the new authored world clock and location/relationship tables with multi-NPC offscreen goals, scene perception and verified event proposal/commit operations.

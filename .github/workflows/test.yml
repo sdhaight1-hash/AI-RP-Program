@@ -28,6 +28,7 @@ jobs:
       - run: npm run eval:semantic
       - run: npm run eval:scale -- --ci
       - run: npm run eval:scale -- --ci --primary
+      - run: npm run eval:scale -- --ci --journal
       - run: node --check scripts/browser-smoke.mjs
       - name: Headless Chrome UI flows (Node 22)
         if: matrix.node-version == '22'

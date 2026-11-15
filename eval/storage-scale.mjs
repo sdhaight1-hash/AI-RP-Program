@@ -9,17 +9,20 @@ import { fileURLToPath } from 'node:url';
 import { WorldPartitionStore } from '../world/partition-store.mjs';
 import { makeEmptyWorldState,createCharacter,createSession } from '../engine.mjs';
 import { retrieveActorMemories } from '../memory/store.mjs';
-import { writeStoryProjection,enablePrimaryProjection,projectionPrimary } from '../storage/normalized.mjs';
+import { writeStoryProjection,enablePrimaryProjection,projectionPrimary,enableVerifiedAppendJournal,
+  verifyStoryProjection } from '../storage/normalized.mjs';
+import {appendVerifiedPlayerRow} from '../storage/append-journal.mjs';
 
 const measure=fn=>{const started=performance.now();const value=fn();return {value,ms:Math.round((performance.now()-started)*100)/100};};
 const percentile=(values,p)=>{
   const sorted=[...values].sort((a,b)=>a-b);
   return sorted[Math.max(0,Math.ceil(sorted.length*p)-1)];
 };
-// Each repetition appends exactly one new player message. The measured operation
-// is the full save path, not fixture construction, load or SQLite initialization.
-export function measureStorageScale(turns,{primary=false,samples=1}={}){
+// The journal mode measures only a storage primitive. It is NOT yet a complete
+// browser/player turn; the full-save modes remain the production baselines.
+export function measureStorageScale(turns,{primary=false,journal=false,samples=1}={}){
   if(!Number.isInteger(turns)||turns<1||turns>30000)throw new Error('Invalid message count');
+  if(journal&&!primary)throw new Error('Append journal benchmark requires normalized-primary');
   if(!Number.isInteger(samples)||samples<1||samples>10)throw new Error('Invalid measurement sample count');
   const directory=mkdtempSync(join(tmpdir(),'ai-rp-scale-'));
   let store;
@@ -46,6 +49,14 @@ export function measureStorageScale(turns,{primary=false,samples=1}={}){
         db.exec('COMMIT');
       }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
       if(!projectionPrimary(db))throw Error('Benchmark primary activation failed');
+      if(journal){
+        const verified=scoped.load();
+        db.exec('BEGIN IMMEDIATE');
+        try{
+          enableVerifiedAppendJournal(db,verified);
+          db.exec('COMMIT');
+        }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+      }
     }
     const reading=measure(()=>scoped.load());
     const timelineId=reading.value.state.sessions[0].timelineId;
@@ -57,19 +68,37 @@ export function measureStorageScale(turns,{primary=false,samples=1}={}){
     let currentRevision=reading.value.revision;
     const saveSamplesMs=[];
     for(let i=0;i<samples;i++){
-      appended.sessions[0].messages.push({
-        id:'bench-last-'+i,role:'user',witnessIds:[character.id],
-        content:'The newest copper lantern report '+i+' has arrived.',sentAt:turns+1002+i
-      });
-      const incremental=measure(()=>scoped.save(appended,currentRevision,{worldId:id}));
+      const message={id:'bench-last-'+i,role:'user',witnessIds:[character.id],
+        content:'The newest copper lantern report '+i+' has arrived.',
+        sentAt:turns+1002+i,channelId:scene.channelId};
+      let incremental;
+      if(journal){
+        incremental=measure(()=>{
+          scoped.db.exec('BEGIN IMMEDIATE');
+          try{
+            const result=appendVerifiedPlayerRow(scoped.db,{
+              sceneId:scene.id,expectedRevision:currentRevision,
+              message,updatedAt:Date.now()
+            });
+            scoped.db.exec('COMMIT');
+            return result;
+          }catch(error){if(scoped.db.isTransaction)scoped.db.exec('ROLLBACK');throw error;}
+        });
+      }else{
+        appended.sessions[0].messages.push(message);
+        incremental=measure(()=>scoped.save(appended,currentRevision,{worldId:id}));
+      }
       if(!incremental.value)throw new Error('Incremental synthetic save was rejected');
       currentRevision=incremental.value.revision;
       saveSamplesMs.push(incremental.ms);
     }
     const integrity=scoped.db.prepare('PRAGMA integrity_check').get()?.integrity_check;
+    if(journal&&verifyStoryProjection(scoped.db,scoped.load()).status!=='matched')
+      throw Error('Journal benchmark lost canonical scene parity');
     if(integrity!=='ok')throw new Error('Synthetic SQLite integrity failed');
     return {
-      turns,storageMode:primary?'normalized-primary':'legacy-snapshot',
+      turns,storageMode:journal?'normalized-primary-journal-prototype':
+        primary?'normalized-primary':'legacy-snapshot',
       initialSaveMs:first.ms,loadMs:reading.ms,
       lexicalRetrievalMs:retrieval.ms,
       // Legacy name retained for existing benchmark consumers. In repeated
@@ -90,10 +119,12 @@ export function measureStorageScale(turns,{primary=false,samples=1}={}){
     rmSync(directory,{recursive:true,force:true});
   }
 }
-export function runStorageScaleEvaluation(counts=[1000,5000,10000],{primary=false,samples=1}={}){
-  const rows=counts.map(turns=>measureStorageScale(turns,{primary,samples}));
+export function runStorageScaleEvaluation(counts=[1000,5000,10000],{primary=false,journal=false,samples=1}={}){
+  const rows=counts.map(turns=>measureStorageScale(turns,{primary,journal,samples}));
   return {kind:'storage-scale-v2',node:process.version,samples,
-    rows,note:'Temporary disk-world measurements on this machine, not a portable latency guarantee. Samples are sequential one-turn saves, not independent noisy-run replicas. Full-state save and recall remain O(history).'};
+    rows,note:journal?
+      'Journal samples measure only a prototype internal SQLite append plus memory/FTS write. Browser request, context load, NPC reply and complete turn are NOT benchmarked; production still uses full-history saves.':
+      'Temporary disk-world measurements on this machine, not a portable latency guarantee. Samples are sequential one-turn saves, not independent noisy-run replicas. Full-state save and recall remain O(history).'};
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const laboratory=process.argv.includes('--lab');
@@ -102,7 +133,8 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const requestedSamples=process.argv.find(arg=>arg.startsWith('--samples='))?.split('=')[1];
   const samples=requestedSamples===undefined?(laboratory?3:1):Number(requestedSamples);
   try{console.log(JSON.stringify(runStorageScaleEvaluation(counts,{
-    primary:process.argv.includes('--primary'),samples
+    primary:process.argv.includes('--primary')||process.argv.includes('--journal'),
+    journal:process.argv.includes('--journal'),samples
   }),null,2));}
   catch(error){console.error('Storage scale evaluation failed:',error.message);process.exitCode=1;}
 }
