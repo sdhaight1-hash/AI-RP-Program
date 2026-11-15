@@ -1185,8 +1185,10 @@ function studioCommands(){
     {label:'Memory & review',detail:'Workspace',keywords:'recall evidence',run:()=>setWorkspace('memory')},
     {label:'Models & lab',detail:'Workspace',keywords:'inference setup tools',run:()=>setWorkspace('tools')},
     desk('World Library & timelines','world','worlds','world switch clocks encounters'),
-    desk('Atlas & places','world','atlas','geography location map'),
-    desk('World relationships','world','relations','kinships social graph'),
+    {label:'Atlas & places',detail:'World',keywords:'geography location map edit place',
+      run:()=>openWorldEditor('atlas')},
+    {label:'World relationships',detail:'World',keywords:'kinships social graph entities',
+      run:()=>openWorldEditor('relations')},
     desk('Character details','characters','character','profile overview'),
     desk('Scene cast','characters','cast','speaker witnesses'),
     desk('Emotion & disposition','characters','emotion','psychology moods'),
@@ -1256,6 +1258,7 @@ function renderWorkspace(){
   const mode=Object.hasOwn(WORKSPACE_META,activeWorkspace)?activeWorkspace:'story';
   const chosen=WORKSPACE_META[mode];
   document.body.dataset.workspace=mode;
+  document.body.dataset.worldView=mode==='world'?worldEditorView:'overview';
   document.querySelectorAll('button[data-workspace]').forEach(button=>{
     const active=button.dataset.workspace===mode;
     button.classList.toggle('active',active);
