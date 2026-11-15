@@ -1,7 +1,7 @@
 // Static Studio navigation and pure command matching; no DOM or story state.
 export const WORKSPACE_META=Object.freeze({
-  world:{name:'World',kicker:'01 · SETTING',title:'The world behind the story',
-    summary:'Manage this universe’s setting, locations, timelines, and relationships. Every world is isolated.',
+  world:{name:'Connical Universe',kicker:'01 · CANON',title:'The Connical Universe behind the story',
+    summary:'Manage this universe’s foundation, locations, timelines and relationships. Each Connical Universe has independent canon.',
     tab:'worlds'},
   characters:{name:'Characters',kicker:'02 · PEOPLE',title:'People with lives beyond the scene',
     summary:'Create believable characters with coherent histories, agency and habits. Archived people are recoverable from Trash.',
