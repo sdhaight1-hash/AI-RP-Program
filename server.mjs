@@ -173,6 +173,16 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if(requestUrl.searchParams.has('worldId')) requireWorldScope(requestUrl.searchParams.get('worldId'));
         return json(res,200,store.worlds.list());
       }
+      if (req.method === 'GET' && path === '/api/worlds/discovery') {
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        const focus=requestUrl.searchParams.get('focus')||'locations';
+        const query=requestUrl.searchParams.get('query')||'';
+        if(!['locations','groups'].includes(focus)||query.length>120)
+          return json(res,400,{error:'Unsupported discovery search'});
+        try{return json(res,200,store.worlds.discoverSources({worldId,focus,query}));}
+        catch(error){return json(res,422,{error:error.message});}
+      }
       if (req.method === 'GET' && path === '/api/worlds/deletion-preview') {
         const worldId=requestUrl.searchParams.get('worldId');
         requireWorldScope(worldId);
