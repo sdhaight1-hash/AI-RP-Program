@@ -30,6 +30,14 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const channelId=retry?(previous.channelId||'in_person'):scene.channelId;
   const worldLibrary={...store.worlds.list(),activeWorldId:worldId};
   const placeNotes=characterPlaceContext(actor,worldLibrary,worldId);
+  // Universe-level physical constraints inform consistent narration, not the
+  // actor's personal memory or access to unknown historical secrets.
+  const blueprint=worldLibrary.blueprint?.worldId===worldId?worldLibrary.blueprint.sections:null;
+  const worldConstraints=blueprint?[
+    blueprint.rules?'World laws: '+shorten(blueprint.rules,250):'',
+    blueprint.era?'Technology/era: '+shorten(blueprint.era,160):'',
+    blueprint.scope?'Geographic scope: '+shorten(blueprint.scope,140):''
+  ].filter(Boolean).join('; '):'';
   const actorPosition=worldLibrary.positions?.find(p=>p.timelineId===scene.timelineId && p.actorId===actorId);
   const presentLocation=actorPosition ? worldLibrary.locations?.find(p=>p.id===actorPosition.locationId) : null;
   const clock=worldLibrary.clocks?.find(c=>c.timelineId===scene.timelineId && c.isExplicit);
@@ -147,6 +155,7 @@ export function buildActorContext({store,worldId,sceneId,actorId,mode='normal',c
   const base=[
     instructions,
     'Active communication rules: '+shorten(visible.styleInstruction,500),
+    worldConstraints?'Objective universe constraints (not necessarily knowledge the NPC can cite): '+worldConstraints:'',
     profile,
     'Current situation (only witnessed details):\n'+shorten(visible.sceneNotes,950),
     presentLocation?'Current actor location (world engine): '+shorten(presentLocation.name,150):'',
