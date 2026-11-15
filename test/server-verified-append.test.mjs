@@ -10,6 +10,8 @@ import {writeStoryProjection,enablePrimaryProjection,enableVerifiedAppendJournal
 import {journalEnabled} from '../storage/append-journal.mjs';
 import {appendAuthorizedPlayerMessage} from '../scene/verified-append.mjs';
 import {createApp} from '../server.mjs';
+import {backupWorldStorage} from '../scripts/backup-storage.mjs';
+import {normalizeStorage} from '../scripts/normalize-storage.mjs';
 
 function fixture({activate=true}={}){
   const dir=mkdtempSync(join(tmpdir(),'rp-authorized-append-'));
@@ -103,4 +105,37 @@ test('HTTP append is scoped to one world and never accepts a caller-supplied wit
     await new Promise(resolve=>app.close(resolve));
     rmSync(f.dir,{recursive:true,force:true});
   }
+});
+
+test('append journal offline activation is backup-gated and never enabled by a dry-run',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-journal-cutover-'));
+  const data=join(dir,'live'),backup1=join(dir,'backup-shadow'),
+    backup2=join(dir,'backup-primary'),backup3=join(dir,'backup-journal');
+  try{
+    const store=new WorldPartitionStore(data),worldId=store.activeWorldId;
+    const scope=store.forWorld(worldId);
+    scope.save(makeInitialState(),scope.load().revision,{worldId});
+    store.close();
+    assert.throws(()=>normalizeStorage(data,{journal:true}),/backup is required/);
+    backupWorldStorage(data,backup1);
+    assert.throws(()=>normalizeStorage(data,{journal:true,backupDir:backup1}),
+      /normalized-primary/);
+    normalizeStorage(data,{apply:true,backupDir:backup1});
+    backupWorldStorage(data,backup2);
+    normalizeStorage(data,{primary:true,backupDir:backup2});
+    assert.equal(normalizeStorage(data).mode,'dry-run');
+    const before=new WorldPartitionStore(data);
+    assert.equal(journalEnabled(before.forWorld(worldId).db),false);
+    before.close();
+    backupWorldStorage(data,backup3);
+    const cutover=normalizeStorage(data,{journal:true,backupDir:backup3});
+    assert.equal(cutover.mode,'journal');
+    assert.equal(cutover.worlds[0].result,'append-journal-enabled');
+    const reopened=new WorldPartitionStore(data);
+    try{
+      const current=reopened.forWorld(worldId);
+      assert.equal(journalEnabled(current.db),true);
+      assert.equal(current.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+    }finally{reopened.close();}
+  }finally{rmSync(dir,{recursive:true,force:true});}
 });
