@@ -551,7 +551,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','X-Content-Type-Options':'nosniff'});
         const reader=createReplyStreamReader();
         const streamError=message=>{
-          if(!res.destroyed)res.write('event: error\\ndata: '+JSON.stringify({error:message})+'\\n\\n');
+          if(!res.destroyed)res.write('event: error\ndata: '+JSON.stringify({error:message})+'\n\n');
           aborter.abort();
         };
         try {
@@ -582,7 +582,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             basis,text:reader.text,messageId:randomUUID(),completedAt,
             expiresAt:completedAt+15*60_000
           });
-          res.write('event: rp_complete\\ndata: '+JSON.stringify({ticket})+'\\n\\n');
+          res.write('event: rp_complete\ndata: '+JSON.stringify({ticket})+'\n\n');
         }else if(!res.destroyed&&!aborter.signal.aborted){
           streamError('Local model did not finish with a valid, current response. Nothing was saved.');
         }
