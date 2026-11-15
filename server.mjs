@@ -45,6 +45,7 @@ const ALLOWED = new Map([
   ['/character/context.mjs', ['../character/context.mjs', 'text/javascript; charset=utf-8']],
   ['/character/schema.mjs', ['../character/schema.mjs', 'text/javascript; charset=utf-8']],
   ['/character/sections.mjs', ['../character/sections.mjs', 'text/javascript; charset=utf-8']],
+  ['/character-review.mjs', ['character-review.mjs', 'text/javascript; charset=utf-8']],
   ['/character/authoring.mjs', ['../character/authoring.mjs', 'text/javascript; charset=utf-8']],
   ['/character/world-bridge.mjs', ['../character/world-bridge.mjs', 'text/javascript; charset=utf-8']],
   ['/character/relationship-bridge.mjs', ['../character/relationship-bridge.mjs', 'text/javascript; charset=utf-8']],
