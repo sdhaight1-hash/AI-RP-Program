@@ -218,3 +218,23 @@ test('journal activation rejects a mismatched snapshot before any storage format
     assert.equal(verifyStoryProjection(db,store.load()).status,'matched');
   }finally{store.close();}
 });
+
+
+test('full-save scene deletion removes journal heads before their parent rows',()=>{
+  const store=new StudioStore(':memory:');
+  try{
+    store.save(makeInitialState(),0);activate(store);
+    const source=store.load().state.sessions[0].id;
+    append(store,{id:'deleted-source',text:'This scene will be deliberately purged.'});
+    const latest=store.load();
+    const without=structuredClone(latest.state);
+    without.sessions=[];without.activeSessionId=null;
+    assert.equal(store.save(without,latest.revision).revision,latest.revision+1);
+    assert.equal(store.load().state.sessions.length,0);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM story_append_rows').get().n,0);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM story_append_heads').get().n,0);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM actor_memories WHERE scene_id=?').get(source).n,0);
+    assert.equal(store.db.prepare('PRAGMA foreign_key_check').all().length,0);
+    assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{store.close();}
+});
