@@ -10,8 +10,9 @@ import {makeInitialState} from '../engine.mjs';
 import {readWorldEpoch} from '../world/epoch.mjs';
 import {createApp} from '../server.mjs';
 import {createReplyStreamReader} from '../interactions/stream-reader.mjs';
+import {writeStoryProjection,enablePrimaryProjection,projectionPrimary,verifyStoryProjection} from '../storage/normalized.mjs';
 
-const modelChunk='data: '+JSON.stringify({choices:[{delta:{content:'I can still hear you.'}}]})+'\n\n';
+const modelChunk=text=>'data: '+JSON.stringify({choices:[{delta:{content:text}}]})+'\n\n';
 const modelDone='data: [DONE]\n\n';
 async function fixture(){
   const dir=mkdtempSync(join(tmpdir(),'rp-reply-epoch-'));
@@ -24,14 +25,14 @@ async function fixture(){
   assert.ok(saved,'fixture must replace the already-initialized empty world');
   const first=scoped.load();
   const timelineId=first.state.sessions[0].timelineId;
-  let gate=null;
+  let gate=null,modelAnswer='I can still hear you.';
   const fetchImpl=async url=>{
     const address=String(url);
     if(address.endsWith('/chat/completions')){
-      if(!gate)return new Response(modelChunk+modelDone);
+      if(!gate)return new Response(modelChunk(modelAnswer)+modelDone);
       return new Response(new ReadableStream({
         start(controller){
-          controller.enqueue(new TextEncoder().encode(modelChunk));
+          controller.enqueue(new TextEncoder().encode(modelChunk(modelAnswer)));
           let released=false;
           gate.release=()=>{
             if(released)return;
@@ -56,6 +57,7 @@ async function fixture(){
   return {
     dir,store,worldId,actor,scene,timelineId,post,
     setGate:value=>{gate=value;},
+    setModelAnswer:value=>{modelAnswer=value;},
     payload:()=>({worldId,sceneId:scene.id,actorId:actor.id,revision:store.forWorld(worldId).load().revision,
       model:'test-gguf',temperature:0.6,max_tokens:120,contextWindow:4096}),
     async close(){gate?.release?.();app.closeAllConnections();await new Promise(resolve=>app.close(resolve));rmSync(dir,{recursive:true,force:true});}
@@ -210,4 +212,56 @@ test('world epoch is durable across reopening and rolls back with a failed world
     assert.equal(store.forWorld(worldId).worlds.list().locations.find(x=>x.id===place.id)?.name,
       'A reliable place');
   }finally{try{store?.close();}finally{rmSync(dir,{recursive:true,force:true});}}
+});
+
+
+test('reviewed NPC reply cannot rewrite an accepted world event through Retry',async()=>{
+  const f=await fixture();
+  try{
+    const initial=takeTicket(await (await f.post('/api/actor/reply',f.payload())).text());
+    assert.equal((await f.post('/api/actor/reply/commit',{
+      worldId:f.worldId,ticket:initial,reviewed:false
+    })).status,200);
+    const scoped=f.store.forWorld(f.worldId),before=scoped.load();
+    const reply=before.state.sessions[0].messages.at(-1);
+    const proposed=scoped.events.propose({
+      sceneId:f.scene.id,timelineId:f.timelineId,sourceMessageId:reply.id,
+      kind:'observation',description:'The NPC explicitly answered.'
+    });
+    scoped.events.decide({proposalId:proposed.id,decision:'accept'});
+    f.setModelAnswer('I will contradict the already accepted event.');
+    const next=takeTicket(await (await f.post('/api/actor/reply',{
+      ...f.payload(),mode:'retry'
+    })).text());
+    const blocked=await f.post('/api/actor/reply/commit',{
+      worldId:f.worldId,ticket:next,reviewed:true
+    });
+    assert.equal(blocked.status,409);
+    assert.match((await blocked.json()).error,/Accepted world event locks/i);
+    const after=scoped.load();
+    assert.equal(after.revision,before.revision);
+    assert.equal(after.state.sessions[0].messages.at(-1).id,reply.id);
+    assert.equal(after.state.sessions[0].messages.at(-1).content,reply.content);
+  }finally{await f.close();}
+});
+
+test('NPC reply commits preserve an opted-in normalized-primary projection',async()=>{
+  const f=await fixture();
+  try{
+    const scoped=f.store.forWorld(f.worldId),snapshot=scoped.load();
+    scoped.db.exec('BEGIN IMMEDIATE');
+    try{
+      writeStoryProjection(scoped.db,snapshot.state,snapshot.revision);
+      enablePrimaryProjection(scoped.db,snapshot);
+      scoped.db.exec('COMMIT');
+    }catch(error){scoped.db.exec('ROLLBACK');throw error;}
+    assert.equal(projectionPrimary(scoped.db),true);
+    const ticket=takeTicket(await (await f.post('/api/actor/reply',f.payload())).text());
+    const reply=await f.post('/api/actor/reply/commit',{worldId:f.worldId,ticket,reviewed:false});
+    assert.equal(reply.status,200,await reply.clone().text());
+    const saved=scoped.load();
+    assert.equal(saved.state.sessions[0].messages.at(-1).content,'I can still hear you.');
+    assert.equal(verifyStoryProjection(scoped.db,saved).status,'matched');
+    assert.equal(scoped.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{await f.close();}
 });
