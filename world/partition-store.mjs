@@ -1,6 +1,7 @@
 // One durable SQLite database per fictional world. The registry contains only
 // world labels and selection state: no lore, character data or story history.
 import { DatabaseSync } from 'node:sqlite';
+import {syncUniverseSources,discoverIndexedUniverseMentions} from './source-index.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, existsSync, readdirSync, renameSync, copyFileSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
@@ -121,6 +122,16 @@ export class WorldPartitionStore {
       createWorld: input => this.createWorld(input),
       updateWorld: input => this.updateWorld(input),
       saveBlueprint: input => {this.assertWorld(input.worldId);return this.current.worlds.saveBlueprint(input);},
+      discoverSources: input => {
+        this.assertWorld(input.worldId);
+        // World identity and blueprint edits have their own SQLite writes.
+        // Reconcile just changed fingerprints on a query, as a recovery path
+        // for metadata edits made without a story save.
+        const library=this.worlds.list();
+        const state=this.current.load().state;
+        syncUniverseSources(this.current.db,{worldId:this.activeWorldId,state,library});
+        return discoverIndexedUniverseMentions(this.current.db,{...input,library});
+      },
       createTimeline: input => {this.assertWorld(input.worldId);return this.current.worlds.createTimeline(input);},
       forkTimeline: input => this.current.worlds.forkTimeline(input),
       createLocation: input => {this.assertWorld(input.worldId);return this.current.worlds.createLocation(input);},
@@ -217,6 +228,11 @@ export class WorldPartitionStore {
       beforeCommit: validated => {
         this.ensureCharacterEntities(validated.characters,this.current,this.activeWorldId,
           validated,{removedCharacterId:purgedCharacterId});
+        // Persist editorial evidence in the same SQLite transaction as the
+        // story snapshot; edits, archives and purges cannot leave stale text.
+        syncUniverseSources(this.current.db,{
+          worldId:this.activeWorldId,state:validated,library:this.worlds.list()
+        });
         if(purgedSceneId){
           if(validated.sessions.some(s=>s.id===purgedSceneId))
             throw new Error('Cannot purge derived records of a live scene');
