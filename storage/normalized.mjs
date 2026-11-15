@@ -3,7 +3,7 @@
 // tested cutover. Projection tables are NEVER a new source of actor knowledge.
 // Migrations and save-time updates share a SQLite transaction with the snapshot.
 import { createHash } from 'node:crypto';
-import {journalEnabled,clearAppendJournalRowsForRewrite,resetAppendJournal,applyAppendJournal} from './append-journal.mjs';
+import {journalEnabled,enableAppendJournal,clearAppendJournalRowsForRewrite,resetAppendJournal,applyAppendJournal} from './append-journal.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const canonicalSessions=sessions=>sessions.map(({messages,...metadata})=>({...metadata,messages}));
@@ -208,6 +208,16 @@ export function readPrimaryStory(db,row) {
   if(JSON.stringify(compactPrimaryDocument(latest.state))!==row.document)
     throw Error('Normalized primary metadata differs from canonical revision');
   return latest.state;
+}
+
+// The only supported activation boundary: parity-check the entire sealed
+// normalized-primary base BEFORE creating any journal rows. The caller must
+// separately verify an offline backup of this exact database revision.
+export function enableVerifiedAppendJournal(db,snapshot){
+  if(!db.isTransaction)throw Error('Append-journal cutover requires a transaction');
+  if(!projectionPrimary(db))throw Error('Normalized-primary mode must already be active');
+  verifyStoryProjection(db,snapshot);
+  return enableAppendJournal(db,snapshot);
 }
 
 // Apply inside the same world SQLite transaction. Backup-gated CLI only.
