@@ -26,7 +26,7 @@ export function makeWorldAuthoringRequest({name='',description='',guidance='',ta
   const contracts=AUTHORING_CONTRACTS.world;
   const fields=target==='all'?Object.keys(contracts):[target];
   if(fields.some(f=>!contracts[f]))throw Error('Unknown world draft field');
-  const basis=draftBasis({name,description});
+  const basis=draftBasis({name,description,target,guidance});
   const system=[
     'You are a context-aware fictional worldbuilding collaborator. Output JSON ONLY.',
     'This is a NEW, isolated world. Never import characters, locations, organizations or canon from other worlds.',
@@ -41,7 +41,7 @@ export function makeWorldAuthoringRequest({name='',description='',guidance='',ta
   return {mode:'world',target,fields,basis,messages:[{role:'system',content:system},{role:'user',content:user}]};
 }
 export function makeSceneAuthoringRequest({worldId,library,characters,characterId,channelId,
-  encounter=null,existing={},guidance='',target='all',lore=[]}={}){
+  encounter=null,existing={},scene=null,guidance='',target='all',lore=[]}={}){
   const world=validateWorld(worldId,library);
   const lead=characters?.find(c=>c.id===characterId&&!c.trashedAt);
   if(!lead||lead.worldId&&lead.worldId!==worldId)throw Error('Choose a character in this world');
@@ -55,7 +55,7 @@ export function makeSceneAuthoringRequest({worldId,library,characters,characterI
   const fields=target==='all'?Object.keys(contracts):[target];
   if(fields.some(f=>!contracts[f]))throw Error('Unknown scene draft field');
   const participants=(encounter?.characterIds||[characterId]).map(id=>characters.find(c=>c.id===id)).filter(Boolean);
-  const basis=draftBasis({worldId,libraryVersion:draftBasis({
+  const basis=draftBasis({worldId,target,guidance,scene,libraryVersion:draftBasis({
     world,locations:(library.locations||[]).filter(x=>x.worldId===worldId),
     entities:(library.entities||[]).filter(x=>x.worldId===worldId),
     relationships:(library.relationships||[]).filter(x=>x.worldId===worldId)
@@ -76,7 +76,7 @@ export function makeSceneAuthoringRequest({worldId,library,characters,characterI
     participants:participants.map(c=>({name:c.name,description:clean(c.description).slice(0,400),
       personality:clean(c.personality).slice(0,400),background:clean(c.backstory).slice(0,300),
       boundaries:clean(c.boundaries).slice(0,200),speechStyle:clean(c.speechStyle).slice(0,200)})),
-    medium:channel.id,encounter:encounter&&{title:encounter.title,premise:encounter.premise,opening:encounter.opening},
+    medium:channel.id,scene,encounter:encounter&&{title:encounter.title,premise:encounter.premise,opening:encounter.opening},
     worldLore:lore.filter(x=>!x.disabled&&!x.sessionIds?.length).slice(0,10).map(x=>({title:x.title,content:clean(x.content).slice(0,230)})),
     currentDraft:existing
   };
