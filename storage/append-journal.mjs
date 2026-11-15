@@ -57,6 +57,8 @@ function rebuildHeads(db,state){
 export function enableAppendJournal(db,snapshot){
   if(!db.isTransaction)throw new Error('Journal activation requires an offline SQLite transaction');
   if(journalEnabled(db))throw new Error('Append journal already enabled');
+  if(!hasTable(db,'story_projection_meta'))
+    throw new Error('Verify and explicitly enable normalized-primary storage first');
   const projection=db.prepare('SELECT revision,fingerprint,primary_mode FROM story_projection_meta WHERE id=1').get();
   const story=db.prepare('SELECT revision FROM studio_state WHERE id=1').get();
   if(!projection||projection.primary_mode!==1||!story||
