@@ -13,6 +13,7 @@ import { addActorFact, listActorFacts, revokeActorFact } from './memory/facts.mj
 import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 import { purgeArchived } from './harness.mjs';
+import { previewWorldDeletion } from './world/deletion-preview.mjs';
 import {assertExplicitPurges,DeletionConflictError} from './world/conflict-guards.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
@@ -164,6 +165,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       if (req.method === 'GET' && path === '/api/worlds') {
         if(requestUrl.searchParams.has('worldId')) requireWorldScope(requestUrl.searchParams.get('worldId'));
         return json(res,200,store.worlds.list());
+      }
+      if (req.method === 'GET' && path === '/api/worlds/deletion-preview') {
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        if(!store.db||!store.worlds?.list)return json(res,501,{error:'World deletion preview unavailable'});
+        const timelineId=requestUrl.searchParams.get('timelineId');
+        try {
+          return json(res,200,previewWorldDeletion(store,{worldId,timelineId:timelineId||null}));
+        }catch(error){return json(res,422,{error:error.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds/activate') {
         const { worldId }=await readJson(req,1500);
