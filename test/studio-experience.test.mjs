@@ -220,3 +220,12 @@ test('character search survives editor rerenders but never crosses world switche
   assert.match(javascript,/characterRosterQuery=rosterSearch\.value/);
   assert.match(javascript,/characterRosterQuery='';characterRosterPage=0;/);
 });
+
+test('streamed character drafts remain bound to their initiating controller, profile, and world',()=>{
+  assert.match(javascript,/const startedWorldId=activeWorldId/);
+  assert.match(javascript,/if\(builderCharacter\(\)\?\.id!==c\.id \|\| activeWorldId!==startedWorldId\)return/);
+  assert.match(javascript,/if\(aiDraftController!==aiController \|\| aiDraftRequest!==request \|\| aiController\.signal\.aborted\)return/);
+  assert.match(javascript,/if\(aiDraftController!==aiController \|\| aiDraftRequest!==request \|\| aiController\.signal\.aborted\)throw new Error/);
+  assert.match(javascript,/if\(aiDraftController===aiController\)\{/);
+  assert.match(javascript,/if\(builderCharacter\(\)\?\.id===c\.id\)/);
+});
