@@ -184,3 +184,13 @@ test('world creation, timelines and clocks are edited inline, with no duplicate 
     assert.match(source,/Select a timeline within this world/);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test('character workspace can search and page the complete world-local roster',()=>{
+  assert.match(javascript,/rosterSearch\.type='search'/);
+  assert.match(javascript,/characters\.filter\(c=>[\s\S]*?c\.name,c\.occupation,c\.tagline/);
+  assert.match(javascript,/const pageSize=25/);
+  assert.match(javascript,/matches\.slice\(page\*pageSize,\(page\+1\)\*pageSize\)/);
+  assert.match(javascript,/rosterSearch\.addEventListener\('input'/);
+  assert.doesNotMatch(javascript,/characters\.slice\(0,10\)/);
+  assert.match(css,/\.character-roster-pager/);
+});
