@@ -30,6 +30,7 @@ let worldLibrary = null;
 let worldLibraryRequest = 0;
 let switchingWorld = false;
 let selectedWorldId = null;
+let worldEditorView='overview';
 let selectedCharacterId = null;
 let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
 // The selected world belongs to this browser tab. Every stateful request
@@ -447,7 +448,7 @@ async function switchWorld(worldId) {
   revision=result.revision;
   serverStorage=true;
   try {localStorage.setItem(backupStateKey(),JSON.stringify(state));sessionStorage.setItem('ai-rp-world-opened','1');} catch {}
-  currentTab='worlds';worldLibrary=null;encounterEditingId=null;encounterReturnToTrash=false;
+  currentTab='worlds';worldLibrary=null;worldEditorView='overview';encounterEditingId=null;encounterReturnToTrash=false;
   $('world-launcher')?.close();
   applyTheme();render();await refreshWorldLibrary();renderWorldLauncher();showError();
   } finally {switchingWorld=false;}
@@ -1149,6 +1150,11 @@ function openEncounterManager(templateId=null,returnToTrash=false){
   setWorkspace('encounters');
   $('encounter-title')?.focus();
 }
+function openWorldEditor(section){
+  if(!['overview','atlas','relations'].includes(section))return;
+  activeWorkspace='world';currentTab='worlds';worldEditorView=section;
+  setDetailDeskOpen(false);renderWorkspace();renderInspector();
+}
 function setWorkspace(mode){
   if(!Object.hasOwn(WORKSPACE_META,mode))return;
   showError();
@@ -1274,6 +1280,20 @@ function renderWorkspace(){
     activeEntityIds.has(x.fromId)&&activeEntityIds.has(x.toId));
   const timelines=(worldLibrary?.timelines||[]).filter(x=>x.worldId===activeWorldId);
   const scene=activeSession(),character=activeWorkspace==='characters'?workspaceCharacter():activeCharacter();
+  if(mode==='world'){
+    const nav=el('nav','','world-editor-nav');
+    nav.setAttribute('aria-label','World editor sections');
+    for(const [section,label] of [['overview','Overview'],['atlas','Places & atlas'],['relations','People & relationships']]){
+      const button=el('button',label,worldEditorView===section?'world-editor-tab active':'world-editor-tab');
+      button.type='button';button.dataset.worldView=section;
+      button.setAttribute('aria-pressed',String(worldEditorView===section));
+      button.onclick=()=>openWorldEditor(section);
+      nav.append(button);
+    }
+    host.append(nav);
+    if(worldEditorView==='atlas'){renderAtlasPanel(host,scene);return;}
+    if(worldEditorView==='relations'){renderRelationsPanel(host);return;}
+  }
   if(mode==='encounters'){
     renderEncounterStudio(host,{
       state,worldLibrary,worldId:activeWorldId,selectedId:encounterEditingId,
@@ -1321,13 +1341,13 @@ function renderWorkspace(){
     grid.append(workspaceCard({index:'02 · GEOGRAPHY',title:'Places that matter',
       description:'Build a navigable atlas. A usual location is not an actor’s current position in a scene.',
       content:workspaceRows(places,x=>[x.name,x.kind]),
-      actions:[['Open World Atlas',()=>openDetailDesk('atlas'),true]]}));
+      actions:[['Manage places',()=>openWorldEditor('atlas'),true]]}));
     grid.append(workspaceCard({index:'03 · SOCIAL FABRIC',title:'People & relationships',
       description:'Known people, institutions, and their authored relationships belong to this world. They do not automatically know each other’s private thoughts.',
       content:workspaceRows(relationships,x=>{
         const from=entities.find(e=>e.id===x.fromId),to=entities.find(e=>e.id===x.toId);
         return [`${from?.name||'?'} → ${to?.name||'?'}`,x.kind];
-      }),actions:[['Open relationship graph',()=>openDetailDesk('relations'),true]]}));
+      }),actions:[['Manage people & relationships',()=>openWorldEditor('relations'),true]]}));
     grid.append(workspaceCard({index:'04 · SCENE STARTERS',title:'Encounters & communication',
       description:'Manage reusable starting situations and choose how characters meet: webcam, social feeds, calls, texts or in person. These are world-scoped templates, not personality fields.',
       content:workspaceRows(state.encounters||[],x=>[x.title,getChannel(x.channelId).label]),
