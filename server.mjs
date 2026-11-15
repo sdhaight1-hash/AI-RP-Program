@@ -17,6 +17,10 @@ import {assertExplicitPurges,DeletionConflictError} from './world/conflict-guard
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
 import { evaluateLocalSemanticModel } from './eval/local-semantic.mjs';
+import {readWorldEpoch} from './world/epoch.mjs';
+import {replyBasis,isReplyBasisCurrent} from './interactions/reply-review.mjs';
+import {applyCompletedNpcReply} from './interactions/reply-commit.mjs';
+import {createReplyStreamReader} from './interactions/stream-reader.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_INFERENCE_URL = 'http://127.0.0.1:5001/v1';
@@ -100,6 +104,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
   const semantic=semanticModel?createLocalSemanticRetriever({
     baseUrl:semanticUrl,model:semanticModel,fetchImpl:semanticFetchImpl
   }):null;
+  // One-use reply tickets exist only for the life of this server process.
+  // A restart invalidates outstanding drafts; the world epoch remains durable.
+  const replyLeases=new Map();
+  const cleanReplyLeases=()=>{
+    const now=Date.now();
+    for(const [id,record] of replyLeases)
+      if(record.expiresAt<=now)replyLeases.delete(id);
+    while(replyLeases.size>=64)replyLeases.delete(replyLeases.keys().next().value);
+  };
   // The server binds localhost by default; this additional check rejects cross-site writes.
   const server = http.createServer(async (req, res) => {
     // A scoped store belongs to this request, never to a process-global tab.
@@ -426,6 +439,36 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           return json(res,201,addActorFact(store,data));
         }catch(error){return json(res,422,{error:error.message});}
       }
+      if (req.method === 'POST' && path === '/api/actor/reply/commit') {
+        const data=await readJson(req,1200);
+        requireWorldScope(data?.worldId);
+        if(typeof data?.ticket!=='string'||data.ticket.length>100||typeof data.reviewed!=='boolean')
+          return json(res,400,{error:'Valid completed reply ticket and review choice required'});
+        const lease=replyLeases.get(data.ticket);
+        if(!lease||lease.expiresAt<=Date.now()||lease.worldId!==data.worldId)
+          return json(res,409,{error:'NPC reply ticket expired or belongs to another world. Generate again.'});
+        // Consume regardless of the result: no replay or concurrent duplicate
+        // commits, including a failed conflict-validation attempt.
+        replyLeases.delete(data.ticket);
+        const verify=(previous)=>{
+          if(previous.revision!==lease.revision ||
+            readWorldEpoch(store.db)!==lease.epoch ||
+            !isReplyBasisCurrent(previous.state.sessions.find(s=>s.id===lease.sceneId),lease.basis))
+            throw new Error('World, story or actor context changed since generation. The stale NPC reply was not saved.');
+        };
+        try{
+          const existing=store.load();
+          verify(existing);
+          const next=structuredClone(existing.state);
+          applyCompletedNpcReply(next,lease,{reviewed:data.reviewed});
+          const saved=typeof baseStore.forWorld==='function'
+            ?store.save(next,lease.revision,{worldId:data.worldId,
+              verifyBeforeReplace:verify})
+            :store.save(next,lease.revision,{beforeReplace:verify});
+          if(!saved)return json(res,409,{error:'Story was edited in another tab before the NPC reply could be saved'});
+          return json(res,200,{...saved,worldId:data.worldId,state:store.load().state});
+        }catch(error){return json(res,409,{error:error.message});}
+      }
       if (req.method === 'POST' && (path === '/api/actor/context' || path === '/api/actor/reply')) {
         const data=await readJson(req,3000);
         requireWorldScope(data.worldId);
@@ -443,6 +486,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           maxOutput:responseTokens};
         const startingRevision=store.load().revision;
         const startingMutation=worldMutationStamp(store);
+        const startingEpoch=readWorldEpoch(store.db);
         let prompt,semanticEvidence=[],semanticStatus=semantic?'no-match':'disabled';
         try {
           prompt=buildActorContext(contextArgs);
