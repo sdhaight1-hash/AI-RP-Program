@@ -32,7 +32,10 @@ async function fixture(){
       return new Response(new ReadableStream({
         start(controller){
           controller.enqueue(new TextEncoder().encode(modelChunk));
+          let released=false;
           gate.release=()=>{
+            if(released)return;
+            released=true;
             controller.enqueue(new TextEncoder().encode(modelDone));
             controller.close();
           };
@@ -49,13 +52,13 @@ async function fixture(){
   await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
   const base='http://127.0.0.1:'+app.address().port;
   const post=(path,data)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(data)});
+    body:JSON.stringify(data),signal:AbortSignal.timeout(12000)});
   return {
     dir,store,worldId,actor,scene,timelineId,post,
     setGate:value=>{gate=value;},
     payload:()=>({worldId,sceneId:scene.id,actorId:actor.id,revision:store.forWorld(worldId).load().revision,
       model:'test-gguf',temperature:0.6,max_tokens:120,contextWindow:4096}),
-    async close(){gate?.release?.();await new Promise(resolve=>app.close(resolve));rmSync(dir,{recursive:true,force:true});}
+    async close(){gate?.release?.();app.closeAllConnections();await new Promise(resolve=>app.close(resolve));rmSync(dir,{recursive:true,force:true});}
   };
 }
 
@@ -65,7 +68,7 @@ function takeTicket(body){
   return JSON.parse(line[1]).ticket;
 }
 
-test('world epoch survives commits from both SQLite connections and server restart',async()=>{
+test('world epoch survives commits from both SQLite connections and server restart',{timeout:18000},async()=>{
   const f=await fixture();
   try{
     const scoped=f.store.forWorld(f.worldId),old=readWorldEpoch(scoped.db);
@@ -85,7 +88,7 @@ test('world epoch survives commits from both SQLite connections and server resta
   }finally{await f.close();}
 });
 
-test('server owns completed NPC reply; one-use commit is atomic and replay cannot duplicate it',async()=>{
+test('server owns completed NPC reply; one-use commit is atomic and replay cannot duplicate it',{timeout:18000},async()=>{
   const f=await fixture();
   try{
     const stream=await f.post('/api/actor/reply',f.payload());
@@ -111,7 +114,7 @@ test('server owns completed NPC reply; one-use commit is atomic and replay canno
   }finally{await f.close();}
 });
 
-test('world change after completion rejects delayed review, consumes ticket, and retains the source player turn',async()=>{
+test('world change after completion rejects delayed review, consumes ticket, and retains the source player turn',{timeout:18000},async()=>{
   const f=await fixture();
   try{
     const response=await f.post('/api/actor/reply',f.payload());
@@ -131,7 +134,7 @@ test('world change after completion rejects delayed review, consumes ticket, and
   }finally{await f.close();}
 });
 
-test('changed world while streaming emits an error but never creates a commit ticket',async()=>{
+test('changed world while streaming emits an error but never creates a commit ticket',{timeout:18000},async()=>{
   const f=await fixture();
   try{
     const gate={};f.setGate(gate);
@@ -152,7 +155,7 @@ test('changed world while streaming emits an error but never creates a commit ti
   }finally{await f.close();}
 });
 
-test('another world cannot redeem a completed NPC reply ticket',async()=>{
+test('another world cannot redeem a completed NPC reply ticket',{timeout:18000},async()=>{
   const f=await fixture();
   try{
     const ticket=takeTicket(await (await f.post('/api/actor/reply',f.payload())).text());
