@@ -6,7 +6,7 @@ import {reviewedCharacterSelections,renderCharacterDraftReview} from '../public/
 
 const character=createCharacter('Mara');
 const worldId='world-one';
-const worldLibrary={worlds:[{id:worldId,name:'Harbor'}],locations:[],entities:[],relationships:[]};
+const worldLibrary={activeWorldId:worldId,worlds:[{id:worldId,name:'Harbor'}],locations:[],entities:[],relationships:[]};
 const request=()=>makeCharacterDraftRequest({
   character,target:'personality',worldId,worldLibrary,lore:[]
 });
