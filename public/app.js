@@ -20,6 +20,8 @@ import { renderEncounterStudio } from '/encounter-studio.mjs';
 import {renderAtlasPanel as drawAtlas,renderRelationsPanel as drawRelations} from '/world-editors.mjs';
 import {renderWorldTimelineEditor as drawTimelines} from '/world-timelines.mjs';
 import {renderActorMemoryEditor} from '/actor-memory-editor.mjs';
+import {makeSceneAuthoringRequest} from '/authoring/world-scene.mjs';
+import {mountWorldSceneAssistant} from '/world-scene-assist.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -566,7 +568,7 @@ const renderRelationsPanel=host=>drawRelations(host,worldEditorApi());
 const renderWorldTimelineEditor=(host,s)=>drawTimelines(host,s,{
   $,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
   activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
-  save,renderInspector,showError,running,fetch
+  save,renderInspector,showError,running,fetch,getModel:()=>state.settings.model
 });
 
 async function postEvent(endpoint,body) {
