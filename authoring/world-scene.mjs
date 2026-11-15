@@ -41,7 +41,7 @@ export function makeWorldAuthoringRequest({name='',description='',guidance='',ta
   return {mode:'world',target,fields,basis,messages:[{role:'system',content:system},{role:'user',content:user}]};
 }
 export function makeSceneAuthoringRequest({worldId,library,characters,characterId,channelId,
-  encounter=null,existing={},scene=null,guidance='',target='all',lore=[]}={}){
+  encounter=null,castIds=null,existing={},scene=null,guidance='',target='all',lore=[]}={}){
   const world=validateWorld(worldId,library);
   const lead=characters?.find(c=>c.id===characterId&&!c.trashedAt);
   if(!lead||lead.worldId&&lead.worldId!==worldId)throw Error('Choose a character in this world');
@@ -54,19 +54,26 @@ export function makeSceneAuthoringRequest({worldId,library,characters,characterI
   const contracts=AUTHORING_CONTRACTS.scene;
   const fields=target==='all'?Object.keys(contracts):[target];
   if(fields.some(f=>!contracts[f]))throw Error('Unknown scene draft field');
-  const participants=(encounter?.characterIds||[characterId]).map(id=>characters.find(c=>c.id===id)).filter(Boolean);
-  const basis=draftBasis({worldId,target,guidance,scene,libraryVersion:draftBasis({
+  const participantIds=castIds||encounter?.characterIds||[characterId];
+  if(!Array.isArray(participantIds)||participantIds.length>64||
+    !participantIds.includes(characterId)||participantIds.some(id=>
+      !characters.some(c=>c.id===id&&!c.trashedAt&&(!c.worldId||c.worldId===worldId))))
+    throw Error('Scene cast contains an unavailable or foreign-world character');
+  const participants=participantIds.map(id=>characters.find(c=>c.id===id));
+  const basis=draftBasis({worldId,target,guidance,scene,castIds:participantIds,libraryVersion:draftBasis({
     world,locations:(library.locations||[]).filter(x=>x.worldId===worldId),
     entities:(library.entities||[]).filter(x=>x.worldId===worldId),
     relationships:(library.relationships||[]).filter(x=>x.worldId===worldId)
   }),characters:participants,characterId,channelId,encounter,existing});
   const system=[
-    'You co-author the STARTING CONFIGURATION of a fictional roleplay scene. Output JSON ONLY.',
+    scene?'You help refine the CURRENT direction of an ongoing roleplay scene. Output JSON ONLY.':
+      'You co-author the STARTING CONFIGURATION of a fictional roleplay scene. Output JSON ONLY.',
     'The selected world is the only canon. Do not introduce established entities from another universe.',
     'Respect the explicit channel: '+channel.label+'. '+channel.description,
     'Preserve each character’s profile, distinct agency and knowledge boundaries.',
     'Do not write NPC dialogue, narrate NPC actions as already committed, force player choices, or assert world/timeline changes.',
     'An existing encounter template is binding; elaborate but never replace its established conditions.',
+    'For existing scenes, do not rewrite or claim earlier conversation lines or fictional events were changed.',
     ...fields.map(f=>f+': '+contracts[f].purpose+'. '+contracts[f].boundary+'. Maximum '+contracts[f].max+' characters.'),
     'Return exactly one JSON object with only these requested keys: '+fields.join(', ')+'. Each value is a string.'
   ].join('\n');
