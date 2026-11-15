@@ -237,3 +237,17 @@ test('world-entry discovery cannot publish results after changing character or w
   assert.match(javascript,/if\(aborter\.signal\.aborted\|\|worldEntryController!==aborter\)return/);
   assert.match(javascript,/if\(worldEntryController===aborter\)\{/);
 });
+
+test('review control is extracted without bypassing authoritative draft approval checks',async()=>{
+  assert.match(javascript,/renderCharacterDraftReview\(\{/);
+  assert.match(javascript,/reviewedCharacterSelections\(\{/);
+  assert.match(javascript,/selectCharacterChanges\(\{character:c,worldLibrary,worldId:activeWorldId,lore:state\.lore,request:aiDraftRequest,changes:accepted\}\)/);
+  const store=new StudioStore(':memory:');
+  const app=createApp({store,fetchImpl:async()=>{throw Error('Offline')}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch('http://127.0.0.1:'+app.address().port+'/character-review.mjs');
+    assert.equal(response.status,200);
+    assert.match(await response.text(),/export function reviewedCharacterSelections/);
+  }finally{await new Promise(resolve=>app.close(resolve));}
+});
