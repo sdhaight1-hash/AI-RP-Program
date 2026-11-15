@@ -287,3 +287,23 @@ test('actor memory editor is world scoped, independently served and preserves so
     assert.match(module,/Remember this detail/);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test('fidelity lab has a scoped controller facade and reviewed persistence only',async()=>{
+  assert.match(javascript,/renderFidelityLab\(host,character,\{/);
+  assert.match(javascript,/getFidelityController:\(\)=>fidelityController/);
+  assert.match(javascript,/getFidelityDraft:\(\)=>fidelityDraft/);
+  assert.match(javascript,/setFidelityDraft:value=>\{fidelityDraft=value;\}/);
+  const store=new StudioStore(':memory:');
+  const app=createApp({store,fetchImpl:async()=>{throw Error('No model')}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  try {
+    const r=await fetch('http://127.0.0.1:'+app.address().port+'/character-lab.mjs');
+    assert.equal(r.status,200);
+    const source=await r.text();
+    assert.match(source,/export function renderFidelityLab/);
+    assert.match(source,/Save reviewed result/);
+    assert.match(source,/if\(!getFidelityDraft\(\)/);
+    assert.match(source,/setFidelityDraft\(null\);save\(\);renderBuilder\(\)/);
+    assert.match(source,/Character profile changed since this test/);
+  }finally{await new Promise(resolve=>app.close(resolve));}
+});
