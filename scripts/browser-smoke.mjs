@@ -138,6 +138,18 @@ async function main(){
       const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
       return catalog.locations.some(l=>l.name===atlasName);
     },'inline Atlas place persisted');
+    console.log('Inline Atlas after save:',JSON.stringify(await script(`
+      return {
+        workspace:document.body.dataset.workspace,view:document.body.dataset.worldView,
+        editor:!!document.querySelector('.world-editor-content'),
+        atlas:!!document.querySelector('#atlas-places'),
+        names:[...document.querySelectorAll('#atlas-places .lore-card strong')].map(x=>x.textContent),
+        detail:document.querySelector('#inspector-heading')?.textContent,
+        error:document.querySelector('#error')?.textContent,
+        selectedWorld:document.querySelector('#atlas-world')?.value,
+        currentWorld:document.querySelector('#world-label')?.textContent
+      };
+    `)));
     await until(async()=>script(`
       return document.querySelector('[data-world-view="atlas"]')?.getAttribute('aria-pressed')==='true' &&
         [...document.querySelectorAll('#atlas-places .lore-card strong')]
