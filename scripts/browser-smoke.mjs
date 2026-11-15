@@ -30,6 +30,7 @@ async function main(){
   let modelAvailable=false;
   const browserReply='Ticketed NPC reply committed from the local-model stream.';
   const newWorldDraft=JSON.stringify({description:'An independent harbor civilization shaped by seasonal trade.'});
+  const locationDraft=JSON.stringify({name:'Browser AI Docks',description:'A salt-stained boat repair shed.'});
   const ongoingSceneDraft=JSON.stringify({direction:'Keep the harbor conversation grounded in Nessa’s independent decisions.'});
   const newSceneDraft=JSON.stringify({title:'Harbor Call at Dusk',
     direction:'The player calls Nessa about an unsigned harbor map.',
@@ -50,7 +51,8 @@ async function main(){
       const isWorld=String(payload.messages?.[0]?.content||'')
         .includes('OPTIONAL world-atlas additions');
       const system=String(payload.messages?.[0]?.content||'');
-      const content=system.includes('NEW, isolated world')?newWorldDraft:
+      const content=system.includes('ONE place inside an already established fictional world')?locationDraft:
+        system.includes('NEW, isolated world')?newWorldDraft:
         system.includes('CURRENT direction of an ongoing')?ongoingSceneDraft:
         system.includes('STARTING CONFIGURATION')?newSceneDraft:
         isWorld?worldProposal:browserReply;
@@ -709,6 +711,40 @@ async function main(){
     assert.equal(store.worlds.list().worlds.length,countBeforeWorldDraft,
       'AI approval must not create a world without separate Create world action');
     await screenshot('07b-ai-reviewed-new-world-draft');
+
+    // AI drafts an Atlas place against this world's existing locations;
+    // reviewing the JSON alone must not create a persistent location.
+    const locationBefore=store.worlds.list().locations.filter(x=>x.worldId===editableWorld).length;
+    assert.equal(await script(`
+      document.querySelector('[data-world-view="atlas"]').click();
+      const ai=document.querySelector('#atlas-create').parentElement;
+      document.querySelector('#atlas-kind').value='building';
+      ai.querySelector('.ai-draft-generate').click();
+      return true;
+    `),true);
+    await until(async()=>script(`
+      return document.querySelector('#atlas-create')?.parentElement
+        ?.querySelector('textarea[aria-label="Editable model JSON"]')
+        ?.value.includes('Browser AI Docks');
+    `),'Atlas model suggested location');
+    assert.equal(store.worlds.list().locations.filter(x=>x.worldId===editableWorld).length,locationBefore,
+      'model suggestions cannot create a place');
+    assert.equal(await script(`
+      document.querySelector('#atlas-create').parentElement.querySelector('.ai-draft-apply').click();
+      return document.querySelector('#atlas-name').value==='Browser AI Docks'
+        &&document.querySelector('#atlas-description').value==='A salt-stained boat repair shed.';
+    `),true,'approving AI output only fills the Atlas location editor');
+    assert.equal(store.worlds.list().locations.filter(x=>x.worldId===editableWorld).length,locationBefore);
+    await script("document.querySelector('#atlas-create').click();return true");
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld))).json();
+      return catalog.locations.some(x=>x.worldId===editableWorld&&x.name==='Browser AI Docks'&&
+        x.description==='A salt-stained boat repair shed.');
+    },'separately committed world-local Atlas location');
+    const otherPlaces=(await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(parallel.id))).json()).locations;
+    assert.ok(!otherPlaces.some(x=>x.name==='Browser AI Docks'),
+      'new Atlas place must never leak into a different world');
+    await screenshot('07d-reviewed-ai-atlas-place');
 
     // The Character Studio world bridge must retain human approval and source
     // provenance in an actual browser, not just a unit-test simulation.
