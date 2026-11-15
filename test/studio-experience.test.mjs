@@ -212,3 +212,11 @@ test('failed, canceled or stale character drafts cannot remain approvable',()=>{
   assert.match(javascript,/validateCharacterDraftBasis\(\{character:c,worldLibrary,worldId:activeWorldId,lore:state\.lore,request\}\)/);
   assert.match(javascript,/selectCharacterChanges\(\{character:c,worldLibrary,worldId:activeWorldId,lore:state\.lore,request:aiDraftRequest,changes:accepted\}\)/);
 });
+
+test('character search survives editor rerenders but never crosses world switches',()=>{
+  assert.match(javascript,/rosterSearch\.value=characterRosterQuery/);
+  assert.match(javascript,/let page=characterRosterPage/);
+  assert.match(javascript,/characterRosterPage=page/);
+  assert.match(javascript,/characterRosterQuery=rosterSearch\.value/);
+  assert.match(javascript,/characterRosterQuery='';characterRosterPage=0;/);
+});
