@@ -446,7 +446,7 @@ async function main(){
     const firstLabel=await script("return document.querySelector('#world-label')?.textContent");
     assert.notEqual(firstLabel,'Parallel Browser World','the first tab must keep its own world');
     await request('POST','/session/'+sessionId+'/refresh',{});
-    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'first tab world reload');
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='Revised Browser Connical Universe'"),'first tab world reload');
     const firstTimelineCatalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
     const firstTimelineIds=firstTimelineCatalog.timelines
       .filter(t=>t.worldId===store.activeWorldId).map(t=>t.id).sort();
