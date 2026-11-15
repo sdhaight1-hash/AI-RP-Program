@@ -1317,19 +1317,53 @@ function renderWorkspace(){
       description:'A profile captures enduring identity, appearance, psychology and history. Current location and emotions belong to the active timeline.',
       actions:[['Create character',()=>$('new-character').click(),true],
         ['Open active character',()=>character&&openBuilder(character)]]});
+    // The old ten-character preview silently hid larger casts. Keep the full
+    // world-local roster searchable without creating hundreds of DOM nodes.
+    const rosterTools=el('div','','character-roster-tools');
+    const rosterSearch=document.createElement('input');
+    rosterSearch.type='search';rosterSearch.placeholder='Search this world’s characters';
+    rosterSearch.setAttribute('aria-label','Search characters in current world');
+    rosterSearch.autocomplete='off';
+    const rosterCount=el('p','','help');
+    rosterTools.append(rosterSearch,rosterCount);
     const rosterList=el('div','','workspace-entity-list');
-    for(const c of characters.slice(0,10)){
-      const row=el('div','','workspace-entity-row');
-      const detail=el('span','', 'workspace-entity-name');
-      const name=el('span',c.name||'Unnamed character');
-      const percent=CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length;
-      const info=el('span',`${percent}/${CHARACTER_V2_FIELDS.length} core fields`,'workspace-entity-meta');
-      const edit=workspaceButton('Edit',()=>openBuilder(c));
-      detail.append(name,el('span',c.occupation||c.tagline||'Character in development','workspace-entity-meta'));
-      row.append(detail,info,edit);rosterList.append(row);
-    }
-    if(!characters.length)rosterList.append(el('p','Create your first character to begin.','empty-note'));
-    roster.append(rosterList);grid.append(roster);
+    const rosterPager=el('div','','character-roster-pager');
+    const previous=workspaceButton('Previous',()=>{page--;drawRoster();});
+    const next=workspaceButton('Next',()=>{page++;drawRoster();});
+    const rosterPageLabel=el('span','','workspace-entity-meta');
+    rosterPager.append(previous,rosterPageLabel,next);
+    const pageSize=25;
+    let page=0;
+    const drawRoster=()=>{
+      const query=rosterSearch.value.trim().toLocaleLowerCase();
+      const matches=characters.filter(c=>
+        [c.name,c.occupation,c.tagline].some(value=>String(value||'').toLocaleLowerCase().includes(query)));
+      const pages=Math.max(1,Math.ceil(matches.length/pageSize));
+      page=Math.max(0,Math.min(page,pages-1));
+      rosterList.replaceChildren();
+      rosterCount.textContent=query
+        ? `${matches.length} of ${characters.length} characters match`
+        : `${characters.length} characters in this world`;
+      for(const c of matches.slice(page*pageSize,(page+1)*pageSize)){
+        const row=el('div','','workspace-entity-row');
+        const detail=el('span','', 'workspace-entity-name');
+        const name=el('span',c.name||'Unnamed character');
+        const complete=CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length;
+        const info=el('span',`${complete}/${CHARACTER_V2_FIELDS.length} core fields`,'workspace-entity-meta');
+        const edit=workspaceButton('Edit',()=>openBuilder(c));
+        detail.append(name,el('span',c.occupation||c.tagline||'Character in development','workspace-entity-meta'));
+        row.append(detail,info,edit);rosterList.append(row);
+      }
+      if(!matches.length)rosterList.append(el('p',query?'No matching characters in this world.':'Create your first character to begin.','empty-note'));
+      rosterPageLabel.textContent=`Page ${page+1} of ${pages}`;
+      previous.disabled=page===0;
+      next.disabled=page>=pages-1;
+      rosterPager.classList.toggle('hidden',pages===1);
+    };
+    rosterSearch.addEventListener('input',()=>{page=0;drawRoster();});
+    drawRoster();
+    roster.append(rosterTools);
+    roster.append(rosterList,rosterPager);grid.append(roster);
     grid.append(workspaceCard({index:'02 · CHARACTER WORKSHOP',title:'A complete inner life',
       description:'Use field-specific AI assistance grounded in everything already established. Each field has a separate purpose and the full character stays coherent.',
       actions:[['Edit character',()=>character&&openBuilder(character),true],
