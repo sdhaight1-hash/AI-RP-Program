@@ -8,6 +8,7 @@ import { makeEmptyWorldState,createCharacter,createSession } from '../engine.mjs
 import { retrieveActorMemories } from '../memory/store.mjs';
 import { createLocalSemanticRetriever } from '../memory/semantic.mjs';
 import { buildActorContext } from '../context/assemble.mjs';
+import { measureEvidenceFunnel } from './evidence-metrics.mjs';
 
 const percentile=(times,q)=>{
   const values=[...times].sort((a,b)=>a-b);
@@ -82,13 +83,15 @@ export async function evaluateSemanticFunnel(){
           hasGold:item.gold?prompt.metadata.evidence.some(e=>e.sourceMessageId===item.gold):false,
           withinBudget:prompt.metadata.promptTokensEstimated<=
             size-prompt.metadata.maxOutput-prompt.metadata.safetyMargin,
-          selectedEvidence:prompt.metadata.selectedEvidence
+          selectedEvidence:prompt.metadata.selectedEvidence,
+          evidenceIds:[...new Set(prompt.metadata.evidence.map(e=>e.sourceMessageId).filter(Boolean))]
         };
         if(prompt.messages.some(m=>m.content.includes('black-comet')))leaked=true;
       }
       const selectedGold=item.gold?selected.some(e=>e.sourceMessageId===item.gold):false;
       checks.push({id:item.id,positive:Boolean(item.gold),gold:item.gold,
         lexicalGold:item.gold?lexical.some(e=>e.sourceMessageId===item.gold):false,
+        lexicalIds:[...new Set(lexical.map(e=>e.sourceMessageId).filter(Boolean))],
         semanticGold:selectedGold,selectedIds:selected.map(x=>x.sourceMessageId),
         falsePositive:!item.gold&&selected.length>0,windows});
     }
@@ -103,7 +106,8 @@ export async function evaluateSemanticFunnel(){
       {id:'all-prompts-within-model-budget',pass:checks.every(c=>Object.values(c.windows)
         .every(w=>w.withinBudget))}
     ];
-    return {kind:'synthetic-semantic-evidence-funnel-v1',cases:checks,
+    return {kind:'synthetic-semantic-evidence-funnel-v2',cases:checks,
+      evidenceMetrics:measureEvidenceFunnel(checks),
       metrics:{positives:positives.length,negatives:negatives.length,
         lexicalGold:positives.filter(c=>c.lexicalGold).length,
         semanticRecall:support/positives.length,
