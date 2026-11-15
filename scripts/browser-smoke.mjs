@@ -220,6 +220,21 @@ async function main(){
     assert.deepEqual(timelinesView,{pane:'timelines',create:true,clock:true,nav:true,focused:false},
       'World & timelines must be an inline editor, not a second focused overlay');
     await screenshot('03-world-timelines-editor');
+    const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(store.activeWorldId))).json()).revision;
+    await script("document.querySelector('#world-impact-preview').click();return true");
+    await until(async()=>script(`
+      return document.querySelector('#world-impact-report')?.textContent
+        .includes('Deletion is unavailable');
+    `),'safe world deletion preview');
+    assert.equal(await script(`
+      return document.querySelector('#world-impact-report')?.textContent.includes('Scenes:')
+        &&document.querySelector('#world-impact-report')?.textContent.includes('Blocked:');
+    `),true,'world preview must report records and safety blockers without deleting');
+    assert.equal((await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(store.activeWorldId))).json()).revision,beforeImpact,
+      'deletion preview must not mutate SQLite');
+    await screenshot('03a-read-only-world-impact');
     const timelineName='Browser Independent Timeline';
     await script(`
       document.querySelector('#timeline-new-name').value=${JSON.stringify(timelineName)};
