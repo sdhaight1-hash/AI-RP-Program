@@ -69,8 +69,10 @@ test('universe edits cannot target a foreign or nonexistent world',async()=>{
       method:'PATCH',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({worldId:another.id,name:'Nope',description:'',
         expectedName:another.name,expectedDescription:another.description})});
-    assert.notEqual(request.status,200);
-    assert.equal(store.worlds.list().worlds.find(x=>x.id===another.id).name,another.name);
-    assert.equal(store.activeWorldId,originalId);
+    assert.equal(request.status,200,'Explicitly scoped edits can target a different universe');
+    assert.equal(store.worlds.list().worlds.find(x=>x.id===another.id).name,'Nope');
+    assert.equal(store.activeWorldId,originalId,
+      'An explicit foreign-universe edit must not change the active universe');
+    assert.notEqual(store.worlds.list().worlds.find(x=>x.id===originalId).name,'Nope');
   }finally{await new Promise(resolve=>app.close(resolve));rmSync(dir,{recursive:true,force:true});}
 });
