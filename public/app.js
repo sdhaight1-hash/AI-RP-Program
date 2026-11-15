@@ -553,7 +553,8 @@ async function permanentlyPurgeLibraryItem(type,item) {
 
 const worldEditorApi=()=>({$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
   addWorldChooser,selectedWorld,postWorld,permanentlyDeleteWorldEntry,
-  state,save,renderHeader,renderInspector,showError});
+  state,save,renderHeader,renderInspector,showError,
+  openCharacterProfile:character=>{selectedCharacterId=character.id;setWorkspace('characters');openBuilder(character);}});
 const renderAtlasPanel=(host,session)=>drawAtlas(host,session,worldEditorApi());
 const renderRelationsPanel=host=>drawRelations(host,worldEditorApi());
 
