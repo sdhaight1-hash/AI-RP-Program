@@ -162,3 +162,25 @@ test('world editors are independently served and available inline, not bound to 
     assert.match(module,/permanentlyDeleteWorldEntry/);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+
+test('world creation, timelines and clocks are edited inline, with no duplicate inspector forms',async()=>{
+  assert.match(javascript,/renderWorldTimelineEditor\(editor,scene\)/);
+  assert.match(javascript,/openWorldEditor\('timelines'\)/);
+  assert.match(javascript,/\['overview','Overview'\]/);
+  assert.match(javascript,/\['timelines','Worlds & timelines'\]/);
+  assert.match(css,/world-editor-content > #world-library-list/);
+  assert.match(css,/data-world-pane="timelines"/);
+  const store=new StudioStore(':memory:');
+  const app=createApp({store,fetchImpl:async()=>{throw Error('Offline test only');}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  try{
+    const res=await fetch('http://127.0.0.1:'+app.address().port+'/world-timelines.mjs');
+    assert.equal(res.status,200);
+    assert.match(res.headers.get('content-type'),/javascript/);
+    const source=await res.text();
+    assert.match(source,/export function renderWorldTimelineEditor/);
+    assert.match(source,/t\.worldId===activeWorldId/);
+    assert.match(source,/Select a timeline within this world/);
+  }finally{await new Promise(resolve=>app.close(resolve));}
+});
