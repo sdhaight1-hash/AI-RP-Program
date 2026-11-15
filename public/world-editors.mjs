@@ -80,6 +80,8 @@ export function renderAtlasPanel(host,session,api) {
   for(const loc of locations){
     const card=el('div','','lore-card');const parentName=locations.find(x=>x.id===loc.parentId)?.name;
     card.append(el('strong',loc.name),el('p',`${loc.kind}${parentName?' · inside '+parentName:''}${loc.description?' · '+loc.description:''}`,'help'));
+    const origin=(worldLibrary.entryProvenance||[]).find(x=>x.entryType==='location'&&x.entryId===loc.id);
+    if(origin)card.append(el('p',`Source: ${origin.trust} · ${origin.sourceStatus} · “${origin.quote}”`,'help'));
     const use=el('button','Use as scene location','subtle-button');use.disabled=!session;
     use.onclick=()=>{
       const activeTimeline=worldLibrary.timelines.find(t=>t.id===session?.timelineId);
@@ -96,10 +98,12 @@ export function renderAtlasPanel(host,session,api) {
     remove.onclick=()=>{void permanentlyDeleteWorldEntry('location',loc,world.id);};
     card.append(remove);container.append(card);
   }
+  let selectedPlaceProof=null;
   const placeMentions=mountMentionRecommendations(host,{
     el,fetch,worldId:world.id,focus:'locations',
     onChoose:candidate=>{
       $('atlas-name').value=candidate.name;
+      selectedPlaceProof=candidate.evidence.find(x=>x.fingerprint)||null;
       $('atlas-kind').value='other';
       $('atlas-name').focus();
     }
@@ -118,7 +122,17 @@ export function renderAtlasPanel(host,session,api) {
     }
   });
   $('atlas-create').onclick=async()=>{
-    try{await postWorld('/api/worlds/locations',{worldId:world.id,name:$('atlas-name').value,kind:$('atlas-kind').value,parentId:$('atlas-parent').value||null,description:$('atlas-description').value});showError();}
+    try{
+      const name=$('atlas-name').value;
+      const proof=selectedPlaceProof&&selectedPlaceProof.quote.toLocaleLowerCase()
+        .includes(name.trim().toLocaleLowerCase())?selectedPlaceProof:null;
+      await postWorld('/api/worlds/locations',{
+        worldId:world.id,name,kind:$('atlas-kind').value,
+        parentId:$('atlas-parent').value||null,description:$('atlas-description').value,
+        ...(proof?{sourceProof:proof}:{})
+      });
+      selectedPlaceProof=null;showError();
+    }
     catch(err){showError(err.message);}
   };
 }
@@ -174,6 +188,8 @@ export function renderRelationsPanel(host,api) {
   for(const entity of entities){
     const row=el('div','','lore-card');
     row.append(el('strong',entity.name),el('p',entity.kind+(entity.description?' · '+entity.description:''),'help'));
+    const origin=(worldLibrary.entryProvenance||[]).find(x=>x.entryType==='entity'&&x.entryId===entity.id);
+    if(origin)row.append(el('p',`Source: ${origin.trust} · ${origin.sourceStatus} · “${origin.quote}”`,'help'));
     const character=entity.sourceCharacterId
       ?state.characters.find(c=>c.id===entity.sourceCharacterId&&!c.trashedAt):null;
     if(character){
@@ -214,10 +230,12 @@ export function renderRelationsPanel(host,api) {
     row.append(remove);list.append(row);
   }
   for(const entity of entities){$('relations-from').add(new Option(entity.name,entity.id));$('relations-to').add(new Option(entity.name,entity.id));}
+  let selectedGroupProof=null;
   const groupMentions=mountMentionRecommendations(host,{
     el,fetch,worldId:world.id,focus:'groups',
     onChoose:candidate=>{
       $('relations-entity-name').value=candidate.name;
+      selectedGroupProof=candidate.evidence.find(x=>x.fingerprint)||null;
       $('relations-entity-kind').value=candidate.kind;
       $('relations-entity-name').focus();
     }
@@ -236,7 +254,17 @@ export function renderRelationsPanel(host,api) {
     }
   });
   $('relations-add-entity').onclick=async()=>{
-    try{await postWorld('/api/worlds/entities',{worldId:world.id,name:$('relations-entity-name').value,kind:$('relations-entity-kind').value,description:$('relations-entity-description').value});showError();}
+    try{
+      const name=$('relations-entity-name').value;
+      const proof=selectedGroupProof&&selectedGroupProof.quote.toLocaleLowerCase()
+        .includes(name.trim().toLocaleLowerCase())?selectedGroupProof:null;
+      await postWorld('/api/worlds/entities',{
+        worldId:world.id,name,kind:$('relations-entity-kind').value,
+        description:$('relations-entity-description').value,
+        ...(proof?{sourceProof:proof}:{})
+      });
+      selectedGroupProof=null;showError();
+    }
     catch(err){showError(err.message);}
   };
   $('relations-add').disabled=entities.length<2;
