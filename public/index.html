@@ -17,14 +17,14 @@
       </div>
       <div class="rail-world">
         <span class="rail-kicker">CURRENT UNIVERSE</span>
-        <button id="world-home" class="world-home" title="Switch between independent worlds">
+        <button id="world-home" class="world-home" title="Switch between Connical Universes">
           <span class="world-icon" aria-hidden="true">◈</span>
-          <span class="world-home-copy"><strong id="world-label" class="world-label">Loading world…</strong><small>Switch world <span aria-hidden="true">↗</span></small></span>
+          <span class="world-home-copy"><strong id="world-label" class="world-label">Loading Connical Universe…</strong><small>Switch universe <span aria-hidden="true">↗</span></small></span>
         </button>
       </div>
       <nav class="workspace-nav" aria-label="Primary workspaces">
         <div class="rail-kicker">CREATE YOUR WORLD</div>
-        <button class="workspace-link" data-workspace="world" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◈</span><span class="workspace-copy"><strong>World</strong><small>Setting, places and timelines</small></span></button>
+        <button class="workspace-link" data-workspace="world" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">◈</span><span class="workspace-copy"><strong>Connical Universe</strong><small>Canon, places and timelines</small></span></button>
         <button class="workspace-link" data-workspace="characters" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">♧</span><span class="workspace-copy"><strong>Characters</strong><small>People and their histories</small></span></button>
         <button class="workspace-link" data-workspace="encounters" aria-pressed="false"><span class="workspace-icon" aria-hidden="true">▣</span><span class="workspace-copy"><strong>Encounters</strong><small>Starting situations and media</small></span></button>
         <div class="rail-kicker">PLAY & MANAGE</div>
@@ -48,7 +48,7 @@
 
     <main class="conversation" id="main-workspace">
       <header class="studio-topbar">
-        <div class="studio-breadcrumb"><span class="topbar-micro">OPEN WORLD</span><strong id="top-world-name">Loading…</strong><span class="breadcrumb-divider" aria-hidden="true">/</span><span id="top-workspace-name">Story room</span></div>
+        <div class="studio-breadcrumb"><span class="topbar-micro">OPEN CONNICAL UNIVERSE</span><strong id="top-world-name">Loading…</strong><span class="breadcrumb-divider" aria-hidden="true">/</span><span id="top-workspace-name">Story room</span></div>
         <div class="topbar-actions"><button id="open-command" class="subtle-button command-trigger" aria-keyshortcuts="Control+K Meta+K" title="Find worlds, people, editors and tools"><span aria-hidden="true">⌕</span> Jump to… <kbd>Ctrl K</kbd></button><span class="topbar-private"><span aria-hidden="true">●</span> Private workspace</span><button id="open-workspace-inspector" class="subtle-button" aria-controls="inspector" aria-expanded="false">Detail desk <span aria-hidden="true">☰</span></button></div>
       </header>
       <div id="error" role="alert" class="error global-notice hidden"></div>
@@ -71,7 +71,7 @@
       </div>
       <div id="messages" class="messages" aria-live="polite"></div>
       <section id="workspace-overview" class="workspace-overview hidden" aria-labelledby="workspace-title">
-        <header class="workspace-heading"><div id="workspace-kicker" class="eyebrow">YOUR UNIVERSE</div><h1 id="workspace-title">World overview</h1><p id="workspace-summary" class="workspace-summary"></p></header>
+        <header class="workspace-heading"><div id="workspace-kicker" class="eyebrow">YOUR UNIVERSE</div><h1 id="workspace-title">Connical Universe overview</h1><p id="workspace-summary" class="workspace-summary"></p></header>
         <div id="workspace-content" class="workspace-content"></div>
       </section>
       <div class="composer-area">
@@ -96,11 +96,11 @@
       <div id="inspector-content" class="inspector-body"></div>
     </aside>
   </div>
-  <dialog id="world-launcher" class="world-launcher" aria-labelledby="world-launcher-title"><div class="world-launcher-head"><h2 id="world-launcher-title">Your Worlds</h2><button id="world-launcher-close" class="subtle-button">Close</button></div><p class="help">Each world is a separate universe with its own canon, cast, memory, places, relationships and story timelines. Switching worlds never imports another world's private memories.</p><label class="field-label" for="world-filter">Find a world</label><input id="world-filter" type="search" placeholder="Search worlds by name or setting…" autocomplete="off" /><p id="world-list-count" class="help" role="status"></p><div id="world-launcher-list" class="world-launcher-list"></div><button id="world-launcher-create" class="primary-button">Create a New World</button></dialog>
+  <dialog id="world-launcher" class="world-launcher" aria-labelledby="world-launcher-title"><div class="world-launcher-head"><h2 id="world-launcher-title">Your Connical Universes</h2><button id="world-launcher-close" class="subtle-button">Close</button></div><p class="help">Each Connical Universe has its own canon, cast, memory, places, relationships and story timelines. Switching universes never imports another universe's private memories.</p><label class="field-label" for="world-filter">Find a Connical Universe</label><input id="world-filter" type="search" placeholder="Search universes by name or setting…" autocomplete="off" /><p id="world-list-count" class="help" role="status"></p><div id="world-launcher-list" class="world-launcher-list"></div><button id="world-launcher-create" class="primary-button">Create a New Connical Universe</button></dialog>
   <dialog id="new-scene-dialog" class="new-scene-dialog" aria-labelledby="new-scene-title">
     <header class="scene-composer-top">
       <div>
-        <span class="eyebrow">SCENE WORKSHOP · WORLD-AWARE AUTHORING</span>
+        <span class="eyebrow">SCENE WORKSHOP · UNIVERSE-AWARE AUTHORING</span>
         <h2 id="new-scene-title">Start an interaction</h2>
         <p class="help">Choose the participants and medium, shape the opening situation, then start the scene. AI suggestions require your review.</p>
       </div>
@@ -159,7 +159,7 @@
     </footer>
   </dialog>
   <dialog id="character-builder" class="builder-dialog" aria-labelledby="builder-title">
-    <div class="builder-top"><div><div class="eyebrow">CHARACTER WORKSHOP · WORLD-AWARE AUTHORING</div><h2 id="builder-title">Shape a living character</h2><p>One person, grounded in their world. Review every AI-assisted change before it becomes established.</p><div id="builder-progress"><span id="builder-progress-label">Profile fields</span><span id="builder-progress-track" role="progressbar" aria-label="Completed character fields" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="builder-progress-fill"></span></span></div></div><button id="builder-close" class="subtle-button" aria-label="Close character builder">✕ Close</button></div>
+    <div class="builder-top"><div><div class="eyebrow">CHARACTER WORKSHOP · UNIVERSE-AWARE AUTHORING</div><h2 id="builder-title">Shape a living character</h2><p>One person, grounded in their world. Review every AI-assisted change before it becomes established.</p><div id="builder-progress"><span id="builder-progress-label">Profile fields</span><span id="builder-progress-track" role="progressbar" aria-label="Completed character fields" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="builder-progress-fill"></span></span></div></div><button id="builder-close" class="subtle-button" aria-label="Close character builder">✕ Close</button></div>
     <div class="builder-grid">
       <aside class="builder-sidebar">
         <div id="builder-portrait" class="builder-portrait" aria-label="Character portrait preview"></div>
