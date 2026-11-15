@@ -493,7 +493,7 @@ async function main(){
       'Character biography must not leak into the other world');
     await screenshot('06d-character-history-saved');
     await request('POST','/session/'+sessionId+'/refresh',{});
-    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='My First World'"),'world after character save reload');
+    await until(async()=>script("return document.querySelector('#world-label')?.textContent==='Revised Browser Connical Universe'"),'world after character save reload');
 
 
     // The relationship codex must delete a real SQLite entry, not just hide a
