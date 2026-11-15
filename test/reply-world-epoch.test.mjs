@@ -68,7 +68,7 @@ function takeTicket(body){
   return JSON.parse(line[1]).ticket;
 }
 
-test('world epoch survives commits from both SQLite connections and server restart',{timeout:18000},async()=>{
+test('world epoch advances on both local and external SQLite world updates',{timeout:18000},async()=>{
   const f=await fixture();
   try{
     const scoped=f.store.forWorld(f.worldId),old=readWorldEpoch(scoped.db);
@@ -184,4 +184,30 @@ test('SSE model reader never authenticates truncated, errored or invalid streams
   for(const byte of bytes)valid.feed(new Uint8Array([byte]));
   assert.equal(valid.text,'café');
   assert.equal(valid.completed(),true);
+});
+
+
+test('world epoch is durable across reopening and rolls back with a failed world transaction',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-epoch-reopen-'));
+  let store=null;
+  try{
+    store=new WorldPartitionStore(dir);
+    const worldId=store.activeWorldId,scoped=store.forWorld(worldId);
+    const before=readWorldEpoch(scoped.db);
+    const place=scoped.worlds.createLocation({worldId,name:'A reliable place',kind:'building'});
+    assert.ok(place.id);
+    const committed=readWorldEpoch(scoped.db);
+    assert.ok(committed>before);
+    scoped.db.exec('BEGIN IMMEDIATE');
+    scoped.db.prepare('UPDATE world_locations SET name=? WHERE id=?')
+      .run('Rolled back rename',place.id);
+    assert.ok(readWorldEpoch(scoped.db)>committed);
+    scoped.db.exec('ROLLBACK');
+    assert.equal(readWorldEpoch(scoped.db),committed,'trigger increments must roll back atomically');
+    store.close();store=null;
+    store=new WorldPartitionStore(dir);
+    assert.ok(readWorldEpoch(store.forWorld(worldId).db)>=committed);
+    assert.equal(store.forWorld(worldId).worlds.list().locations.find(x=>x.id===place.id)?.name,
+      'A reliable place');
+  }finally{try{store?.close();}finally{rmSync(dir,{recursive:true,force:true});}}
 });
