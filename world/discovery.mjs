@@ -26,7 +26,7 @@ export function sourcesFor({state={},library={},worldId}){
     for(const [field,value] of Object.entries(library.blueprint.sections||{}))
       add('blueprint',worldId,field,value,'established');
   for(const person of (state.characters||[]).filter(c=>!c.trashedAt&&(!c.worldId||c.worldId===worldId)).slice(0,1000)){
-    for(const field of ['description','backstory','personality','occupation','family','relationships','preferredEnvironment','frequentPlacesText','history','goals','fears','secrets']){
+    for(const field of ['description','backstory','familyHistory','formativeEvents','personality','occupation','family','relationships','preferredEnvironment','dailyRoutine','socialHabits','hobbies','frequentPlacesText','history','goals','fears','secrets']){
       add('character',person.id,field,person[field],'profile');
     }
     // Other author-defined character sections are still searched, but never
