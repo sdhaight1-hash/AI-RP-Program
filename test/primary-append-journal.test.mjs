@@ -7,7 +7,7 @@ import {StudioStore} from '../storage.mjs';
 import {WorldPartitionStore} from '../world/partition-store.mjs';
 import {createCharacter,createSession,makeEmptyWorldState,makeInitialState} from '../engine.mjs';
 import {writeStoryProjection,enablePrimaryProjection,
-  verifyStoryProjection,projectionPrimary} from '../storage/normalized.mjs';
+  verifyStoryProjection,projectionPrimary,enableVerifiedAppendJournal} from '../storage/normalized.mjs';
 import {enableAppendJournal,journalEnabled,appendVerifiedPlayerRow} from '../storage/append-journal.mjs';
 import {readWorldEpoch} from '../world/epoch.mjs';
 
@@ -18,7 +18,7 @@ function activate(store){
     writeStoryProjection(db,current.state,current.revision);
     enablePrimaryProjection(db,current);
     assert.equal(verifyStoryProjection(db,current).status,'matched');
-    enableAppendJournal(db,current);
+    enableVerifiedAppendJournal(db,current);
     db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
   assert.equal(projectionPrimary(db),true);
@@ -193,4 +193,28 @@ test('journal remains scoped to its world and an ordinary save compacts only tha
     assert.equal(two.load().state.sessions.length,0);
     assert.equal(journalEnabled(two.db),false);
   }finally{store.close();rmSync(root,{recursive:true,force:true});}
+});
+
+
+test('journal activation rejects a mismatched snapshot before any storage format change',()=>{
+  const store=new StudioStore(':memory:');
+  try{
+    store.save(makeInitialState(),0);
+    const db=store.db,current=store.load();
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      writeStoryProjection(db,current.state,current.revision);
+      enablePrimaryProjection(db,current);
+      db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+    const fake=structuredClone(store.load());
+    fake.state.sessions[0].messages[0].content='Tampered unreviewed replacement';
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      assert.throws(()=>enableVerifiedAppendJournal(db,fake),
+        /Normalized projection differs from canonical story/i);
+    }finally{db.exec('ROLLBACK');}
+    assert.equal(journalEnabled(db),false);
+    assert.equal(verifyStoryProjection(db,store.load()).status,'matched');
+  }finally{store.close();}
 });
