@@ -221,6 +221,70 @@ export function renderWorldTimelineEditor(host,s,api) {
         name:currentUniverse.name,description:currentUniverse.description
       };
     }
+    const authoritativeBlueprint=worldLibrary.blueprint?.worldId===activeWorldId
+      ?worldLibrary.blueprint:{worldId:activeWorldId,revision:0,sections:emptyUniverseBlueprint()};
+    if(!pendingUniverseBlueprint||pendingUniverseBlueprint.worldId!==activeWorldId){
+      pendingUniverseBlueprint={
+        worldId:activeWorldId,revision:authoritativeBlueprint.revision,
+        original:structuredClone(authoritativeBlueprint.sections),
+        sections:structuredClone(authoritativeBlueprint.sections)
+      };
+    }
+    const blueprintDraft=pendingUniverseBlueprint;
+    const renderEditBlueprint=()=>renderBlueprintFields(
+      $('universe-edit-blueprint-fields'),blueprintDraft.sections,'edit-universe',
+      (key,value)=>{
+        blueprintDraft.sections={...blueprintDraft.sections,[key]:value};
+        showBlueprintChanges();
+      }
+    );
+    const showBlueprintChanges=()=>{
+      const changed=JSON.stringify(blueprintDraft.sections)!==JSON.stringify(blueprintDraft.original);
+      $('universe-blueprint-state').textContent=changed?'Unsaved blueprint changes':
+        'No unsaved blueprint changes';
+      $('universe-blueprint-save').disabled=savingBlueprint||!changed;
+    };
+    renderEditBlueprint();showBlueprintChanges();
+    mountWorldSceneAssistant($('universe-blueprint-ai-slot'),{
+      mode:'blueprint',getModel,
+      isCurrent:()=>identitySection.isConnected&&
+        getCurrentWorldId()===blueprintDraft.worldId&&!savingBlueprint,
+      beforeGenerate:beforeUpdateUniverse,
+      getRequest:(target,guidance)=>makeBlueprintAuthoringRequest({
+        worldId:blueprintDraft.worldId,library:worldLibrary,
+        name:currentUniverse.name,description:currentUniverse.description,
+        sections:blueprintDraft.sections,target,guidance
+      }),
+      onApply:patch=>{
+        blueprintDraft.sections={...blueprintDraft.sections,...patch};
+        renderEditBlueprint();showBlueprintChanges();
+      }
+    });
+    $('universe-blueprint-save').onclick=async()=>{
+      if(savingBlueprint)return;
+      savingBlueprint=true;showBlueprintChanges();
+      try {
+        if(!serverStorage)throw Error('Connect SQLite to save the universe blueprint');
+        await beforeUpdateUniverse();
+        if(getCurrentWorldId()!==blueprintDraft.worldId)
+          throw Error('Universe switched while saving the blueprint');
+        const response=await fetch('/api/worlds/blueprint',{
+          method:'PATCH',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            worldId:blueprintDraft.worldId,
+            revision:blueprintDraft.revision,sections:blueprintDraft.sections
+          })
+        });
+        const data=await response.json();
+        if(!response.ok)throw Error(data.error||'Blueprint save failed');
+        pendingUniverseBlueprint=null;
+        await refreshWorldLibrary();
+        showError();
+      }catch(error){showError(error.message);}
+      finally{savingBlueprint=false;
+        if($('universe-blueprint-save')?.isConnected)$('universe-blueprint-save').disabled=false;
+      }
+    };
     const draft=pendingUniverseRevision;
     const editName=$('universe-edit-name'),editDescription=$('universe-edit-description');
     editName.value=draft.name;editDescription.value=draft.description;
