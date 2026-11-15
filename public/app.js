@@ -244,10 +244,15 @@ function startSession(char = activeCharacter(), encounter = null,channelId=null,
   activeWorkspace='story';currentTab='scene';setDetailDeskOpen(false);
   save(); render();
   $('message-input').focus();
+  return session;
 }
 
+let sceneCreationInFlight=false;
+let sceneCreatedUnconfirmed=false;
 function openNewSceneDialog() {
-  if(running)return;
+  if(running||sceneCreationInFlight)return;
+  sceneCreatedUnconfirmed=false;
+  $('new-scene-confirm').disabled=false;
   const actors=state.characters.filter(c=>!c.trashedAt);
   if(!actors.length)return showError('Create a character inside this world first.');
   const chosen=$('new-scene-character');chosen.replaceChildren();
@@ -476,13 +481,13 @@ async function refreshWorldLibrary() {
 
 // A world switch is a hard context boundary. No pending generation, browser
 // backup, or stale per-world state is allowed to cross it.
-async function switchWorld(worldId) {
-  if (worldId === activeWorldId) { $('world-launcher')?.close();return; }
+async function switchWorld(worldId,{confirmed=false}={}) {
+  if (worldId === activeWorldId) { $('world-launcher')?.close();return true; }
   if(switchingWorld)throw new Error('Another world switch is already in progress.');
   if(destructiveActionInFlight)throw new Error('Finish the permanent deletion before switching worlds.');
   if (running || aiDraftController || fidelityController || localEvalController || worldEntryController) throw new Error('Finish or cancel generation before switching worlds.');
-  if (pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return;
-  if ($('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return;
+  if (!confirmed && pendingReply && !confirm('Discard the unreviewed NPC draft before opening another world?')) return false;
+  if (!confirmed && $('message-input')?.value.trim() && !confirm('Discard the unsent message before opening another world?')) return false;
   switchingWorld=true;
   try {
   await requireSavedStory();
@@ -503,6 +508,7 @@ async function switchWorld(worldId) {
   currentTab='worlds';worldLibrary=null;worldEditorView='overview';encounterEditingId=null;encounterReturnToTrash=false;
   $('world-launcher')?.close();
   applyTheme();render();await refreshWorldLibrary();renderWorldLauncher();showError();
+  return true;
   } finally {switchingWorld=false;}
 }
 function renderWorldLauncher() {
@@ -609,7 +615,19 @@ const renderRelationsPanel=host=>drawRelations(host,worldEditorApi());
 const renderWorldTimelineEditor=(host,s)=>drawTimelines(host,s,{
   $,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
   activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
-  save,renderInspector,showError,running,fetch,getModel:()=>state.settings.model
+  save,renderInspector,showError,running,fetch,getModel:()=>state.settings.model,
+  beforeCreateWorld:async()=>{
+    if(switchingWorld||destructiveActionInFlight||running||aiDraftController||
+       fidelityController||localEvalController||worldEntryController)
+      throw Error('Finish the current operation before creating another world.');
+    if(pendingReply&&!confirm('Discard the unreviewed NPC draft before creating a new world?'))
+      return false;
+    if($('message-input')?.value.trim()&&
+       !confirm('Discard the unsent message before creating a new world?'))
+      return false;
+    await requireSavedStory();
+    return true;
+  }
 });
 
 async function postEvent(endpoint,body) {
@@ -2325,14 +2343,42 @@ for(const channel of CHANNEL_OPTIONS){
 }
 $('new-session').onclick=()=>openNewSceneDialog();
 $('new-scene-cancel').onclick=()=>$('new-scene-dialog').close();
-$('new-scene-confirm').onclick=()=>{
-  const char=state.characters.find(c=>c.id===$('new-scene-character').value && !c.trashedAt);
-  const encounter=(state.encounters||[]).find(e=>e.id===$('new-scene-encounter').value && e.characterIds.includes(char?.id));
-  if(!char)return showError('Choose a character.');
-  const reviewed=Object.fromEntries(['title','direction','atmosphere','authorNote']
-    .map(key=>[key,$('new-scene-draft-'+key).value]));
-  $('new-scene-dialog').close();
-  startSession(char,encounter||null,$('new-scene-channel').value,reviewed);
+$('new-scene-confirm').onclick=async()=>{
+  if(sceneCreationInFlight||sceneCreatedUnconfirmed)return;
+  const button=$('new-scene-confirm');
+  sceneCreationInFlight=true;button.disabled=true;
+  let created=null;
+  try {
+    if(running||switchingWorld)throw Error('Finish the current operation before starting a scene.');
+    const sceneWorldId=activeWorldId;
+    const char=state.characters.find(c=>c.id===$('new-scene-character').value&&!c.trashedAt);
+    if(!char)throw Error('Choose a character before starting a scene.');
+    const selectedTemplate=$('new-scene-encounter').value;
+    const encounter=(state.encounters||[]).find(e=>e.id===selectedTemplate&&e.characterIds?.includes(char.id))||null;
+    if(selectedTemplate&&!encounter)throw Error('The selected encounter template is no longer available.');
+    const channelId=$('new-scene-channel').value;
+    const reviewed=Object.fromEntries(['title','direction','atmosphere','authorNote']
+      .map(key=>[key,$('new-scene-draft-'+key).value]));
+    // Do not close the composer or create a local scene until earlier writes
+    // have completed. A failed SQLite commit must never look like success.
+    await requireSavedStory();
+    if(sceneWorldId!==activeWorldId||!$('new-scene-dialog').open)
+      throw Error('World or scene selection changed. Reopen scene creation.');
+    created=startSession(char,encounter,channelId,reviewed);
+    sceneCreatedUnconfirmed=true;
+    await requireSavedStory();
+    $('new-scene-dialog').close();
+    sceneCreatedUnconfirmed=false;
+    showError();
+  } catch(error){
+    showError(created
+      ?'Scene was added to the browser but its SQLite save was not verified: '+error.message+
+        ' Export your current story before reloading; do not create a duplicate.'
+      :error.message);
+  } finally {
+    sceneCreationInFlight=false;
+    if(!sceneCreatedUnconfirmed)button.disabled=false;
+  }
 };
 $('new-scene-manage-encounters').onclick=()=>{
   const templateId=$('new-scene-encounter').value||null;
