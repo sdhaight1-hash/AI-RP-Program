@@ -32,6 +32,17 @@ A conventional full-document save remains supported. It verifies the current jou
 4. Extend server-issued NPC reply tickets to a corresponding verified incremental **assistant** append, including retried reply variants, witness-scoped recall and creator-approved event locks. A player-only fast append still leaves the NPC half of every roleplay turn on a full-state resave.
 5. Run 1K/10K/25K whole-turn benchmarks, not only journal INSERTs. `--journal` mode of `eval/storage-scale.mjs` is expressly a low-level SQLite microbenchmark with real actor-memory/FTS writes and integrity verification, not proof of browser/model speed.
 
+## Sample CI storage-operation measurements
+
+On [one November 2026 Node 22/24 GitHub Actions run](https://github.com/sdhaight1-hash/AI-RP-Program/actions/runs/43664394113), the isolated one-message write samples were:
+
+| Runner | 1K legacy snapshot | 4K legacy snapshot | 1K normalized-primary snapshot | 4K normalized-primary snapshot | 1K journal primitive | 4K journal primitive |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Node 22 | 12.55 ms | 31.99 ms | 20.48 ms | 61.77 ms | 1.65 ms | 1.44 ms |
+| Node 24 | 15.79 ms | 52.41 ms | 21.79 ms | 71.70 ms | 1.63 ms | 1.82 ms |
+
+These are **single-run synthetic diagnostics, not stable speedup ratios or user hardware measurements**. The journal numbers exclude network transfer, acting-context construction, model inference, browser state reconciliation, and the NPC response save; at present, those steps still use the full-history path. The tests prove the underlying SQLite journal + per-witness FTS write has nearly constant observed cost between 1K and 4K sources *on these particular CI runs*, not that an entire 4K-turn roleplay is faster.
+
 ## Verification
 
 `test/primary-append-journal.test.mjs` verifies opt-in-only mode, existing v1 compatibility, story reconstruction and projection parity, scene and character scope, transaction rollback on FTS failure, tamper detection, source ID conflicts, chronology, safe compaction, close/reopen durability, cross-world isolation and bad cutover rejection.
