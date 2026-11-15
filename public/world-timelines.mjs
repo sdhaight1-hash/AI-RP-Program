@@ -5,7 +5,7 @@ export function renderWorldTimelineEditor(host,s,api) {
     activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
     save,renderInspector,showError,running,fetch}=api;
 
-  host.innerHTML = `<h2 class="panel-title">Worlds, timelines & fictional clocks</h2><p class="help">Every world has independent canon and timelines. Open a world explicitly before creating or editing its timelines. Places and relationships are in the adjacent World sections.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><label class="field-label" for="world-new-description">World description</label><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="timeline-new-name">New timeline in the current world</label><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Timeline in this world</label><select id="timeline-select"></select><p class="help">Selecting a timeline lets you set its clock below. Applying it to the active scene is a separate action.</p><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><div class="group"><h3 class="builder-subtitle">Encounter templates</h3><p class="help">Reusable openings and communication modes live in their own Encounters workspace. Use it to remove templates blocking permanent character deletion.</p><button id="world-manage-encounters" class="subtle-button">Manage encounters</button></div><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
+  host.innerHTML = `<h2 class="panel-title">Worlds, timelines & fictional clocks</h2><p class="help">Every world has independent canon and timelines. Open a world explicitly before creating or editing its timelines. Places and relationships are in the adjacent World sections.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><label class="field-label" for="world-new-description">World description</label><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="timeline-new-name">New timeline in the current world</label><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Timeline in this world</label><select id="timeline-select"></select><p class="help">Selecting a timeline lets you set its clock below. Applying it to the active scene is a separate action.</p><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><div class="group" id="world-deletion-impact"><h3 class="builder-subtitle">Deletion impact — read only</h3><p class="help">Inspect which records depend on a world or timeline before any future permanent removal. The preview cannot delete or modify anything; world and timeline destruction are not yet enabled.</p><div class="inline-actions"><button id="world-impact-preview" class="subtle-button">Preview this world</button><button id="timeline-impact-preview" class="subtle-button">Preview selected timeline</button></div><div id="world-impact-report" aria-live="polite"></div></div><div class="group"><h3 class="builder-subtitle">Encounter templates</h3><p class="help">Reusable openings and communication modes live in their own Encounters workspace. Use it to remove templates blocking permanent character deletion.</p><button id="world-manage-encounters" class="subtle-button">Manage encounters</button></div><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
   const report = $('world-library-list');
   if (!worldLibrary) {
     report.append(el('p','Loading your local worlds...','help'));
@@ -28,6 +28,44 @@ export function renderWorldTimelineEditor(host,s,api) {
     }
     report.append(card);
   }
+  const previewHost=$('world-impact-report');
+  const showImpact=async timelineId=>{
+    if(!serverStorage||!activeWorldId)return showError('Connect and open a world to inspect deletion impact.');
+    if(timelineId&&!worldLibrary.timelines.some(t=>t.id===timelineId&&t.worldId===activeWorldId))
+      return showError('Select a timeline in the current world first.');
+    const button=timelineId?$('timeline-impact-preview'):$('world-impact-preview');
+    button.disabled=true;
+    previewHost.replaceChildren(el('p','Inspecting dependencies…','help'));
+    try{
+      const url='/api/worlds/deletion-preview?worldId='+encodeURIComponent(activeWorldId)+
+        (timelineId?'&timelineId='+encodeURIComponent(timelineId):'');
+      const response=await fetch(url);
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||'Could not read deletion impact');
+      if(!host.isConnected)return; // Do not write a previous world's report after switching tabs.
+      previewHost.replaceChildren();
+      previewHost.append(el('h4',timelineId?'Selected timeline dependencies':'Current world dependencies','builder-subtitle'));
+      const items=[
+        ['World',data.worldName],['Timelines',data.timelineIds.length],
+        ['Scenes',data.records.scenes],['Messages',data.records.messages],
+        ['Character references',data.characterIds.length],
+        ['Actor memories',data.records.actorMemories],
+        ['Actor facts',data.records.actorFacts],
+        ['World events',data.records.timelineEvents],
+        ['Child fork timelines',data.descendantTimelineIds.length]
+      ];
+      for(const [label,value] of items)
+        previewHost.append(el('p',label+': '+value,'help'));
+      previewHost.append(el('p','Deletion is unavailable. This is a snapshot; it must be reverified under a lock before any destructive operation.','help'));
+      for(const blocker of data.blockers)previewHost.append(el('p','Blocked: '+blocker,'help'));
+      showError();
+    }catch(error){
+      if(host.isConnected)previewHost.replaceChildren(el('p',error.message,'help'));
+    }finally{if(host.isConnected)button.disabled=false;}
+  };
+  $('world-impact-preview').onclick=()=>void showImpact(null);
+  $('timeline-impact-preview').disabled=!timelineSelect.value;
+  $('timeline-impact-preview').onclick=()=>void showImpact(timelineSelect.value);
   $('world-manage-encounters').onclick=()=>setWorkspace('encounters');
   if(!worldLibrary.worlds.length)report.append(el('p','Create your first world to begin.','empty-note'));
    if(s?.timelineId && worldLibrary.timelines.some(t=>t.id===s.timelineId&&t.worldId===activeWorldId))
@@ -37,7 +75,7 @@ export function renderWorldTimelineEditor(host,s,api) {
     $('timeline-clock-utc').value=clock?new Date(clock.instantMs).toISOString().slice(0,16):'';
     $('timeline-clock-zone').value=clock?.timeZone||'UTC';
   };
-  timelineSelect.onchange=fillClock;
+  timelineSelect.onchange=()=>{fillClock();$('timeline-impact-preview').disabled=!timelineSelect.value;};
   if(timelineSelect.value)fillClock();
   $('timeline-clock-save').disabled=!timelineSelect.value;
   $('timeline-clock-save').onclick=async()=>{
