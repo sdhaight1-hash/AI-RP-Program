@@ -69,6 +69,14 @@ export function enableAppendJournal(db,snapshot){
   return {revision:snapshot.revision,scenes:snapshot.state.sessions.length};
 }
 
+export function clearAppendJournalRowsForRewrite(db){
+  if(!journalEnabled(db))return;
+  if(!db.isTransaction)throw new Error('Journal preparation requires a transaction');
+  // Drop references before ordinary full-save projection deletes old scenes.
+  // The enclosing transaction restores them if a later source lock fails.
+  db.prepare('DELETE FROM story_append_rows').run();
+}
+
 // A normal full-world save can compact the journal in that same transaction.
 // Only the current canonical state may be used as the new verified base.
 export function resetAppendJournal(db,state,revision,fingerprint){
