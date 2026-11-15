@@ -251,3 +251,20 @@ test('review control is extracted without bypassing authoritative draft approval
     assert.match(await response.text(),/export function reviewedCharacterSelections/);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test('World timeline editor offers scoped read-only deletion impact, never a deletion command',async()=>{
+  const store=new StudioStore(':memory:');
+  const app=createApp({store,fetchImpl:async()=>{throw Error('No model required')}});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch('http://127.0.0.1:'+app.address().port+'/world-timelines.mjs');
+    assert.equal(response.status,200);
+    const source=await response.text();
+    assert.match(source,/world-impact-preview/);
+    assert.match(source,/timeline-impact-preview/);
+    assert.match(source,/api\/worlds\/deletion-preview\?worldId=/);
+    assert.match(source,/host\.isConnected/);
+    assert.match(source,/Deletion is unavailable/);
+    assert.doesNotMatch(source,/api\/worlds\/delete|api\/timelines\/delete/);
+  }finally{await new Promise(resolve=>app.close(resolve));}
+});
