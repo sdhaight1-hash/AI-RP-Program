@@ -61,6 +61,7 @@ test('authorized append persists one player turn, memories and epoch without rew
     assert.equal(after.state.sessions[0].messages.at(-1).id,input.messageId);
     assert.equal(f.scoped.db.prepare('SELECT count(*) AS n FROM story_projection_messages').get().n,rows);
     assert.equal(f.scoped.db.prepare('SELECT count(*) AS n FROM story_append_rows').get().n,1);
+    assert.ok(f.scoped.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='story_message_last_assistant_idx'").get());
     assert.equal(f.scoped.db.prepare('SELECT document FROM studio_state WHERE id=1').get().document,compact);
     assert.equal(f.scoped.db.prepare('SELECT count(*) AS n FROM actor_memories WHERE source_message_id=?').get(input.messageId).n,1);
     assert.equal(f.scoped.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
