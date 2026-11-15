@@ -238,3 +238,23 @@ test('full-save scene deletion removes journal heads before their parent rows',(
     assert.equal(store.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   }finally{store.close();}
 });
+
+
+test('approved event source locks still protect messages created through the journal',()=>{
+  const store=new StudioStore(':memory:');
+  try{
+    store.save(makeInitialState(),0);activate(store);
+    append(store,{id:'journal-accepted',text:'A promise made in the living world.'});
+    const before=store.load(),scene=before.state.sessions[0];
+    const proposal=store.events.propose({sceneId:scene.id,timelineId:scene.timelineId,
+      sourceMessageId:'journal-accepted',description:'An explicit promise was made.'});
+    store.events.decide({proposalId:proposal.id,decision:'accept'});
+    const altered=structuredClone(before.state);
+    altered.sessions[0].messages.find(m=>m.id==='journal-accepted').content='No promise was ever made.';
+    assert.throws(()=>store.save(altered,before.revision),/Accepted world event locks/i);
+    assert.equal(store.load().revision,before.revision);
+    assert.equal(store.load().state.sessions[0].messages.at(-1).content,
+      'A promise made in the living world.');
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM story_append_rows').get().n,1);
+  }finally{store.close();}
+});
