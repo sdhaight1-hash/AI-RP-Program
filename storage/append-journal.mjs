@@ -44,7 +44,10 @@ function createJournalTables(db){
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS story_message_source_idx
-    ON story_projection_messages(scene_id,message_id);`);
+    ON story_projection_messages(scene_id,message_id);
+  CREATE INDEX IF NOT EXISTS story_message_last_assistant_idx
+    ON story_projection_messages(scene_id,position DESC)
+    WHERE json_extract(document,'$.role')='assistant';`);
 }
 
 function rebuildHeads(db,state){

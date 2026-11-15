@@ -50,3 +50,17 @@ These are **single-run synthetic diagnostics, not stable speedup ratios or user 
 `test/storage-scale.test.mjs` exercises the temporary-world journal benchmark; CI now runs `npm run eval:scale -- --ci --journal` on Node 22 and 24 as a separate measurement. Optional extended trial: `npm run eval:scale -- --lab --journal --samples=3`. No user `.data` files or local model are touched.
 
 The existing old-world SQL schema is not rewritten, no automatic migration is shipped, and no unrelated character/world interface is changed by this storage groundwork.
+
+## Server-owned player append and explicit activation
+
+The journal now has a narrow **player-only** server endpoint: `POST /api/scene/player-append`. It accepts exactly `worldId`, `sceneId`, `revision`, `messageId` (UUID) and `content`. The server obtains the scene's communication medium, eligible cast, next speaker, timeline authority, witnesses and timestamp from verified world-local SQLite data. Callers cannot submit an assistant role, witness IDs, or a replacement communication channel. The append transaction updates the journal, scene head, witnessed actor memory and world epoch together. A mismatched revision is rejected; no full scene history is serialized on this write path.
+
+Activation is still **offline and opt-in**, never automatic:
+
+1. Stop Studio and create a verified offline backup.
+2. Stage shadow projection with `npm run normalize:storage -- .data --apply <backup>`.
+3. Create a **new** backup and explicitly enable normalized-primary using `--primary <new-backup>`.
+4. Create another **new** verified backup of this primary-mode state, then run `npm run normalize:storage -- .data --journal <primary-backup>`.
+5. Verify `npm run audit:storage -- .data`, restart Studio, and retain all pre-cutover backups.
+
+**Important:** the normal web UI still uses full-document saves. This server endpoint is an internal foundation for a future opt-in browser incremental-send feature and is **not** a recommendation to manually call the API while another tab has unsaved edits. NPC replies, non-append edits, and concurrent browsers require a larger, coordinated message protocol. The append path remains disabled for worlds not explicitly journal-enabled. This does not close Issue #31.

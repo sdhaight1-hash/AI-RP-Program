@@ -10,9 +10,10 @@ import { normalizeState } from '../engine.mjs';
 import { bindTimelineIds } from '../world/canon.mjs';
 import {
   inspectStoryProjectionInput,projectionEnabled,projectionPrimary,readPrimaryStory,
-  enablePrimaryProjection,verifyStoryProjection,writeStoryProjection
+  enablePrimaryProjection,enableVerifiedAppendJournal,verifyStoryProjection,writeStoryProjection
 } from '../storage/normalized.mjs';
 import { inspectWorldStorage } from './storage-health.mjs';
+import {journalEnabled} from '../storage/append-journal.mjs';
 import { sha256 } from './backup-storage.mjs';
 
 function snapshot(db) {
@@ -70,22 +71,23 @@ function matchingBackup(dataDir,backupDir,health){
   }
 }
 
-export function normalizeStorage(dataDir,{apply=false,primary=false,backupDir=null}={}){
+export function normalizeStorage(dataDir,{apply=false,primary=false,journal=false,backupDir=null}={}){
   const root=resolve(dataDir),health=inspectWorldStorage(root);
   if(!health.ok)throw Error('Storage audit failed: '+JSON.stringify(health.errors));
-  if(apply&&primary)throw Error('Use one migration operation per invocation');
-  if(apply||primary)matchingBackup(root,backupDir,health);
+  if([apply,primary,journal].filter(Boolean).length>1)throw Error('Use one migration operation per invocation');
+  if(apply||primary||journal)matchingBackup(root,backupDir,health);
   const worlds=[];
   for(const world of health.worlds){
     const file=join(root,'worlds',world.id,'world.sqlite');
-    const db=open(file,!(apply||primary));
+    const db=open(file,!(apply||primary||journal));
     try {
       const before=snapshot(db);
       const counts=inspectStoryProjectionInput(before.state);
       const present=projectionEnabled(db),isPrimary=projectionPrimary(db);
       if(present&&!isPrimary)verifyStoryProjection(db,before);
       if(primary&&!present)throw Error('Stage the normalized shadow projection before primary cutover');
-      if((apply&&!present)||(primary&&!isPrimary)){
+      if(journal&&!isPrimary)throw Error('Enable and verify normalized-primary mode before append journaling');
+      if((apply&&!present)||(primary&&!isPrimary)||(journal&&!journalEnabled(db))){
         db.exec('BEGIN IMMEDIATE');
         try{
           // Re-read under the write lock to avoid converting a changed story.
@@ -95,28 +97,31 @@ export function normalizeStorage(dataDir,{apply=false,primary=false,backupDir=nu
           if(apply) {
             writeStoryProjection(db,locked.state,locked.revision);
             verifyStoryProjection(db,locked);
-          } else enablePrimaryProjection(db,locked);
+          } else if(primary) enablePrimaryProjection(db,locked);
+          else enableVerifiedAppendJournal(db,locked);
           db.exec('COMMIT');
         }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
       }
       worlds.push({worldId:world.id,revision:before.revision,...counts,
-        result:isPrimary?'already-primary':primary?'normalized-primary':
+        result:journal?(journalEnabled(db)?'append-journal-enabled':'journal-error'):
+          isPrimary?'already-primary':primary?'normalized-primary':
           present?'already-normalized':apply?'normalized':'ready-to-normalize'});
     }finally{db.close();}
   }
-  return {mode:primary?'primary':apply?'apply':'dry-run',worlds,
-    note:primary?'Opted-in normalized-primary worlds use SQLite projection as canonical story; keep the full backup.':
+  return {mode:journal?'journal':primary?'primary':apply?'apply':'dry-run',worlds,
+    note:journal?'Append journal is opt-in and only player messages use the verified server endpoint. Browser sends still use normal save until separately enabled.':
+      primary?'Opted-in normalized-primary worlds use SQLite projection as canonical story; keep the full backup.':
       'Shadow snapshots remain canonical until an explicit --primary conversion.'};
 }
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const dir=process.argv[2],flag=process.argv[3];
-  if(!dir||flag&&!['--apply','--primary'].includes(flag)||((flag==='--apply'||flag==='--primary')&&!process.argv[4])){
-    console.error('Usage: node scripts/normalize-storage.mjs <.data directory> [--apply|--primary <existing backup folder>]');
+  if(!dir||flag&&!['--apply','--primary','--journal'].includes(flag)||((flag==='--apply'||flag==='--primary'||flag==='--journal')&&!process.argv[4])){
+    console.error('Usage: node scripts/normalize-storage.mjs <.data directory> [--apply|--primary|--journal <existing backup folder>]');
     process.exitCode=1;
   }else{
     try{console.log(JSON.stringify(normalizeStorage(dir,{
-      apply:flag==='--apply',primary:flag==='--primary',backupDir:process.argv[4]||null
+      apply:flag==='--apply',primary:flag==='--primary',journal:flag==='--journal',backupDir:process.argv[4]||null
     }),null,2));}
     catch(error){console.error('Normalization refused:',error.message);process.exitCode=1;}
   }

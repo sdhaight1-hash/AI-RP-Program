@@ -14,6 +14,7 @@ import { suggestActorMemories } from './memory/suggestions.mjs';
 import { createLocalSemanticRetriever } from './memory/semantic.mjs';
 import { purgeArchived } from './harness.mjs';
 import { previewWorldDeletion } from './world/deletion-preview.mjs';
+import { appendAuthorizedPlayerMessage } from './scene/verified-append.mjs';
 import {assertExplicitPurges,DeletionConflictError} from './world/conflict-guards.mjs';
 import { commitCharacterWorldEntry,listCharacterWorldSources } from './character/world-bridge.mjs';
 import { approveCharacterWorldRelationship } from './character/relationship-bridge.mjs';
@@ -311,6 +312,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         requireWorldScope(requestUrl.searchParams.get('worldId'));
         try {return json(res,200,{events:store.events.visible(requestUrl.searchParams.get('timelineId'),requestUrl.searchParams.get('actorId'))});}
         catch(err){return json(res,400,{error:err.message});}
+      }
+      if (req.method === 'POST' && path === '/api/scene/player-append') {
+        const input=await readJson(req,34000);
+        requireWorldScope(input?.worldId);
+        try {return json(res,201,appendAuthorizedPlayerMessage(store,input));}
+        catch(error){
+          const conflict=/revision changed|disabled|cast changed|not an authorized|unavailable/.test(error.message);
+          return json(res,conflict?409:422,{error:error.message});
+        }
       }
       if (req.method === 'POST' && path === '/api/library/purge') {
         const input=await readJson(req,1600);
