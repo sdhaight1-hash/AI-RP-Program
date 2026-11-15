@@ -194,3 +194,15 @@ test('character workspace can search and page the complete world-local roster',(
   assert.doesNotMatch(javascript,/characters\.slice\(0,10\)/);
   assert.match(css,/\.character-roster-pager/);
 });
+
+test('character sections expose direct, explicitly reviewed AI assistance',()=>{
+  assert.match(javascript,/updateBuilderSectionNavigation\(c\)/);
+  assert.match(javascript,/builderSectionCompletion\(character,section\)/);
+  assert.match(javascript,/key!=='name' && key!=='color' && CHARACTER_FIELDS\.includes\(key\)/);
+  assert.match(javascript,/target\.dispatchEvent\(new Event\('change'\)\)/);
+  assert.match(javascript,/Ready to draft/);
+  assert.match(javascript,/aiDraftController\?\.abort\(\); aiDraftRequest=null; aiDraftTarget=null/);
+  assert.match(javascript,/\$\('builder-ai-target'\)\.disabled = true/);
+  assert.match(javascript,/\$\('builder-ai-target'\)\.disabled=false/);
+  assert.match(css,/\.builder-field-assist/);
+});
