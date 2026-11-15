@@ -1059,3 +1059,19 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
   .world-editor-content > #world-library-list{grid-template-columns:1fr}
   .world-editor-content > .group{padding:13px}
 }
+
+/* Large world casts remain browsable without overwhelming the workspace. */
+.character-roster-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 14px}
+.character-roster-tools input[type="search"]{flex:1 1 220px;min-width:0;max-width:460px;padding:11px 13px;
+  border:1px solid var(--ux-line-strong);border-radius:10px;background:var(--ux-faint);color:var(--text)}
+.character-roster-tools .help{margin:0}
+.character-roster-pager{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+.character-roster-pager.hidden{display:none}
+.character-roster-pager button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:760px){.character-roster-tools input[type="search"]{max-width:none;width:100%}}
+
+/* One-click entry into a specific field's existing, reviewed AI workflow. */
+.builder-field-assist{margin-top:10px;font-size:11px;padding:8px 12px}
+.builder-field-assist:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.builder-nav button{line-height:1.45;text-align:left}
+@media(max-width:760px){.builder-field-assist{width:100%}}

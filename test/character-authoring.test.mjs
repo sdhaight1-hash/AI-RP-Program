@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import { createCharacter } from '../engine.mjs';
+import { builderSectionCompletion, BUILDER_SECTIONS } from '../character/sections.mjs';
 import { makeCharacterDraftRequest,parseCharacterSuggestions,selectCharacterChanges,gatherCharacterWorldContext } from '../character/authoring.mjs';
 const library={activeWorldId:'alpha',worlds:[{id:'alpha',name:'Alpha Harbor',description:'Modern coastal city'},{id:'beta',name:'Beta Empire',description:'SPOILER_BETA'}],
   locations:[{id:'shop',worldId:'alpha',name:'Old Bookshop',kind:'building'},{id:'alien',worldId:'beta',name:'SECRET_BETA_LOCATION',kind:'town'}],
@@ -45,4 +46,19 @@ test('co-author drafts become stale when familiar-place assignments change',()=>
   const next=makeCharacterDraftRequest({character:c,target:'personality',worldLibrary:library,worldId:'alpha'});
   c.frequentPlaces=[{locationId:'shop',reason:'Reads here'}];
   assert.throws(()=>selectCharacterChanges({character:c,worldLibrary:library,worldId:'alpha',request:next,changes:{personality:'Calm'}}),/changed/);
+});
+
+test('builder progress counts only authored fields in each section',()=>{
+  const character=createCharacter('Nora');
+  character.name='Nora';character.personality='Patient and skeptical';
+  character.values='Protect the village';
+  character.color='#aabbcc';
+  const identity=builderSectionCompletion(character,'identity');
+  assert.equal(identity.total,BUILDER_SECTIONS.identity.length-1,'UI accent must not count as a narrative detail');
+  assert.ok(identity.filled>=1,'name is authored');
+  const mind=builderSectionCompletion(character,'mind');
+  assert.equal(mind.filled,2);
+  assert.equal(builderSectionCompletion(character,'lab').total,0);
+  assert.equal(builderSectionCompletion(character,'unknown').filled,0);
+  assert.equal(builderSectionCompletion({...character,personality:'  ',values:''},'mind').filled,0);
 });

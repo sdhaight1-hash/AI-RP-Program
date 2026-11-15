@@ -184,3 +184,39 @@ test('world creation, timelines and clocks are edited inline, with no duplicate 
     assert.match(source,/Select a timeline within this world/);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test('character workspace can search and page the complete world-local roster',()=>{
+  assert.match(javascript,/rosterSearch\.type='search'/);
+  assert.match(javascript,/characters\.filter\(c=>[\s\S]*?c\.name,c\.occupation,c\.tagline/);
+  assert.match(javascript,/const pageSize=25/);
+  assert.match(javascript,/matches\.slice\(page\*pageSize,\(page\+1\)\*pageSize\)/);
+  assert.match(javascript,/rosterSearch\.addEventListener\('input'/);
+  assert.doesNotMatch(javascript,/characters\.slice\(0,10\)/);
+  assert.match(css,/\.character-roster-pager/);
+});
+
+test('character sections expose direct, explicitly reviewed AI assistance',()=>{
+  assert.match(javascript,/updateBuilderSectionNavigation\(c\)/);
+  assert.match(javascript,/builderSectionCompletion\(character,section\)/);
+  assert.match(javascript,/key!=='name' && key!=='color' && CHARACTER_FIELDS\.includes\(key\)/);
+  assert.match(javascript,/target\.dispatchEvent\(new Event\('change'\)\)/);
+  assert.match(javascript,/Ready to draft/);
+  assert.match(javascript,/aiDraftController\?\.abort\(\); aiDraftRequest=null; aiDraftTarget=null/);
+  assert.match(javascript,/\$\('builder-ai-target'\)\.disabled = true/);
+  assert.match(javascript,/\$\('builder-ai-target'\)\.disabled=false/);
+  assert.match(css,/\.builder-field-assist/);
+});
+
+test('failed, canceled or stale character drafts cannot remain approvable',()=>{
+  assert.match(javascript,/if\(aiDraftRequest===request\)\{[\s\S]*?aiDraftRequest=null; aiDraftTarget=null;[\s\S]*?builder-ai-preview/);
+  assert.match(javascript,/validateCharacterDraftBasis\(\{character:c,worldLibrary,worldId:activeWorldId,lore:state\.lore,request\}\)/);
+  assert.match(javascript,/selectCharacterChanges\(\{character:c,worldLibrary,worldId:activeWorldId,lore:state\.lore,request:aiDraftRequest,changes:accepted\}\)/);
+});
+
+test('character search survives editor rerenders but never crosses world switches',()=>{
+  assert.match(javascript,/rosterSearch\.value=characterRosterQuery/);
+  assert.match(javascript,/let page=characterRosterPage/);
+  assert.match(javascript,/characterRosterPage=page/);
+  assert.match(javascript,/characterRosterQuery=rosterSearch\.value/);
+  assert.match(javascript,/characterRosterQuery='';characterRosterPage=0;/);
+});

@@ -9,7 +9,7 @@ import { makeCharacterDraftRequest, parseCharacterSuggestions, selectCharacterCh
 import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/character/world-bridge.mjs';
 import { proposedRelationshipKinds } from '/character/relationship-bridge.mjs';
 import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
-import { BUILDER_SECTIONS } from '/character/sections.mjs';
+import { BUILDER_SECTIONS,builderSectionCompletion } from '/character/sections.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
 import { worldPath,loadWorldSnapshot,loadWorldCatalog } from '/world-client.mjs';
@@ -36,6 +36,8 @@ let switchingWorld = false;
 let selectedWorldId = null;
 let worldEditorView='overview';
 let selectedCharacterId = null;
+let characterRosterQuery='';
+let characterRosterPage=0;
 let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
 // The selected world belongs to this browser tab. Every stateful request
 // carries its world ID, regardless of other tabs' selections.
@@ -444,6 +446,7 @@ async function switchWorld(worldId) {
   comfyJob=null;comfyImages=[]; // Do not expose another world's generated assets after switching.
   $('message-input').value='';
   aiDraftTarget=null;builderCharacterId=null;selectedCharacterId=null;fidelityDraft=null;
+  characterRosterQuery='';characterRosterPage=0;
   $('character-builder')?.close();
   activeWorldId=result.worldId;
   selectedWorldId=result.worldId;
@@ -1317,19 +1320,55 @@ function renderWorkspace(){
       description:'A profile captures enduring identity, appearance, psychology and history. Current location and emotions belong to the active timeline.',
       actions:[['Create character',()=>$('new-character').click(),true],
         ['Open active character',()=>character&&openBuilder(character)]]});
+    // The old ten-character preview silently hid larger casts. Keep the full
+    // world-local roster searchable without creating hundreds of DOM nodes.
+    const rosterTools=el('div','','character-roster-tools');
+    const rosterSearch=document.createElement('input');
+    rosterSearch.type='search';rosterSearch.placeholder='Search this world’s characters';
+    rosterSearch.setAttribute('aria-label','Search characters in current world');
+    rosterSearch.autocomplete='off';
+    rosterSearch.value=characterRosterQuery;
+    const rosterCount=el('p','','help');
+    rosterTools.append(rosterSearch,rosterCount);
     const rosterList=el('div','','workspace-entity-list');
-    for(const c of characters.slice(0,10)){
-      const row=el('div','','workspace-entity-row');
-      const detail=el('span','', 'workspace-entity-name');
-      const name=el('span',c.name||'Unnamed character');
-      const percent=CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length;
-      const info=el('span',`${percent}/${CHARACTER_V2_FIELDS.length} core fields`,'workspace-entity-meta');
-      const edit=workspaceButton('Edit',()=>openBuilder(c));
-      detail.append(name,el('span',c.occupation||c.tagline||'Character in development','workspace-entity-meta'));
-      row.append(detail,info,edit);rosterList.append(row);
-    }
-    if(!characters.length)rosterList.append(el('p','Create your first character to begin.','empty-note'));
-    roster.append(rosterList);grid.append(roster);
+    const rosterPager=el('div','','character-roster-pager');
+    const previous=workspaceButton('Previous',()=>{page--;drawRoster();});
+    const next=workspaceButton('Next',()=>{page++;drawRoster();});
+    const rosterPageLabel=el('span','','workspace-entity-meta');
+    rosterPager.append(previous,rosterPageLabel,next);
+    const pageSize=25;
+    let page=characterRosterPage;
+    const drawRoster=()=>{
+      const query=rosterSearch.value.trim().toLocaleLowerCase();
+      const matches=characters.filter(c=>
+        [c.name,c.occupation,c.tagline].some(value=>String(value||'').toLocaleLowerCase().includes(query)));
+      const pages=Math.max(1,Math.ceil(matches.length/pageSize));
+      page=Math.max(0,Math.min(page,pages-1));
+      characterRosterPage=page;
+      rosterList.replaceChildren();
+      rosterCount.textContent=query
+        ? `${matches.length} of ${characters.length} characters match`
+        : `${characters.length} characters in this world`;
+      for(const c of matches.slice(page*pageSize,(page+1)*pageSize)){
+        const row=el('div','','workspace-entity-row');
+        const detail=el('span','', 'workspace-entity-name');
+        const name=el('span',c.name||'Unnamed character');
+        const complete=CHARACTER_V2_FIELDS.filter(k=>String(c[k]||'').trim()).length;
+        const info=el('span',`${complete}/${CHARACTER_V2_FIELDS.length} core fields`,'workspace-entity-meta');
+        const edit=workspaceButton('Edit',()=>openBuilder(c));
+        detail.append(name,el('span',c.occupation||c.tagline||'Character in development','workspace-entity-meta'));
+        row.append(detail,info,edit);rosterList.append(row);
+      }
+      if(!matches.length)rosterList.append(el('p',query?'No matching characters in this world.':'Create your first character to begin.','empty-note'));
+      rosterPageLabel.textContent=`Page ${page+1} of ${pages}`;
+      previous.disabled=page===0;
+      next.disabled=page>=pages-1;
+      rosterPager.classList.toggle('hidden',pages===1);
+    };
+    rosterSearch.addEventListener('input',()=>{characterRosterQuery=rosterSearch.value;page=0;drawRoster();});
+    drawRoster();
+    roster.append(rosterTools);
+    roster.append(rosterList,rosterPager);grid.append(roster);
     grid.append(workspaceCard({index:'02 · CHARACTER WORKSHOP',title:'A complete inner life',
       description:'Use field-specific AI assistance grounded in everything already established. Each field has a separate purpose and the full character stays coherent.',
       actions:[['Edit character',()=>character&&openBuilder(character),true],
@@ -1404,6 +1443,8 @@ function renderBuilderPortrait() {
 function openBuilder(c) {
   if (!c) return;
   localEvalController?.abort();
+  // A prior character's in-flight suggestion may never appear in this editor.
+  aiDraftController?.abort(); aiDraftRequest=null; aiDraftTarget=null;
   if(selectedCharacterId!==c.id){
     selectedCharacterId=c.id;
     if(activeWorkspace==='characters')renderWorkspace();
@@ -1411,6 +1452,8 @@ function openBuilder(c) {
   builderCharacterId = c.id; builderTab = 'identity';
   $('builder-ai-preview').classList.add('hidden'); $('builder-ai-status').textContent = '';
   $('builder-ai-guidance').value = '';
+  $('builder-ai-target').value='full';
+  $('builder-ai-target').dispatchEvent(new Event('change'));
   worldEntryController?.abort(); worldEntryRequest=null;
   $('builder-world-items').replaceChildren();$('builder-world-status').textContent='';
   $('builder-world-links').replaceChildren();
@@ -1480,15 +1523,25 @@ function updateBuilderContext(character){
   $('builder-world-context').textContent=`WORLD CONTEXT · ${world?.name||'Current world'}\n${places.length} available places · ${knownRelations.length} established links${links.length?' · Connected places: '+links.slice(0,3).join(', '):''}. Generated fields must fit this world and the existing profile.`;
 }
 
+function updateBuilderSectionNavigation(character){
+  document.querySelectorAll('[data-builder-tab]').forEach(button=>{
+    const section=button.dataset.builderTab;
+    button.dataset.builderLabel ||= button.textContent;
+    if(section!=='lab'){
+      const {filled,total}=builderSectionCompletion(character,section);
+      button.textContent=`${button.dataset.builderLabel} · ${filled}/${total}`;
+      button.setAttribute('aria-label',`${button.dataset.builderLabel}: ${filled} of ${total} authored fields`);
+    }
+    button.classList.toggle('active',section===builderTab);
+    button.setAttribute('aria-selected',String(section===builderTab));
+  });
+}
 function renderBuilder() {
   const c = builderCharacter(); if (!c) return;
   $('builder-title').textContent = `Creating ${c.name}`;
   updateBuilderContext(c);
   renderBuilderPortrait();
-  document.querySelectorAll('[data-builder-tab]').forEach(b => {
-    b.classList.toggle('active', b.dataset.builderTab === builderTab);
-    b.setAttribute('aria-selected', String(b.dataset.builderTab === builderTab));
-  });
+  updateBuilderSectionNavigation(c);
   const host = $('builder-fields'); host.replaceChildren();
   if (builderTab === 'lab') { renderCharacterLab(host, c); return; }
   for (const [key, label, type, help] of BUILDER_SECTIONS[builderTab]) {
@@ -1506,13 +1559,32 @@ function renderBuilder() {
         : input.value;
       save();
       updateBuilderContext(c);
+      updateBuilderSectionNavigation(c);
       if (key === 'name') $('builder-title').textContent = `Creating ${c.name}`;
       if (key === 'color') atmosphere(c.color);
       if (key === 'name' || key === 'color') renderLists();
       if (key === 'name') renderBuilderPortrait();
       if (c.id === activeCharacter()?.id) renderHeader();
     });
-    group.append(caption, input, el('p', help, 'help')); host.append(group);
+    const hint=el('p',help,'help');
+    group.append(caption,input,hint);
+    // Choose a field's existing compartmentalized prompt without invoking
+    // the model or applying a change before the creator gives direction.
+    if(key!=='name' && key!=='color' && CHARACTER_FIELDS.includes(key)){
+      const assist=el('button','✦ Draft this field','subtle-button builder-field-assist');
+      assist.type='button';
+      assist.setAttribute('aria-label',`Select AI assistance for ${label}`);
+      assist.onclick=()=>{
+        if(aiDraftController)return;
+        const target=$('builder-ai-target');
+        target.value=key;
+        target.dispatchEvent(new Event('change'));
+        $('builder-ai-status').textContent=`Ready to draft ${label}. Add creative direction, then select Suggest draft.`;
+        $('builder-ai-guidance').focus();
+      };
+      group.append(assist);
+    }
+    host.append(group);
   }
   if(builderTab==='life')renderCharacterPlaces(host,c);
   if(builderTab==='mind'){
@@ -2034,6 +2106,7 @@ async function generateBuilderDraft() {
   $('builder-ai-reference').textContent=`Context supplied: ${worldLibrary.worlds.find(x=>x.id===activeWorldId)?.name||'world'} · ${request.referenceSummary.locations} places · ${request.referenceSummary.entities} entities · ${request.referenceSummary.relationships} direct social ties · ${request.referenceSummary.lore} lore records · ${request.referenceSummary.filledFields} established fields · ${request.referenceSummary.focusedFields} expanded references. Each requested field has its own purpose; nothing becomes canon until approved.`;
   const aiController = new AbortController(); aiDraftController = aiController;
   $('builder-ai-generate').disabled = true;
+  $('builder-ai-target').disabled = true;
   $('builder-ai-stop').classList.remove('hidden');
   $('builder-ai-preview').classList.remove('hidden');
   const draft = $('builder-ai-result'); draft.value = '';
@@ -2062,9 +2135,15 @@ async function generateBuilderDraft() {
     renderBuilderAIChanges();
     $('builder-ai-status').textContent = 'Draft ready. Review individual fields; nothing has been applied.';
   } catch(err) {
+    // A canceled, failed, or superseded response must never remain approvable.
+    if(aiDraftRequest===request){
+      aiDraftRequest=null; aiDraftTarget=null;
+      $('builder-ai-preview').classList.add('hidden');
+    }
     $('builder-ai-status').textContent = err.name === 'AbortError' ? 'Suggestion canceled.' : err.message;
   } finally {
-    aiDraftController = null;$('builder-ai-generate').disabled=false;$('builder-ai-stop').classList.add('hidden');
+    aiDraftController = null;$('builder-ai-generate').disabled=false;
+    $('builder-ai-target').disabled=false;$('builder-ai-stop').classList.add('hidden');
   }
 }
 function safeName(name) { return String(name).toLowerCase().replace(/[^a-z0-9-_]+/g,'-').slice(0,60)||'character'; }
