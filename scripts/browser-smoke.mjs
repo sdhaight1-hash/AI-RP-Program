@@ -29,6 +29,11 @@ async function main(){
   const store=new WorldPartitionStore(join(workDir,'worlds'));
   let modelAvailable=false;
   const browserReply='Ticketed NPC reply committed from the local-model stream.';
+  const newWorldDraft=JSON.stringify({description:'An independent harbor civilization shaped by seasonal trade.'});
+  const newSceneDraft=JSON.stringify({title:'Harbor Call at Dusk',
+    direction:'The player calls Nessa about an unsigned harbor map.',
+    atmosphere:'Muffled gull cries and a quiet electrical hum.',
+    authorNote:'Keep the conversation grounded and exploratory.'});
   const worldProposal=JSON.stringify({entries:[{type:'entity',kind:'character',
     name:'Nessa',description:'The character’s aunt named in the saved family history.',
     sourceField:'familyHistory',
@@ -43,7 +48,10 @@ async function main(){
       const payload=JSON.parse(options.body||'{}');
       const isWorld=String(payload.messages?.[0]?.content||'')
         .includes('OPTIONAL world-atlas additions');
-      const content=isWorld?worldProposal:browserReply;
+      const system=String(payload.messages?.[0]?.content||'');
+      const content=system.includes('NEW, isolated world')?newWorldDraft:
+        system.includes('STARTING CONFIGURATION')?newSceneDraft:
+        isWorld?worldProposal:browserReply;
       return new Response('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\n\ndata: [DONE]\n\n');
     }
     throw Error('Unexpected local model probe: '+target);
@@ -671,6 +679,35 @@ async function main(){
       return state.settings.model==='browser-leased-model';
     },'model choice persisted before actor generation');
 
+    // New-world generation is editable, reviewed, and cannot silently create canon.
+    const countBeforeWorldDraft=store.worlds.list().worlds.length;
+    await script(`
+      document.querySelector('#close-inspector').click();
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-world-view="timelines"]').click();
+      document.querySelector('#world-new-name').value='Browser Saltlands';
+      const ai=document.querySelector('#world-create').parentElement;
+      const target=ai.querySelector('select[aria-label="AI generation focus"]');
+      target.value='description';target.dispatchEvent(new Event('change'));
+      ai.querySelector('button.subtle-button').click();
+      return true;
+    `);
+    await until(async()=>script(`
+      return document.querySelector('#world-create')?.parentElement?.querySelector('textarea[aria-label="Editable model JSON"]')
+        ?.value.includes('independent harbor civilization');
+    `),'new-world AI draft rendered for review');
+    await script(`
+      const ai=document.querySelector('#world-create').parentElement;
+      ai.querySelector('button.primary-button').click();
+      return true;
+    `);
+    assert.equal(await script(`
+      return document.querySelector('#world-new-description').value;
+    `),'An independent harbor civilization shaped by seasonal trade.');
+    assert.equal(store.worlds.list().worlds.length,countBeforeWorldDraft,
+      'AI approval must not create a world without separate Create world action');
+    await screenshot('07b-ai-reviewed-new-world-draft');
+
     // The Character Studio world bridge must retain human approval and source
     // provenance in an actual browser, not just a unit-test simulation.
     assert.equal(await script(`
@@ -736,10 +773,33 @@ async function main(){
       document.querySelector('#close-inspector').click();
       document.querySelector('button[data-workspace="story"]').click();
       document.querySelector('#new-session').click();
-      document.querySelector('#new-scene-confirm').click();
+      const target=document.querySelector('#new-scene-ai-host select[aria-label="AI generation focus"]');
+      if(!target)return false;
+      const button=document.querySelector('#new-scene-ai-host button.subtle-button');
+      button.click();
       return true;
     `);
+    await until(async()=>script(`
+      return document.querySelector('#new-scene-ai-host textarea[aria-label="Editable model JSON"]')
+        ?.value.includes('Harbor Call at Dusk');
+    `),'scene AI draft rendered for review');
+    assert.equal(await script(`
+      document.querySelector('#new-scene-draft-title').value;
+      const apply=document.querySelector('#new-scene-ai-host button.primary-button');
+      apply.click();
+      return document.querySelector('#new-scene-draft-title').value==='Harbor Call at Dusk'
+        &&document.querySelector('#new-scene-draft-direction').value.includes('unsigned harbor map');
+    `),true,'reviewed scene AI must populate editable fields');
+    await script("document.querySelector('#new-scene-confirm').click();return true");
     await until(async()=>script("return document.body.dataset.workspace==='story' && !!document.querySelector('#message-input')"),'live scene editor');
+    const reviewedScene=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state
+      .sessions.find(scene=>scene.title==='Harbor Call at Dusk');
+    assert.ok(reviewedScene,'reviewed title must be part of the created scene');
+    assert.equal(reviewedScene.direction,'The player calls Nessa about an unsigned harbor map.');
+    assert.equal(reviewedScene.atmosphere,'Muffled gull cries and a quiet electrical hum.');
+    assert.equal(reviewedScene.authorNote,'Keep the conversation grounded and exploratory.');
+    assert.equal(reviewedScene.messages.length,0,'scene AI must not insert synthetic NPC dialogue');
+    await screenshot('07c-ai-reviewed-scene-created');
     await script(`
       document.querySelector('#message-input').value='Do you hear the character speaking?';
       document.querySelector('#send').click();
