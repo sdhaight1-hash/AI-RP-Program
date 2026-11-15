@@ -451,10 +451,12 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         // commits, including a failed conflict-validation attempt.
         replyLeases.delete(data.ticket);
         const verify=(previous)=>{
-          if(previous.revision!==lease.revision ||
-            readWorldEpoch(store.db)!==lease.epoch ||
-            !isReplyBasisCurrent(previous.state.sessions.find(s=>s.id===lease.sceneId),lease.basis))
-            throw new Error('World, story or actor context changed since generation. The stale NPC reply was not saved.');
+          if(previous.revision!==lease.revision)
+            throw new Error('Story revision changed since generation. The stale NPC reply was not saved.');
+          if(readWorldEpoch(store.db)!==lease.epoch)
+            throw new Error('World knowledge changed since generation. The stale NPC reply was not saved.');
+          if(!isReplyBasisCurrent(previous.state?.sessions?.find(s=>s.id===lease.sceneId),lease.basis))
+            throw new Error('Acting scene context changed since generation. The stale NPC reply was not saved.');
         };
         try{
           const existing=store.load();
