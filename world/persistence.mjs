@@ -317,16 +317,23 @@ export class WorldRepository {
       description:bounded(description,'entity description',4000)};
     const exists=this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND name=? COLLATE NOCASE LIMIT 1')
       .get(worldId,value.name);
-    if(exists)throw Error('A canon entity with this name already exists. Link the existing entry instead.');
-    this.db.exec('BEGIN IMMEDIATE');
+    if(exists&&!sourceCharacterId)
+      throw Error('A canon entity with this name already exists. Link the existing entry instead.');
+    // Character-to-world approvals and world-repair already hold a transaction.
+    // A SAVEPOINT works both inside and outside those callers.
+    this.db.exec('SAVEPOINT create_canon_entity');
     try{
       this.db.prepare('INSERT INTO world_entities(id,world_id,name,kind,source_character_id,created_at) VALUES (?,?,?,?,?,?)')
         .run(value.id,worldId,value.name,kind,sourceCharacterId,now());
       this.db.prepare('INSERT INTO world_entity_details(entity_id,world_id,description) VALUES(?,?,?)')
         .run(value.id,worldId,value.description);
-      this.db.exec('COMMIT');
+      this.db.exec('RELEASE SAVEPOINT create_canon_entity');
       return value;
-    }catch(error){if(this.db.isTransaction)this.db.exec('ROLLBACK');throw error;}
+    }catch(error){
+      this.db.exec('ROLLBACK TO SAVEPOINT create_canon_entity');
+      this.db.exec('RELEASE SAVEPOINT create_canon_entity');
+      throw error;
+    }
   }
 
   updateEntity({worldId,id,name,kind,description,expectedName,expectedKind,expectedDescription}){
