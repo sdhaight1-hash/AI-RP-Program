@@ -1218,3 +1218,18 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
 .universe-blueprint-field textarea{display:block;width:100%;min-height:84px;box-sizing:border-box;resize:vertical;line-height:1.55}
 .universe-blueprint-details .world-composer-grid{padding-top:12px}
 .universe-blueprint-details .help{line-height:1.6}
+
+/* Canon discovery: evidence-forward, unconfirmed suggestions. */
+.universe-mention-panel{border:1px solid var(--ux-line-strong);border-radius:14px;
+  background:var(--ux-faint);padding:17px;margin:15px 0}
+.universe-mention-panel h3{margin:0 0 6px;font:500 21px var(--ux-serif)}
+.universe-mention-panel>.help{line-height:1.55}
+.universe-mention-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:10px;margin-top:12px}
+.universe-mention-item{margin:0;min-width:0}
+.universe-mention-item strong{display:block;margin-bottom:5px;overflow-wrap:anywhere}
+.universe-mention-item p{font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.universe-mention-item .subtle-button{margin-top:8px}
+.universe-mention-existing{padding:12px 0;font-size:11px}
+.universe-mention-existing summary{cursor:pointer;color:var(--text-dim)}
+#relations-edit-panel:not(.hidden){border:1px solid var(--ux-line-strong);padding:17px;border-radius:12px}
+#relations-entity-description,#relations-edit-description{min-height:90px;display:block;width:100%;box-sizing:border-box}
