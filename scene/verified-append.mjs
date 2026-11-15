@@ -4,7 +4,7 @@ import {chooseSpeaker} from '../harness.mjs';
 import {channelAudience,getChannel} from '../interactions/channels.mjs';
 import {journalEnabled,appendVerifiedPlayerRow} from '../storage/append-journal.mjs';
 
-const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function appendAuthorizedPlayerMessage(store,input){
   if(!store?.db||!store?.activeWorldId)
