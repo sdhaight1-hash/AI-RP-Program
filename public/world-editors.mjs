@@ -1,4 +1,4 @@
-import {makeLocationAuthoringRequest} from '../authoring/world-scene.mjs';
+import {makeLocationAuthoringRequest,makeEntityAuthoringRequest} from '../authoring/world-scene.mjs';
 import {discoverUniverseMentions} from '../world/discovery.mjs';
 
 function mountMentionRecommendations(host,{$,el,library,state,worldId,focus,onChoose}){
@@ -96,8 +96,9 @@ export function renderAtlasPanel(host,session,api) {
 }
 export function renderRelationsPanel(host,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,addWorldChooser,selectedWorld,
-    postWorld,permanentlyDeleteWorldEntry,state,showError,openCharacterProfile,fetch}=api;
-  host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Create or permanently delete world people, entities and relationships. Archived character profiles are hidden until restored; deleting an independent world entity also deletes its linked relationships.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="family">Family / dynasty</option><option value="community">Community</option><option value="culture">Culture</option><option value="group">Informal group</option><option value="object">Object</option><option value="concept">Concept</option></select><label class="field-label" for="relations-entity-description">What is established?</label><textarea id="relations-entity-description" rows="3" maxlength="4000" placeholder="Purpose, practices, membership, shared history or cultural traditions…"></textarea><button id="relations-add-entity" class="subtle-button">Add to canon</button></div>
+    postWorld,permanentlyDeleteWorldEntry,state,showError,openCharacterProfile,fetch,getModel}=api;
+  host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Create or permanently delete world people, entities and relationships. Archived character profiles are hidden until restored; deleting an independent world entity also deletes its linked relationships.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="family">Family / dynasty</option><option value="community">Community</option><option value="culture">Culture</option><option value="group">Informal group</option><option value="object">Object</option><option value="concept">Concept</option></select><label class="field-label" for="relations-entity-description">What is established?</label><textarea id="relations-entity-description" rows="3" maxlength="4000" placeholder="Purpose, practices, membership, shared history or cultural traditions…"></textarea><button id="relations-add-entity" class="subtle-button">Add to canon</button>
+  <div id="relations-entity-ai-slot" aria-label="Contextual AI writing partner for social and cultural entries"></div></div>
   <div id="relations-edit-panel" class="group hidden">
     <h3 class="builder-subtitle">Edit existing canon entry</h3>
     <label class="field-label" for="relations-edit-name">Name</label><input id="relations-edit-name" maxlength="120"/>
@@ -194,6 +195,18 @@ export function renderRelationsPanel(host,api) {
     }
   });
   host.insertBefore(groupMentions,$('relations-entity-name').parentElement);
+  mountWorldSceneAssistant($('relations-entity-ai-slot'),{
+    mode:'entity',getModel,isCurrent:()=>host.isConnected&&selectedWorld()?.id===world.id,
+    getRequest:(target,guidance)=>makeEntityAuthoringRequest({
+      worldId:world.id,library:worldLibrary,kind:$('relations-entity-kind').value,
+      name:$('relations-entity-name').value,
+      description:$('relations-entity-description').value,target,guidance
+    }),
+    onApply:patch=>{
+      if(patch.name!==undefined)$('relations-entity-name').value=patch.name;
+      if(patch.description!==undefined)$('relations-entity-description').value=patch.description;
+    }
+  });
   $('relations-add-entity').onclick=async()=>{
     try{await postWorld('/api/worlds/entities',{worldId:world.id,name:$('relations-entity-name').value,kind:$('relations-entity-kind').value,description:$('relations-entity-description').value});showError();}
     catch(err){showError(err.message);}
