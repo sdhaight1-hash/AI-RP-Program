@@ -2295,6 +2295,7 @@ async function generate(mode = 'normal') {
   $('send').disabled=true; $('regenerate').disabled=true; $('continue').disabled=true;
   $('stop').classList.remove('hidden');showError();
   let assistantText='';let errorMessage='';let succeeded=false;let issues=[];
+  let modelDone=false,replyTicket=null;
   const message={id:retry?previous.id:crypto.randomUUID(),role:'assistant',content:'',speakerId:actorId,
     channelId:retry?getChannel(previous.channelId).id:getChannel(session.channelId).id,sentAt:Date.now(),
     witnessIds:retry?[...(previous.witnessIds||[])]:channelAudience(session.channelId)==='cast'?[...session.castIds]:[actorId],provisional:true};
@@ -2311,21 +2312,34 @@ async function generate(mode = 'normal') {
     if (!response.body) throw new Error('Model server returned no response stream');
     streamingReply={sessionId:session.id,message};
     renderMessages();
-    const reader=response.body.getReader();const decode=new TextDecoder();let pending='';let done=false;
-    const onFrame=(frame)=>{
-      const data=frame.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n');
-      if (!data) return;
-      if (data==='[DONE]') {done=true;return;}
-      try {
+    const reader=response.body.getReader();const decode=new TextDecoder();let pending='';
+    const onFrame=frame=>{
+      const data=frame.split('\n').filter(line=>line.startsWith('data:'))
+        .map(line=>line.slice(5).trimStart()).join('\n');
+      if(!data)return;
+      if(data==='[DONE]'){modelDone=true;return;}
+      try{
         const obj=JSON.parse(data);
+        if(frame.split('\n').some(line=>line.trim()==='event: rp_complete')){
+          replyTicket=obj.ticket;return;
+        }
         if(obj.error){errorMessage=typeof obj.error==='string'?obj.error:JSON.stringify(obj.error);return;}
         const delta=obj.choices?.[0]?.delta?.content;
-        if(typeof delta==='string'&&delta){assistantText+=delta;message.content=assistantText;const messages=$('messages');const last=messages.lastElementChild?.querySelector('.message-text');if(last)last.textContent=assistantText; messages.scrollTop=messages.scrollHeight;}
-      }catch{/* Ignore malformed events, not the surrounding stream. */}
+        if(typeof delta==='string'&&delta){
+          assistantText+=delta;message.content=assistantText;
+          const messages=$('messages'),last=messages.lastElementChild?.querySelector('.message-text');
+          if(last)last.textContent=assistantText;
+          messages.scrollTop=messages.scrollHeight;
+        }
+      }catch{/* Incomplete/malformed frames cannot supply a completion ticket. */}
     };
-    while(!done){const item=await reader.read();if(item.done)break;pending=parseSSE(pending+decode.decode(item.value,{stream:true}),onFrame);}
+    // The model's [DONE] is NOT proof the world stayed unchanged. Continue
+    // reading until the local server issues a separate rp_complete ticket.
+    while(true){const item=await reader.read();if(item.done)break;pending=parseSSE(pending+decode.decode(item.value,{stream:true}),onFrame);}
     parseSSE(pending+decode.decode()+'\n\n',onFrame);
     if(errorMessage)throw new Error(errorMessage);
+    if(!modelDone||typeof replyTicket!=='string'||!replyTicket)
+      throw new Error('World or scene changed while generating, or the model stream ended early. Nothing was saved.');
     if(!assistantText.trim())throw new Error('The model returned an empty reply. Try another model or generation preset.');
     issues=inspectNpcReply(message.channelId,assistantText,state.characters.find(c=>c.id===actorId)?.name||'');
     succeeded=true;
@@ -2334,13 +2348,13 @@ async function generate(mode = 'normal') {
   } finally {
     streamingReply=null;
     if(succeeded){
-      const record={sessionId:session.id,basis,actorId,mode,retry,originalVariants,
+      const record={ticket:replyTicket,sessionId:session.id,basis,actorId,mode,retry,originalVariants,
         message:{...message,content:assistantText},issues};
       if(issues.length)pendingReply=record;
-      else if(!commitNpcReply(record))showError('Scene changed before the NPC reply could be saved. Please try again.');
+      else await persistNpcReply(record);
     }
     running=false;controller=null;$('send').disabled=false;$('regenerate').disabled=false;$('continue').disabled=false;
-    $('stop').classList.add('hidden');save();renderLists();renderMessages();renderHeader();
+    $('stop').classList.add('hidden');renderLists();renderMessages();renderHeader();
   }
 }
 
