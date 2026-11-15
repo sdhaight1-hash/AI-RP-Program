@@ -17,6 +17,7 @@ import { WORKSPACE_META,visibleDetailTabs,searchStudioCommands } from '/studio-n
 import { removeEncounterTemplate,encounterDependencies } from '/encounters/library.mjs';
 import { renderEncounterStudio } from '/encounter-studio.mjs';
 import {renderAtlasPanel as drawAtlas,renderRelationsPanel as drawRelations} from '/world-editors.mjs';
+import {renderWorldTimelineEditor as drawTimelines} from '/world-timelines.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -557,6 +558,11 @@ const worldEditorApi=()=>({$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
   openCharacterProfile:character=>{selectedCharacterId=character.id;setWorkspace('characters');openBuilder(character);}});
 const renderAtlasPanel=(host,session)=>drawAtlas(host,session,worldEditorApi());
 const renderRelationsPanel=host=>drawRelations(host,worldEditorApi());
+const renderWorldTimelineEditor=(host,s)=>drawTimelines(host,s,{
+  $,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
+  activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
+  save,renderInspector,showError,running,fetch
+});
 
 async function postEvent(endpoint,body) {
   const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,worldId:activeWorldId})});
@@ -696,76 +702,8 @@ function renderInspector() {
     $('import-character').onclick = () => $('character-upload').click();
     $('character-upload').onchange = async e => { const file = e.target.files?.[0]; if (!file) return; try { const cc = importCharacter(JSON.parse(await file.text())); state.characters.push(cc); startSession(cc); showError(); } catch(err) { showError(err.message); } e.target.value=''; };
   } else if (currentTab === 'worlds') {
-    host.innerHTML = `<h2 class="panel-title">World Library</h2><p class="help">Each world is independent. Manage its setting, canon entities, timelines and encounters here; the Atlas and Relations desks handle places and social connections. Actor memories stay within their witnessed timeline.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="world-select">World for a new timeline</label><select id="world-select"></select><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Active scene's timeline</label><select id="timeline-select"></select><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><div class="group"><h3 class="builder-subtitle">Encounter templates</h3><p class="help">Reusable openings and communication modes live in their own Encounters workspace. Use it to remove templates blocking permanent character deletion.</p><button id="world-manage-encounters" class="subtle-button">Manage encounters</button></div><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
-    const report = $('world-library-list');
-    if (!worldLibrary) {
-      report.append(el('p','Loading your local worlds...','help'));
-      if (!loadingWorlds) refreshWorldLibrary();
-      return;
-    }
-    const worldSelect=$('world-select'), timelineSelect=$('timeline-select');
-    for(const world of worldLibrary.worlds){
-      worldSelect.add(new Option(world.name,world.id));
-      const card=el('div','','lore-card');
-      const title=el('strong',world.name);const desc=el('p',world.description||'Blank canon world','help');
-      card.append(title,desc);
-      const open=el('button',world.id===activeWorldId?'Current World':'Open World','subtle-button');
-      open.disabled=world.id===activeWorldId;
-      open.onclick=()=>{void switchWorld(world.id).catch(error=>showError(error.message));};
-      card.append(open);
-      for(const timeline of worldLibrary.timelines.filter(t=>t.worldId===world.id)) {
-        const label=el('p',`${timeline.name}${timeline.id===s?.timelineId?' · current scene':''}`,'help');
-        card.append(label);timelineSelect.add(new Option(`${world.name} — ${timeline.name}`,timeline.id));
-      }
-      report.append(card);
-    }
-    $('world-manage-encounters').onclick=()=>setWorkspace('encounters');
-    if(!worldLibrary.worlds.length)report.append(el('p','Create your first world to begin.','empty-note'));
-    if(activeWorldId)worldSelect.value=activeWorldId;
-    worldSelect.onchange=()=>{void switchWorld(worldSelect.value).catch(error=>showError(error.message));};
-    if(s?.timelineId && worldLibrary.timelines.some(t=>t.id===s.timelineId)) timelineSelect.value=s.timelineId;
-    const fillClock=()=>{
-      const clock=worldLibrary.clocks?.find(c=>c.timelineId===timelineSelect.value);
-      if(!clock)return;
-      $('timeline-clock-utc').value=new Date(clock.instantMs).toISOString().slice(0,16);
-      $('timeline-clock-zone').value=clock.timeZone;
-    };
-    timelineSelect.onchange=fillClock;
-    if(timelineSelect.value)fillClock();
-    $('timeline-clock-save').disabled=!timelineSelect.value;
-    $('timeline-clock-save').onclick=async()=>{
-      try{
-        const raw=$('timeline-clock-utc').value;
-        if(!raw)throw Error('Choose a fictional UTC date and time.');
-        const instant=new Date(`${raw}:00Z`).toISOString();
-        await postWorld('/api/timelines/clock',{timelineId:timelineSelect.value,instant,timeZone:$('timeline-clock-zone').value});
-        showError();renderHeader();
-      }catch(err){showError(err.message);}
-    };
-    $('world-create').onclick=async()=>{
-      try{
-        if(!serverStorage)throw Error('The SQLite server must be connected to create worlds.');
-        const res=await fetch('/api/worlds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('world-new-name').value,description:$('world-new-description').value})});
-        const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create world');
-        await switchWorld(data.id);showError();
-      }catch(error){showError(error.message);}
-    };
-    $('timeline-create').onclick=async()=>{
-      try{
-        if(!serverStorage)throw Error('The SQLite server must be connected to create timelines.');
-        if($('world-select').value!==activeWorldId)throw Error('Open that world before creating its timeline.');
-        const res=await fetch('/api/timelines',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:$('world-select').value,name:$('timeline-new-name').value})});
-        const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create timeline');
-        showError();await refreshWorldLibrary();$('timeline-select').value=data.id;
-      }catch(error){showError(error.message);}
-    };
-    $('timeline-assign').disabled=!s;
-    $('timeline-assign').onclick=()=>{
-      if(!s||running)return;
-      const value=$('timeline-select').value;
-      if(!worldLibrary.timelines.some(t=>t.id===value))return showError('Select a valid timeline first.');
-      s.timelineId=value;save();renderInspector();showError();
-    };
+    host.innerHTML='<h2 class="panel-title">World administration</h2><p class="help">Manage worlds, timelines, fictional clocks and scene assignment directly in the World workspace.</p><button id="open-world-admin" class="primary-button">Open World & timelines</button>';
+    $('open-world-admin').onclick=()=>openWorldEditor('timelines');
   } else if (currentTab === 'atlas') {
     renderAtlasPanel(host,s);
   } else if (currentTab === 'relations') {
