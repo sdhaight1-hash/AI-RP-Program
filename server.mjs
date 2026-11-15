@@ -450,17 +450,21 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         // Consume regardless of the result: no replay or concurrent duplicate
         // commits, including a failed conflict-validation attempt.
         replyLeases.delete(data.ticket);
-        const verify=(previous)=>{
-          if(previous.revision!==lease.revision)
+        // The storage beforeReplace callback receives the *prior state*,
+        // not the outer {revision,state} envelope. Query revision inside the
+        // same BEGIN IMMEDIATE boundary as the definitive epoch check.
+        const verify=previousState=>{
+          const actualRevision=store.db.prepare('SELECT revision FROM studio_state WHERE id=1').get()?.revision;
+          if(actualRevision!==lease.revision)
             throw new Error('Story revision changed since generation. The stale NPC reply was not saved.');
           if(readWorldEpoch(store.db)!==lease.epoch)
             throw new Error('World knowledge changed since generation. The stale NPC reply was not saved.');
-          if(!isReplyBasisCurrent(previous.state?.sessions?.find(s=>s.id===lease.sceneId),lease.basis))
+          if(!isReplyBasisCurrent(previousState?.sessions?.find(s=>s.id===lease.sceneId),lease.basis))
             throw new Error('Acting scene context changed since generation. The stale NPC reply was not saved.');
         };
         try{
           const existing=store.load();
-          verify(existing);
+          verify(existing.state);
           const next=structuredClone(existing.state);
           applyCompletedNpcReply(next,lease,{reviewed:data.reviewed});
           const saved=typeof baseStore.forWorld==='function'
