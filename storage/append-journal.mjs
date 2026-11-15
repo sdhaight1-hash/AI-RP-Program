@@ -4,6 +4,7 @@
 // append chain. No world is enabled automatically.
 import {createHash} from 'node:crypto';
 import {syncAppendedPlayerMemory} from '../memory/store.mjs';
+import {getChannel} from '../interactions/channels.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const seed=fingerprint=>hash('ai-rp-journal-v1:'+fingerprint);
@@ -116,11 +117,17 @@ export function appendVerifiedPlayerRow(db,{sceneId,message,expectedRevision,upd
   if(sceneMetadata.trashedAt||sceneMetadata.channelId!==message.channelId||
      !sceneMetadata.timelineId)
     throw new Error('Scene archived, unsaved or its communication medium changed');
+  // Produce the same canonical player-message fields as normalizeState on a
+  // full save, otherwise a later verified projection parity check would see
+  // a different source despite the same visible content.
+  const writtenMessage={...message,id:message.id,pinned:Boolean(message.pinned),
+    channelId:getChannel(message.channelId).id,sentAt:message.sentAt,
+    speakerId:undefined,witnessIds:[...new Set(message.witnessIds)],variants:undefined};
   if(db.prepare('SELECT 1 FROM story_projection_messages WHERE scene_id=? AND message_id=?').get(sceneId,message.id)||
     db.prepare('SELECT 1 FROM story_append_rows WHERE scene_id=? AND message_id=?').get(sceneId,message.id))
     throw new Error('Duplicate source message ID');
   const row={version:expectedRevision+1,scene_id:sceneId,position:head.message_count,
-    message_id:message.id,document:JSON.stringify(message),updated_at:updatedAt};
+    message_id:message.id,document:JSON.stringify(writtenMessage),updated_at:updatedAt};
   const nextChain=link(meta.chain,row);
   db.prepare('INSERT INTO story_append_rows(version,scene_id,position,message_id,document,updated_at,chain) VALUES(?,?,?,?,?,?,?)')
     .run(row.version,row.scene_id,row.position,row.message_id,row.document,row.updated_at,nextChain);
@@ -133,11 +140,11 @@ export function appendVerifiedPlayerRow(db,{sceneId,message,expectedRevision,upd
   if(written.changes!==1)throw new Error('Story changed during append');
   // Source memory + FTS is committed with the same journal row and revision,
   // never deferred to a later full-history resave.
-  syncAppendedPlayerMemory(db,sceneMetadata,message);
+  syncAppendedPlayerMemory(db,sceneMetadata,writtenMessage);
   // Even a zero-witness journal append (if explicitly permitted by a future
   // checked API) is a world change relevant to another actor's reply basis.
   db.prepare('UPDATE world_epoch SET version=version+1 WHERE id=1').run();
-  return {revision:row.version,message};
+  return {revision:row.version,message:writtenMessage};
 }
 
 export function applyAppendJournal(db,base,storyRevision){
