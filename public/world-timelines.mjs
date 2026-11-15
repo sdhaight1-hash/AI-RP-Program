@@ -1,11 +1,15 @@
 import {makeWorldAuthoringRequest} from '../authoring/world-scene.mjs';
 import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
+
+// The workspace is rebuilt after world-catalog refreshes. Keep the local,
+// uncommitted creation draft outside the disposable DOM, not in world canon.
+let pendingWorldDraft={name:'',description:''};
 // World and timeline editor presentation, wired to explicit world-scoped
 // callbacks. Avoids mutating the browser's active-world selection implicitly.
 export function renderWorldTimelineEditor(host,s,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
     activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
-    save,renderInspector,showError,running,fetch,getModel}=api;
+    save,renderInspector,showError,running,fetch,getModel,beforeCreateWorld}=api;
 
   host.innerHTML = `
   <div class="world-creation-shell">
@@ -100,6 +104,14 @@ export function renderWorldTimelineEditor(host,s,api) {
       </div>
     </section>
   </div>`;
+  const worldName=$('world-new-name'),worldDescription=$('world-new-description');
+  worldName.value=pendingWorldDraft.name;
+  worldDescription.value=pendingWorldDraft.description;
+  const rememberWorldDraft=()=>{
+    pendingWorldDraft={name:worldName.value,description:worldDescription.value};
+  };
+  worldName.addEventListener('input',rememberWorldDraft);
+  worldDescription.addEventListener('input',rememberWorldDraft);
   // Drafting a world never imports another world's private canon.
   mountWorldSceneAssistant($('world-ai-slot'),{
     mode:'world',getModel,isCurrent:()=>host.isConnected&&!running,
@@ -109,6 +121,7 @@ export function renderWorldTimelineEditor(host,s,api) {
     onApply:patch=>{
       if(patch.name!==undefined)$('world-new-name').value=patch.name;
       if(patch.description!==undefined)$('world-new-description').value=patch.description;
+      rememberWorldDraft();
     }
   });
   const report = $('world-library-list');
@@ -198,13 +211,39 @@ export function renderWorldTimelineEditor(host,s,api) {
       showError();renderHeader();
     }catch(err){showError(err.message);}
   };
+  let creatingWorld=false;
   $('world-create').onclick=async()=>{
+    if(creatingWorld)return;
+    const button=$('world-create');
+    creatingWorld=true;button.disabled=true;
+    let created=null;
     try{
       if(!serverStorage)throw Error('The SQLite server must be connected to create worlds.');
-      const res=await fetch('/api/worlds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('world-new-name').value,description:$('world-new-description').value})});
+      const name=worldName.value.trim();
+      if(!name)throw Error('Give the new world a name before creating it.');
+      // Confirm pending replies, unsent messages and SQLite writes BEFORE
+      // committing a durable new world, never after the POST succeeds.
+      if(!await beforeCreateWorld())return;
+      const res=await fetch('/api/worlds',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name,description:worldDescription.value})});
       const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create world');
-      await switchWorld(data.id);showError();
-    }catch(error){showError(error.message);}
+      created=data;
+      pendingWorldDraft={name:'',description:''};
+      const switched=await switchWorld(data.id,{confirmed:true});
+      if(!switched)throw Error('World was created, but could not be opened automatically.');
+      showError();
+    }catch(error){
+      if(created){
+        // Never pretend an already-created SQLite world was rolled back.
+        showError('World "'+created.name+'" was created but not opened: '+error.message+
+          ' Open it from Your universes. Do not create it again.');
+        void refreshWorldLibrary();
+      }else showError(error.message);
+    }finally{
+      creatingWorld=false;
+      if(button.isConnected)button.disabled=false;
+    }
   };
   $('timeline-create').onclick=async()=>{
     try{
