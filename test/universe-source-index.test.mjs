@@ -51,6 +51,12 @@ test('source indexing is atomic with story saves; edits and purges never leave g
     assert.equal(findUniverseSources(db,{query:'Lantern Guild'}).length,0);
     assert.ok(findUniverseSources(db,{query:'Market Square'}).length>0);
     assert.equal((await discover('locations')).suggestions.some(x=>x.name==='Cedar Market'),false);
+    const illegal=store.forWorld(worldId).load().state;
+    illegal.sessions=[]; // cannot permanently delete a live scene without explicit archive and purge
+    assert.throws(()=>store.forWorld(worldId).save(illegal,saved.revision+1,{worldId}),
+      /permanent-delete|Archive first/);
+    assert.ok(findUniverseSources(db,{query:'Market Square'}).length>0,
+      'failed canonical writes must not leave new FTS state');
     const archived=store.forWorld(worldId).load().state;
     archived.sessions[0].trashedAt=Date.now();
     archived.characters[0].trashedAt=Date.now();
@@ -159,4 +165,28 @@ test('reviewed mention creates one linked canon record and retains source proven
       'Permanent canon deletion must also purge only that entry provenance');
     assert.equal(store.forWorld(worldId).db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   }finally{await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
+});
+
+test('the full stored scene transcript is searchable beyond the former 250-message cutoff',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-long-transcript-index-'));
+  const store=new WorldPartitionStore(dir);
+  try{
+    const worldId=store.activeWorldId;
+    const char=createCharacter('Sable');
+    const scene=createSession(char);
+    scene.messages=Array.from({length:300},(_,i)=>({
+      id:'source-msg-'+i,role:'user',
+      content:i===0?'I arrived at Old Mill Square.':
+        i===299?'I left the council at Northern Harbor.':'Routine city conversation '+i,
+      witnessIds:[char.id]
+    }));
+    const story=makeEmptyWorldState();
+    story.characters=[char];story.sessions=[scene];
+    store.forWorld(worldId).save(story,store.forWorld(worldId).load().revision,{worldId});
+    const db=store.forWorld(worldId).db;
+    assert.ok(findUniverseSources(db,{query:'Old Mill Square'}).some(x=>x.id==='source-msg-0'));
+    assert.ok(findUniverseSources(db,{query:'Northern Harbor'}).some(x=>x.id==='source-msg-299'));
+    const indexed=db.prepare("SELECT count(*) AS count FROM universe_source_documents WHERE source_type='dialogue'").get().count;
+    assert.equal(indexed,300);
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
