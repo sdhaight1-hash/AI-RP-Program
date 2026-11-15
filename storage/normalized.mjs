@@ -3,6 +3,7 @@
 // tested cutover. Projection tables are NEVER a new source of actor knowledge.
 // Migrations and save-time updates share a SQLite transaction with the snapshot.
 import { createHash } from 'node:crypto';
+import {journalEnabled,clearAppendJournalRowsForRewrite,resetAppendJournal,applyAppendJournal} from './append-journal.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const canonicalSessions=sessions=>sessions.map(({messages,...metadata})=>({...metadata,messages}));
@@ -82,6 +83,7 @@ export function writeStoryProjection(db,state,revision) {
   if(!Number.isSafeInteger(revision)||revision<0)throw new Error('Invalid projection revision');
   inspectStoryProjectionInput(state);
   initializeStoryProjection(db);
+  clearAppendJournalRowsForRewrite(db);
   const {characters,sessions,...core}=state;
   const keepCharacters=new Set(),keepScenes=new Set();
   const upsertChar=db.prepare(`INSERT INTO story_projection_characters(character_id,position,document)
@@ -129,6 +131,7 @@ export function writeStoryProjection(db,state,revision) {
     VALUES(1,1,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,
     fingerprint=excluded.fingerprint,core=excluded.core`)
     .run(revision,fingerprint(state),encode(core));
+  resetAppendJournal(db,state,revision,fingerprint(state));
   return {revision,...inspectStoryProjectionInput(state)};
 }
 
@@ -164,10 +167,16 @@ export function readStoryProjection(db) {
 export function verifyStoryProjection(db,snapshot) {
   const projected=readStoryProjection(db);
   if(!projected)return {status:'absent'};
-  if(projected.revision!==snapshot.revision)
-    throw new Error('Normalized projection revision mismatch');
-  if(projected.fingerprint!==fingerprint(snapshot.state))
-    throw new Error('Normalized projection differs from canonical story');
+  if(journalEnabled(db)){
+    const latest=applyAppendJournal(db,projected,snapshot.revision);
+    if(JSON.stringify(latest.state)!==JSON.stringify(snapshot.state))
+      throw new Error('Normalized journal differs from canonical story');
+  }else{
+    if(projected.revision!==snapshot.revision)
+      throw new Error('Normalized projection revision mismatch');
+    if(projected.fingerprint!==fingerprint(snapshot.state))
+      throw new Error('Normalized projection differs from canonical story');
+  }
   return {status:'matched',revision:snapshot.revision,
     ...inspectStoryProjectionInput(snapshot.state)};
 }
@@ -194,11 +203,11 @@ export function compactPrimaryDocument(state) {
 export function readPrimaryStory(db,row) {
   if(!projectionPrimary(db))throw Error('Normalized primary storage is not enabled');
   const projected=readStoryProjection(db);
-  if(!projected||projected.revision!==row.revision)
-    throw Error('Normalized primary revision mismatch');
-  if(JSON.stringify(compactPrimaryDocument(projected.state))!==row.document)
+  if(!projected)throw Error('Normalized primary revision mismatch');
+  const latest=applyAppendJournal(db,projected,row.revision);
+  if(JSON.stringify(compactPrimaryDocument(latest.state))!==row.document)
     throw Error('Normalized primary metadata differs from canonical revision');
-  return projected.state;
+  return latest.state;
 }
 
 // Apply inside the same world SQLite transaction. Backup-gated CLI only.
