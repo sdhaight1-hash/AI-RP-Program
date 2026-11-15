@@ -10,6 +10,7 @@ import { makeWorldEntryDraftRequest,parseWorldEntrySuggestions } from '/characte
 import { proposedRelationshipKinds } from '/character/relationship-bridge.mjs';
 import { CHARACTER_FIELD_CONTRACTS } from '/character/field-contracts.mjs';
 import { BUILDER_SECTIONS,builderSectionCompletion } from '/character/sections.mjs';
+import {renderCharacterDraftReview,reviewedCharacterSelections} from '/character-review.mjs';
 import { FIDELITY_PROBES, FIDELITY_RATINGS, makeFidelityProbe, inspectFidelityReply, normalizeFidelityReviews } from '/fidelity.mjs';
 import { makeLocalModelEvaluationTasks,inspectLocalModelResult,summarizeLocalModelEvaluation } from '/eval/local-model.mjs';
 import { worldPath,loadWorldSnapshot,loadWorldCatalog } from '/world-client.mjs';
@@ -1858,21 +1859,10 @@ async function uploadPortrait(file) {
   if (currentTab === 'character') renderInspector();
 }
 function renderBuilderAIChanges() {
-  const host=$('builder-ai-changes');host.replaceChildren();
-  if(!aiDraftRequest)return;
-  let proposal;
-  try{proposal=parseCharacterSuggestions($('builder-ai-result').value,aiDraftRequest);}
-  catch(err){host.append(el('p',err.message+' You may edit the raw response and review it again.','help'));return;}
-  host.append(el('strong','Proposed changes — check only the fields to accept'));
-  for(const [key,value] of Object.entries(proposal)){
-    const box=el('div','','builder-ai-change');
-    const label=document.createElement('label');label.className='field-label';
-    const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=true;checkbox.dataset.proposalField=key;
-    label.append(checkbox,document.createTextNode(' '+builderLabel(key)));
-    const before=builderCharacter()?.[key];if(before)box.append(el('p',`Current: ${String(before).slice(0,250)}`,'help'));
-    const edit=document.createElement('textarea');edit.rows=4;edit.maxLength=12000;edit.value=value;edit.dataset.proposalText=key;
-    box.append(label,edit);host.append(box);
-  }
+  renderCharacterDraftReview({
+    host:$('builder-ai-changes'),raw:$('builder-ai-result').value,request:aiDraftRequest,
+    character:builderCharacter(),label:builderLabel,makeElement:el,dom:document
+  });
 }
 function setupBuilderAI() {
   const select = $('builder-ai-target');
@@ -1910,13 +1900,10 @@ function setupBuilderAI() {
   $('builder-ai-apply').onclick = () => {
     const c=builderCharacter();if(!c||!aiDraftRequest)return;
     try{
-      const proposals=parseCharacterSuggestions($('builder-ai-result').value,aiDraftRequest);
-      const accepted={};
-      for(const key of Object.keys(proposals)){
-        const checkbox=$('builder-ai-changes').querySelector(`[data-proposal-field="${key}"]`);
-        const field=$('builder-ai-changes').querySelector(`[data-proposal-text="${key}"]`);
-        if(checkbox?.checked)accepted[key]=field?.value||proposals[key];
-      }
+      const accepted=reviewedCharacterSelections({
+        request:aiDraftRequest,raw:$('builder-ai-result').value,
+        controls:$('builder-ai-changes')
+      });
       const patch=selectCharacterChanges({character:c,worldLibrary,worldId:activeWorldId,lore:state.lore,request:aiDraftRequest,changes:accepted});
       if(!confirm(`Apply ${Object.keys(patch).length} reviewed character detail(s)? No other fields or world facts will change.`))return;
       Object.assign(c,patch);save();renderBuilder();renderLists();renderHeader();renderMessages();
