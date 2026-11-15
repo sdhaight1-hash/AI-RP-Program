@@ -27,3 +27,24 @@ test('opt-in normalized-primary benchmark retains complete actor memory and revi
   assert.equal(report.rows[0].storageMode,'normalized-primary');
   assert.equal(report.rows[0].memoryRows,51);
 });
+
+test('repeat one-message saves preserve full actor memory and report real p50/p95 samples',()=>{
+  const row=measureStorageScale(80,{samples:3});
+  assert.equal(row.oneTurnResaveSamplesMs.length,3);
+  assert.equal(row.memoryRows,83);
+  assert.equal(row.oneTurnResaveMs,[...row.oneTurnResaveSamplesMs].sort((a,b)=>a-b)[1]);
+  assert.equal(row.oneTurnResaveP95Ms,Math.max(...row.oneTurnResaveSamplesMs));
+  assert.ok(row.heapUsedAfterBytes>0&&row.rssAfterBytes>0);
+  assert.equal(row.integrity,'ok');
+  assert.equal(runStorageScaleEvaluation([8],{samples:2}).samples,2);
+  for(const samples of [-1,0,1.4,11,NaN])assert.throws(
+    ()=>measureStorageScale(5,{samples}),/Invalid measurement sample count/);
+});
+
+test('repeat one-message saves also preserve normalized-primary parity',()=>{
+  const row=measureStorageScale(80,{primary:true,samples:3});
+  assert.equal(row.storageMode,'normalized-primary');
+  assert.equal(row.oneTurnResaveSamplesMs.length,3);
+  assert.equal(row.memoryRows,83);
+  assert.equal(row.integrity,'ok');
+});
