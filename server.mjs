@@ -236,7 +236,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       if (req.method === 'POST' && path === '/api/worlds/locations') {
         const data=await readJson(req,6000);
         requireWorldScope(data.worldId);
-        try {return json(res,201,store.worlds.createLocation(data));}
+        try {return json(res,201,data.sourceProof?store.worlds.createReviewedEntry({...data,entryType:'location'}):store.worlds.createLocation(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds/connections') {
@@ -248,7 +248,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       if (req.method === 'POST' && path === '/api/worlds/entities') {
         const data=await readJson(req,3000);
         requireWorldScope(data.worldId);
-        try {return json(res,201,store.worlds.createEntity(data));}
+        try {return json(res,201,data.sourceProof?store.worlds.createReviewedEntry({...data,entryType:'entity'}):store.worlds.createEntity(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'PATCH' && path === '/api/worlds/entities') {
