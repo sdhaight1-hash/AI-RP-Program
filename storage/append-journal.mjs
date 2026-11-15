@@ -76,9 +76,11 @@ export function enableAppendJournal(db,snapshot){
 export function clearAppendJournalRowsForRewrite(db){
   if(!journalEnabled(db))return;
   if(!db.isTransaction)throw new Error('Journal preparation requires a transaction');
-  // Drop references before ordinary full-save projection deletes old scenes.
-  // The enclosing transaction restores them if a later source lock fails.
+  // Drop both dependent sidecar tables before ordinary full-save
+  // projection deletes old scenes. The enclosing transaction restores them
+  // if an accepted-source lock or any later write fails.
   db.prepare('DELETE FROM story_append_rows').run();
+  db.prepare('DELETE FROM story_append_heads').run();
 }
 
 // A normal full-world save can compact the journal in that same transaction.
