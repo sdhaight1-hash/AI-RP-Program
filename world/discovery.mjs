@@ -8,7 +8,8 @@ const COLLECTIVE=new RegExp("\\b(?:[Tt]he[ \\t]+)?"+NAME+"[ \\t]+(Family|Clan|Gu
 const STOP=new Set(['I','We','She','He','They','The','This','That','Her','His','Their','It','My','Our','A','An','And','But','When','Then','After','Before','Because','At','In','On','From','To','With','There','Here','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Today','Tomorrow','Yesterday']);
 const suffixKinds={Family:'family',Clan:'family',Guild:'organization',Council:'organization',Circle:'group',Order:'organization',Society:'organization',Company:'organization',Corporation:'organization',Collective:'community',Union:'organization',Community:'community',Faction:'faction',Cult:'organization',Club:'group',School:'organization',Syndicate:'organization',Network:'group',Culture:'culture',People:'culture'};
 const quotesFrom=(text,start,end)=>String(text).slice(Math.max(0,start-65),Math.min(text.length,end+85)).trim();
-const normalizeName=s=>String(s||'').trim().replace(/[.,!?;:]+$/gu,'').replace(SPACES,' ');
+const normalizeName=s=>String(s||'').trim().replace(/[.,!?;:]+$/gu,'')
+  .replace(SPACES,' ').replace(/(?:\s+(?:and|of|the)|\s+&)$/iu,'').trim();
 const likelyName=s=>{
   const tokens=s.split(' ');
   return s.length>=3&&s.length<=120&&tokens.length<=5&&
