@@ -81,3 +81,68 @@ test('source retrieval is independently scoped per universe and quote searches t
     assert.throws(()=>findUniverseSources(a.db,{query:'a'.repeat(121)}),/at most 120/);
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('reviewed mention creates one linked canon record and retains source provenance after revisions',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-reviewed-provenance-'));
+  const store=new WorldPartitionStore(dir);
+  const worldId=store.activeWorldId;
+  const server=createApp({store,fetchImpl:async()=>{throw Error('unused')}});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const base='http://127.0.0.1:'+server.address().port;
+    const request=async(endpoint,input)=>fetch(base+endpoint,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(input)});
+    const char=createCharacter('Morgan');
+    char.backstory='Morgan grew up in Copper Ward. The Willow Guild controlled trade.';
+    const current=store.forWorld(worldId).load();
+    const state=makeEmptyWorldState();state.characters=[char];
+    const first=store.forWorld(worldId).save(state,current.revision,{worldId});
+    const get=async focus=>(await(await fetch(base+'/api/worlds/discovery?worldId='+
+      encodeURIComponent(worldId)+'&focus='+focus)).json());
+    const groups=await get('groups');
+    const guild=groups.suggestions.find(x=>x.name==='Willow Guild');
+    assert.ok(guild,'indexed character backstory should surface social entry');
+    const proof=guild.evidence.find(e=>e.fingerprint);
+    assert.ok(proof,'source version is needed for a reviewable commit');
+    const location=(await get('locations')).suggestions.find(x=>x.name==='Copper Ward');
+    assert.ok(location);
+    const created=await request('/api/worlds/entities',{
+      worldId,name:guild.name,kind:'organization',
+      description:'Trades local craftwork',sourceProof:proof
+    });
+    assert.equal(created.status,201,await created.clone().text());
+    const entity=await created.json();
+    assert.equal(entity.provenance.sourceStatus,'current');
+    const duplicate=await request('/api/worlds/entities',{
+      worldId,name:guild.name,kind:'organization',sourceProof:proof
+    });
+    assert.equal(duplicate.status,400);
+    const located=await request('/api/worlds/locations',{
+      worldId,name:location.name,kind:'neighborhood',
+      description:'The historic dockside district',sourceProof:location.evidence.find(e=>e.fingerprint)
+    });
+    assert.equal(located.status,201,await located.clone().text());
+    const place=await located.json();
+    const before=store.forWorld(worldId).worlds.list().entryProvenance;
+    assert.ok(before.some(p=>p.entryId===entity.id&&p.sourceStatus==='current'));
+    assert.ok(before.some(p=>p.entryId===place.id&&p.sourceStatus==='current'));
+    const altered=store.forWorld(worldId).load().state;
+    altered.characters[0].backstory='Morgan abandoned her old trade relationships.';
+    store.forWorld(worldId).save(altered,first.revision,{worldId});
+    const provenance=store.forWorld(worldId).worlds.list().entryProvenance;
+    assert.equal(provenance.find(p=>p.entryId===entity.id).sourceStatus,'changed');
+    assert.equal(provenance.find(p=>p.entryId===place.id).sourceStatus,'changed');
+    assert.ok(provenance.find(p=>p.entryId===entity.id).quote.includes('Willow Guild'));
+    const stale=await request('/api/worlds/entities',{
+      worldId,name:'Willow Circle',kind:'organization',sourceProof:proof
+    });
+    assert.equal(stale.status,400,'stale source evidence cannot establish a new canon entry');
+    const foreign=store.worlds.createWorld({name:'Independent'});
+    const cross=await request('/api/worlds/entities',{
+      worldId:foreign.id,name:'Willow Circle',kind:'organization',sourceProof:proof
+    });
+    assert.notEqual(cross.status,201);
+    assert.deepEqual(store.forWorld(foreign.id).worlds.list().entryProvenance,[]);
+    assert.equal(store.forWorld(worldId).db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
+});
