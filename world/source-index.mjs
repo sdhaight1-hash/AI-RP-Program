@@ -16,6 +16,17 @@ export function initializeUniverseSourceIndex(db){
     content TEXT NOT NULL,
     fingerprint TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS universe_entry_provenance (
+    world_id TEXT NOT NULL,
+    entry_type TEXT NOT NULL CHECK(entry_type IN ('location','entity')),
+    entry_id TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    source_quote TEXT NOT NULL,
+    source_trust TEXT NOT NULL,
+    recorded_at INTEGER NOT NULL,
+    PRIMARY KEY(world_id,entry_type,entry_id)
+  );
   CREATE VIRTUAL TABLE IF NOT EXISTS universe_source_fts USING fts5(
     content,content='universe_source_documents',content_rowid='id',tokenize='unicode61'
   );
@@ -88,4 +99,49 @@ export function findUniverseSources(db,{query='',limit=400}={}){
 export function discoverIndexedUniverseMentions(db,{worldId,library,focus='locations',query='',limit=14}={}){
   const sourcesOverride=findUniverseSources(db,{query,limit:query?750:1000});
   return discoverUniverseMentions({worldId,library,focus,limit,sourcesOverride});
+}
+
+export function createSourcedUniverseEntry(db,repository,{worldId,entryType,sourceProof,...entry}){
+  if(!['location','entity'].includes(entryType)||!sourceProof||
+     typeof sourceProof!=='object'||Array.isArray(sourceProof))
+    throw Error('Invalid sourced canon entry');
+  const {type,id,field,quote,fingerprint}=sourceProof;
+  if(![type,id,field,quote,fingerprint].every(v=>typeof v==='string'&&v.length>0))
+    throw Error('Incomplete source evidence');
+  if([type,id,field].some(v=>v.length>160)||quote.length>500||fingerprint.length!==64)
+    throw Error('Invalid source evidence length');
+  const row=db.prepare(`SELECT content,trust,fingerprint
+    FROM universe_source_documents WHERE source_key=?`).get(sourceKey({type,id,field}));
+  if(!row||row.fingerprint!==fingerprint)
+    throw Error('Source changed; rescan and review the current evidence before saving canon');
+  if(!row.content.includes(quote)||!quote.toLocaleLowerCase().includes(
+    String(entry.name||'').trim().toLocaleLowerCase()))
+    throw Error('Selected source does not substantiate this name');
+  db.exec('SAVEPOINT universe_canon_approval');
+  try{
+    const created=entryType==='location'
+      ?repository.createLocation({worldId,...entry})
+      :repository.createEntity({worldId,...entry});
+    db.prepare(`INSERT INTO universe_entry_provenance
+      (world_id,entry_type,entry_id,source_key,source_fingerprint,source_quote,source_trust,recorded_at)
+      VALUES (?,?,?,?,?,?,?,?)`).run(worldId,entryType,created.id,
+        sourceKey({type,id,field}),fingerprint,quote,row.trust,Date.now());
+    db.exec('RELEASE SAVEPOINT universe_canon_approval');
+    return {...created,provenance:{type,id,field,quote,trust:row.trust,sourceStatus:'current'}};
+  }catch(error){
+    db.exec('ROLLBACK TO SAVEPOINT universe_canon_approval');
+    db.exec('RELEASE SAVEPOINT universe_canon_approval');
+    throw error;
+  }
+}
+export function listUniverseEntryProvenance(db,worldId){
+  return db.prepare(`SELECT p.entry_type AS entryType,p.entry_id AS entryId,
+    p.source_key AS sourceKey,p.source_fingerprint AS fingerprint,
+    p.source_quote AS quote,p.source_trust AS trust,
+    p.recorded_at AS recordedAt,
+    CASE WHEN s.fingerprint=p.source_fingerprint THEN 'current'
+      WHEN s.id IS NULL THEN 'removed' ELSE 'changed' END AS sourceStatus
+    FROM universe_entry_provenance p
+    LEFT JOIN universe_source_documents s ON s.source_key=p.source_key
+    WHERE p.world_id=? ORDER BY p.recorded_at DESC`).all(worldId);
 }
