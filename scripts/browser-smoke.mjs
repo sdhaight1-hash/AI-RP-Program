@@ -119,6 +119,72 @@ async function main(){
     assert.deepEqual(world,{workspace:'world',visible:true,sceneHidden:true,cards:4,selected:'true'});
     await screenshot('02-world-overview');
 
+    // Main-world inline Atlas and Relations editors must remain navigable,
+    // persist real SQLite records, and never open the old overlay by default.
+    const atlasName='Inline Atlas Browser Place';
+    assert.equal(await script(`
+      document.querySelector('[data-world-view="atlas"]').click();
+      return !!document.querySelector('.world-editor-content #atlas-create') &&
+        !!document.querySelector('[data-world-view="overview"]') &&
+        !document.body.classList.contains('detail-focus');
+    `),true,'World Places editor should be inline and retain section navigation');
+    await script(`
+      document.querySelector('#atlas-name').value=${JSON.stringify(atlasName)};
+      document.querySelector('#atlas-kind').value='building';
+      document.querySelector('#atlas-create').click();
+      return true;
+    `);
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
+      return catalog.locations.some(l=>l.name===atlasName);
+    },'inline Atlas place persisted');
+    await until(async()=>script(`
+      return document.querySelector('[data-world-view="atlas"]')?.getAttribute('aria-pressed')==='true' &&
+        [...document.querySelectorAll('#atlas-places .lore-card strong')]
+          .some(x=>x.textContent===${JSON.stringify(atlasName)});
+    `),'inline Atlas refreshed with newly saved place');
+    await screenshot('02c-inline-atlas');
+
+    const inlineEntityName='Inline Relations Test Entity';
+    assert.equal(await script(`
+      document.querySelector('[data-world-view="relations"]').click();
+      return !!document.querySelector('.world-editor-content #relations-add-entity') &&
+        !!document.querySelector('[data-world-view="atlas"]') &&
+        !document.body.classList.contains('detail-focus');
+    `),true,'World Relationships editor should be inline and retain section navigation');
+    await script(`
+      document.querySelector('#relations-entity-name').value=${JSON.stringify(inlineEntityName)};
+      document.querySelector('#relations-entity-kind').value='organization';
+      document.querySelector('#relations-add-entity').click();
+      return true;
+    `);
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
+      return catalog.entities.some(e=>e.name===inlineEntityName);
+    },'inline world entity persisted');
+    await until(async()=>script(`
+      return document.querySelector('[data-world-view="relations"]')?.getAttribute('aria-pressed')==='true' &&
+        [...document.querySelectorAll('#relations-list .lore-card strong')]
+          .some(x=>x.textContent===${JSON.stringify(inlineEntityName)});
+    `),'inline Relations refreshed with newly saved entity');
+    await screenshot('02d-inline-relations');
+    assert.equal(await script(`
+      window.confirm=()=>true;
+      const row=[...document.querySelectorAll('#relations-list .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(inlineEntityName)});
+      row?.querySelector('button')?.click();
+      return !!row;
+    `),true,'World inline entities must expose guarded deletion');
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
+      return !catalog.entities.some(e=>e.name===inlineEntityName);
+    },'inline world entity permanently deleted');
+    assert.equal(await script(`
+      document.querySelector('[data-world-view="overview"]').click();
+      return document.querySelectorAll('.workspace-card').length===4 &&
+        !document.querySelector('.world-editor-content');
+    `),true,'World Overview should return without discarding editor state');
+
     for(const [workspace,title,filename] of [
       ['memory','What each character can remember','02a-memory-overview'],
       ['tools','Your private creative toolkit','02b-tools-overview']
@@ -144,16 +210,22 @@ async function main(){
     await screenshot('03-focused-world-editor');
     assert.equal(await script("document.querySelector('#close-inspector').click();return document.body.classList.contains('detail-focus')"),false);
 
-    assert.equal(await script(`
+    const atlasCommandResult=await script(`
       document.querySelector('#open-command').click();
       document.querySelector('#command-search').value='atlas';
       document.querySelector('#command-search').dispatchEvent(new Event('input',{bubbles:true}));
       const choices=[...document.querySelectorAll('.command-item')].map(x=>x.textContent);
       document.querySelector('.command-item').click();
-      return choices.some(x=>x.includes('Atlas'))&&!document.querySelector('#command-palette').open&&
-        document.body.dataset.workspace==='world'&&document.body.classList.contains('detail-focus');
-    `),true,'command palette should navigate into the real Atlas editor');
-    await script(`document.querySelector('#close-inspector').click();document.querySelector('button[data-workspace="characters"]').click();return true`);
+      return {choices,open:document.querySelector('#command-palette').open,
+        workspace:document.body.dataset.workspace,pane:document.body.dataset.worldPane,
+        editor:!!document.querySelector('.world-editor-content #atlas-create'),
+        focus:document.body.classList.contains('detail-focus')};
+    `);
+    assert.ok(atlasCommandResult.choices.some(x=>x.includes('Atlas')) &&
+      !atlasCommandResult.open && atlasCommandResult.workspace==='world' &&
+      atlasCommandResult.pane==='atlas' && atlasCommandResult.editor &&
+      !atlasCommandResult.focus,'command palette should navigate into inline Atlas');
+    await script(`document.querySelector('button[data-workspace="characters"]').click();return true`);
     assert.equal(await script("return document.querySelector('#workspace-title').textContent"),'People with lives beyond the scene');
     await screenshot('04-character-workspace');
 
