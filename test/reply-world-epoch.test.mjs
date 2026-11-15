@@ -19,8 +19,10 @@ async function fixture(){
   const state=makeInitialState(),actor=state.characters[0],scene=state.sessions[0];
   scene.messages.push({id:randomUUID(),role:'user',content:'Can you hear me?',
     channelId:'in_person',witnessIds:[actor.id],sentAt:Date.now()});
-  store.forWorld(worldId).save(state,0,{worldId});
-  const first=store.forWorld(worldId).load();
+  const scoped=store.forWorld(worldId);
+  const saved=scoped.save(state,scoped.load().revision,{worldId});
+  assert.ok(saved,'fixture must replace the already-initialized empty world');
+  const first=scoped.load();
   const timelineId=first.state.sessions[0].timelineId;
   let gate=null;
   const fetchImpl=async url=>{
@@ -79,7 +81,7 @@ test('world epoch survives commits from both SQLite connections and server resta
       assert.ok(readWorldEpoch(external)>prior);
       assert.equal(readWorldEpoch(scoped.db),readWorldEpoch(external));
     }finally{external.close();}
-    assert.equal(scoped.load().revision,1,'world mutation epoch is separate from story revision');
+    assert.equal(scoped.load().revision,f.payload().revision,'world mutation epoch is separate from story revision');
   }finally{await f.close();}
 });
 
