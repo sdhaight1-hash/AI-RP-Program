@@ -535,7 +535,11 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const basisScene=store.load().state?.sessions?.find(s=>s.id===data.sceneId);
         if(!basisScene)return json(res,409,{error:'Scene disappeared during context assembly'});
         const basis=replyBasis(basisScene);
-        const streamCurrent=()=>store.load().revision===startingRevision &&
+        // Constant-cost per-chunk guard: never parse the entire world story
+        // once per generated token. Full scene/source validation happens again
+        // within the final SQLite save transaction.
+        const streamCurrent=()=>
+          store.db.prepare('SELECT revision FROM studio_state WHERE id=1').get()?.revision===startingRevision &&
           readWorldEpoch(store.db)===startingEpoch &&
           worldMutationStamp(store)===startingMutation;
         const aborter=new AbortController();
