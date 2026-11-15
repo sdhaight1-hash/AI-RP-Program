@@ -28,6 +28,9 @@ let currentTab = 'scene';
 let activeWorkspace = 'story';
 let worldLibrary = null;
 let worldLibraryRequest = 0;
+// Initial catalog fetch and new-world switches can render before this is ready.
+// An older inspector path used this undeclared name only on that uncommon path.
+let loadingWorlds = false;
 let switchingWorld = false;
 let selectedWorldId = null;
 let worldEditorView='overview';
