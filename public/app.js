@@ -228,10 +228,16 @@ const showError = (message = '') => {
   }
 };
 
-function startSession(char = activeCharacter(), encounter = null,channelId=null) {
+function startSession(char = activeCharacter(), encounter = null,channelId=null,approvedDraft=null) {
   if (!char) return;
   const session = createSession(char,encounter);
   if(!encounter&&channelId)session.channelId=getChannel(channelId).id;
+  // A reviewed scene foundation is guidance, never a fictional event or NPC message.
+  if(approvedDraft){
+    for(const field of ['title','direction','atmosphere','authorNote'])
+      if(typeof approvedDraft[field]==='string'&&approvedDraft[field].trim())
+        session[field]=approvedDraft[field].trim();
+  }
   if(encounter?.locationId && getChannel(encounter.channelId).id==='in_person')session.location=worldLibrary?.locations.find(l=>l.id===encounter.locationId)?.name||'';
   state.sessions.unshift(session);
   state.activeSessionId = session.id;
@@ -266,7 +272,31 @@ function openNewSceneDialog() {
     template.onchange=showMedium;selected.onchange=showMedium;
     showMedium();
   };
-  chosen.onchange=refresh;refresh();$('new-scene-dialog').showModal();
+  chosen.onchange=refresh;refresh();
+  for(const key of ['title','direction','atmosphere','authorNote'])
+    $('new-scene-draft-'+key).value='';
+  $('new-scene-dialog').showModal();
+  const assistHost=$('new-scene-ai-host');assistHost.replaceChildren();
+  const draftValues=()=>Object.fromEntries(['title','direction','atmosphere','authorNote']
+    .map(key=>[key,$('new-scene-draft-'+key).value]));
+  const makeRequest=(target,guidance)=>{
+    const characterId=chosen.value;
+    const encounter=(state.encounters||[]).find(e=>e.id===$('new-scene-encounter').value)||null;
+    return makeSceneAuthoringRequest({
+      worldId:activeWorldId,library:worldLibrary,characters:state.characters,characterId,
+      channelId:$('new-scene-channel').value,encounter,existing:draftValues(),
+      lore:state.lore,guidance,target
+    });
+  };
+  mountWorldSceneAssistant(assistHost,{
+    mode:'scene',getModel:()=>state.settings.model,
+    isCurrent:()=>$('new-scene-dialog').open&&assistHost.isConnected&&!running,
+    beforeGenerate:requireSavedStory,
+    getRequest:makeRequest,
+    onApply:patch=>{
+      for(const [key,value] of Object.entries(patch))$('new-scene-draft-'+key).value=value;
+    }
+  });
 }
 function renderLists() {
   const sessions = $('session-list');
@@ -2252,8 +2282,10 @@ $('new-scene-confirm').onclick=()=>{
   const char=state.characters.find(c=>c.id===$('new-scene-character').value && !c.trashedAt);
   const encounter=(state.encounters||[]).find(e=>e.id===$('new-scene-encounter').value && e.characterIds.includes(char?.id));
   if(!char)return showError('Choose a character.');
+  const reviewed=Object.fromEntries(['title','direction','atmosphere','authorNote']
+    .map(key=>[key,$('new-scene-draft-'+key).value]));
   $('new-scene-dialog').close();
-  startSession(char,encounter||null,$('new-scene-channel').value);
+  startSession(char,encounter||null,$('new-scene-channel').value,reviewed);
 };
 $('new-scene-manage-encounters').onclick=()=>{
   const templateId=$('new-scene-encounter').value||null;
