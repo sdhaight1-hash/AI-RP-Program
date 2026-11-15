@@ -412,7 +412,7 @@ async function main(){
       .filter(t=>t.worldId===store.activeWorldId).map(t=>t.id).sort();
     const timelineChoices=await script(`
       document.querySelector('button[data-workspace="world"]').click();
-      document.querySelector('[data-world-view="timelines"]').click();
+      document.querySelector('.workspace-card.featured button').click();
       return [...document.querySelector('#timeline-select').options].map(x=>x.value).sort();
     `);
     assert.deepEqual(timelineChoices,firstTimelineIds,
@@ -792,6 +792,10 @@ async function main(){
     `),true,'reviewed scene AI must populate editable fields');
     await script("document.querySelector('#new-scene-confirm').click();return true");
     await until(async()=>script("return document.body.dataset.workspace==='story' && !!document.querySelector('#message-input')"),'live scene editor');
+    await until(async()=>{
+      const state=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
+      return state.sessions.some(scene=>scene.title==='Harbor Call at Dusk');
+    },'reviewed scene foundation persisted before model dialogue');
     const reviewedScene=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state
       .sessions.find(scene=>scene.title==='Harbor Call at Dusk');
     assert.ok(reviewedScene,'reviewed title must be part of the created scene');
