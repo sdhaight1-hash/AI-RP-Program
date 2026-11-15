@@ -229,3 +229,11 @@ test('streamed character drafts remain bound to their initiating controller, pro
   assert.match(javascript,/if\(aiDraftController===aiController\)\{/);
   assert.match(javascript,/if\(builderCharacter\(\)\?\.id===c\.id\)/);
 });
+
+test('world-entry discovery cannot publish results after changing character or world',()=>{
+  assert.match(javascript,/const c=builderCharacter\(\),status=\$\('builder-world-status'\),startedWorldId=activeWorldId/);
+  assert.match(javascript,/worldEntryController!==aborter\|\|builderCharacter\(\)\?\.id!==c\.id/);
+  assert.match(javascript,/activeWorldId!==startedWorldId\)throw new DOMException/);
+  assert.match(javascript,/if\(aborter\.signal\.aborted\|\|worldEntryController!==aborter\)return/);
+  assert.match(javascript,/if\(worldEntryController===aborter\)\{/);
+});
