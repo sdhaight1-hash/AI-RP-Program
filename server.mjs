@@ -37,6 +37,7 @@ const ALLOWED = new Map([
   ['/world-timelines.mjs', ['world-timelines.mjs', 'text/javascript; charset=utf-8']],
   ['/world-scene-assist.mjs', ['world-scene-assist.mjs', 'text/javascript; charset=utf-8']],
   ['/authoring/world-scene.mjs', ['../authoring/world-scene.mjs', 'text/javascript; charset=utf-8']],
+  ['/world/blueprint.mjs', ['../world/blueprint.mjs', 'text/javascript; charset=utf-8']],
   ['/encounters/library.mjs', ['../encounters/library.mjs', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/studio-shell.css', ['studio-shell.css', 'text/css; charset=utf-8']],
@@ -188,7 +189,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
       }
       if (req.method === 'POST' && path === '/api/worlds') {
         // UI allows 4,000 Unicode code units; UTF-8 JSON may exceed 5 KB.
-        const data=await readJson(req,20000);
+        const data=await readJson(req,64000);
         try { return json(res,201,store.worlds.createWorld(data)); }
         catch(err) { return json(res,400,{error:err.message}); }
       }
@@ -199,6 +200,14 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         catch(error){
           const stale=/changed|reload and review/.test(error.message);
           return json(res,stale?409:422,{error:error.message});
+        }
+      }
+      if (req.method === 'PATCH' && path === '/api/worlds/blueprint') {
+        const input=await readJson(req,36000);
+        requireWorldScope(input.worldId);
+        try {return json(res,200,store.worlds.saveBlueprint(input));}
+        catch(error){
+          return json(res,/changed; reload/.test(error.message)?409:422,{error:error.message});
         }
       }
       if (req.method === 'POST' && path === '/api/timelines') {

@@ -1,9 +1,26 @@
-import {makeWorldAuthoringRequest,makeUniverseRevisionRequest} from '../authoring/world-scene.mjs';
+import {makeWorldAuthoringRequest,makeUniverseRevisionRequest,makeBlueprintAuthoringRequest} from '../authoring/world-scene.mjs';
+import {UNIVERSE_BLUEPRINT_FIELDS,emptyUniverseBlueprint} from '../world/blueprint.mjs';
 import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
 
 // The workspace is rebuilt after world-catalog refreshes. Keep the local,
 // uncommitted creation draft outside the disposable DOM, not in world canon.
-let pendingWorldDraft={name:'',description:''};
+let pendingWorldDraft={name:'',description:'',blueprint:emptyUniverseBlueprint()};
+let pendingUniverseBlueprint=null;
+let savingBlueprint=false;
+function renderBlueprintFields(host,values,prefix,onChange){
+  host.replaceChildren();
+  for(const [key,meta] of Object.entries(UNIVERSE_BLUEPRINT_FIELDS)){
+    const item=document.createElement('div');item.className='universe-blueprint-field';
+    const label=document.createElement('label');label.className='field-label';
+    const id=prefix+'-'+key;label.htmlFor=id;label.textContent=meta.label;
+    const input=document.createElement('textarea');input.id=id;input.rows=3;
+    input.maxLength=meta.max;input.value=values[key]||'';
+    input.placeholder=meta.purpose;
+    input.oninput=()=>onChange(key,input.value);
+    item.append(label,input);host.append(item);
+  }
+}
+
 let creatingWorld=false;
 let editingUniverse=false;
 let pendingUniverseRevision=null;
@@ -42,6 +59,14 @@ export function renderWorldTimelineEditor(host,s,api) {
           </div>
           <div class="world-composer-assist" id="world-ai-slot" aria-label="World creation writing partner"></div>
         </div>
+        <details class="universe-blueprint-details" id="universe-new-blueprint">
+          <summary>Expand universe blueprint · 7 structured foundations</summary>
+          <p class="help">Individually describe the universe's scale, era, rules, societies and conflicts. These are setting-wide facts, not scene events.</p>
+          <div class="world-composer-grid">
+            <div id="world-new-blueprint-fields" class="universe-blueprint-fields"></div>
+            <div id="world-blueprint-ai-slot"></div>
+          </div>
+        </details>
       </section>
       <aside class="world-existing-list" aria-labelledby="world-existing-heading">
         <div class="world-section-heading">
@@ -72,6 +97,20 @@ export function renderWorldTimelineEditor(host,s,api) {
         </div>
         <div class="world-composer-assist" id="universe-edit-ai-slot" aria-label="AI assistance for the current universe"></div>
       </div>
+      <details class="universe-blueprint-details" id="universe-edit-blueprint">
+        <summary>Universe blueprint · edit structured canon foundations</summary>
+        <p class="help">Keep physical rules, historical baselines, cultures and tensions separate from mutable narrative events.</p>
+        <div class="world-composer-grid">
+          <div>
+            <div id="universe-edit-blueprint-fields" class="universe-blueprint-fields"></div>
+            <div class="world-create-action">
+              <span id="universe-blueprint-state" class="world-save-note" role="status">No changes</span>
+              <button id="universe-blueprint-save" class="primary-button">Save blueprint</button>
+            </div>
+          </div>
+          <div id="universe-blueprint-ai-slot"></div>
+        </div>
+      </details>
     </section>
     <section class="world-timeline-tools" aria-labelledby="world-timeline-heading">
       <div class="world-section-heading">
@@ -132,11 +171,26 @@ export function renderWorldTimelineEditor(host,s,api) {
   worldName.value=pendingWorldDraft.name;
   worldDescription.value=pendingWorldDraft.description;
   const rememberWorldDraft=()=>{
-    pendingWorldDraft={name:worldName.value,description:worldDescription.value};
+    pendingWorldDraft={...pendingWorldDraft,name:worldName.value,description:worldDescription.value};
   };
   $('world-create').disabled=creatingWorld;
   worldName.addEventListener('input',rememberWorldDraft);
   worldDescription.addEventListener('input',rememberWorldDraft);
+  renderBlueprintFields($('world-new-blueprint-fields'),pendingWorldDraft.blueprint,'new-universe',(
+    key,value)=>{pendingWorldDraft.blueprint={...pendingWorldDraft.blueprint,[key]:value};}
+  );
+  mountWorldSceneAssistant($('world-blueprint-ai-slot'),{
+    mode:'blueprint',getModel,isCurrent:()=>host.isConnected&&!running,
+    getRequest:(target,guidance)=>makeBlueprintAuthoringRequest({
+      name:worldName.value,description:worldDescription.value,
+      sections:pendingWorldDraft.blueprint,target,guidance
+    }),
+    onApply:patch=>{
+      pendingWorldDraft.blueprint={...pendingWorldDraft.blueprint,...patch};
+      renderBlueprintFields($('world-new-blueprint-fields'),pendingWorldDraft.blueprint,
+        'new-universe',(key,value)=>{pendingWorldDraft.blueprint={...pendingWorldDraft.blueprint,[key]:value};});
+    }
+  });
   // Drafting a world never imports another world's private canon.
   mountWorldSceneAssistant($('world-ai-slot'),{
     mode:'world',getModel,isCurrent:()=>host.isConnected&&!running,
@@ -167,6 +221,70 @@ export function renderWorldTimelineEditor(host,s,api) {
         name:currentUniverse.name,description:currentUniverse.description
       };
     }
+    const authoritativeBlueprint=worldLibrary.blueprint?.worldId===activeWorldId
+      ?worldLibrary.blueprint:{worldId:activeWorldId,revision:0,sections:emptyUniverseBlueprint()};
+    if(!pendingUniverseBlueprint||pendingUniverseBlueprint.worldId!==activeWorldId){
+      pendingUniverseBlueprint={
+        worldId:activeWorldId,revision:authoritativeBlueprint.revision,
+        original:structuredClone(authoritativeBlueprint.sections),
+        sections:structuredClone(authoritativeBlueprint.sections)
+      };
+    }
+    const blueprintDraft=pendingUniverseBlueprint;
+    const renderEditBlueprint=()=>renderBlueprintFields(
+      $('universe-edit-blueprint-fields'),blueprintDraft.sections,'edit-universe',
+      (key,value)=>{
+        blueprintDraft.sections={...blueprintDraft.sections,[key]:value};
+        showBlueprintChanges();
+      }
+    );
+    const showBlueprintChanges=()=>{
+      const changed=JSON.stringify(blueprintDraft.sections)!==JSON.stringify(blueprintDraft.original);
+      $('universe-blueprint-state').textContent=changed?'Unsaved blueprint changes':
+        'No unsaved blueprint changes';
+      $('universe-blueprint-save').disabled=savingBlueprint||!changed;
+    };
+    renderEditBlueprint();showBlueprintChanges();
+    mountWorldSceneAssistant($('universe-blueprint-ai-slot'),{
+      mode:'blueprint',getModel,
+      isCurrent:()=>identitySection.isConnected&&
+        getCurrentWorldId()===blueprintDraft.worldId&&!savingBlueprint,
+      beforeGenerate:beforeUpdateUniverse,
+      getRequest:(target,guidance)=>makeBlueprintAuthoringRequest({
+        worldId:blueprintDraft.worldId,library:worldLibrary,
+        name:currentUniverse.name,description:currentUniverse.description,
+        sections:blueprintDraft.sections,target,guidance
+      }),
+      onApply:patch=>{
+        blueprintDraft.sections={...blueprintDraft.sections,...patch};
+        renderEditBlueprint();showBlueprintChanges();
+      }
+    });
+    $('universe-blueprint-save').onclick=async()=>{
+      if(savingBlueprint)return;
+      savingBlueprint=true;showBlueprintChanges();
+      try {
+        if(!serverStorage)throw Error('Connect SQLite to save the universe blueprint');
+        await beforeUpdateUniverse();
+        if(getCurrentWorldId()!==blueprintDraft.worldId)
+          throw Error('Universe switched while saving the blueprint');
+        const response=await fetch('/api/worlds/blueprint',{
+          method:'PATCH',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            worldId:blueprintDraft.worldId,
+            revision:blueprintDraft.revision,sections:blueprintDraft.sections
+          })
+        });
+        const data=await response.json();
+        if(!response.ok)throw Error(data.error||'Blueprint save failed');
+        pendingUniverseBlueprint=null;
+        await refreshWorldLibrary();
+        showError();
+      }catch(error){showError(error.message);}
+      finally{savingBlueprint=false;
+        if($('universe-blueprint-save')?.isConnected)$('universe-blueprint-save').disabled=false;
+      }
+    };
     const draft=pendingUniverseRevision;
     const editName=$('universe-edit-name'),editDescription=$('universe-edit-description');
     editName.value=draft.name;editDescription.value=draft.description;
@@ -317,10 +435,10 @@ export function renderWorldTimelineEditor(host,s,api) {
       if(!await beforeCreateWorld())return;
       const res=await fetch('/api/worlds',{method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name,description:worldDescription.value})});
+        body:JSON.stringify({name,description:worldDescription.value,blueprint:pendingWorldDraft.blueprint})});
       const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create world');
       created=data;
-      pendingWorldDraft={name:'',description:''};
+      pendingWorldDraft={name:'',description:'',blueprint:emptyUniverseBlueprint()};
       if(getCurrentWorldId()!==sourceWorldId)
         throw Error('The active world changed while this world was being created.');
       const switched=await switchWorld(data.id,{confirmed:true});

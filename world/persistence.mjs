@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import {emptyUniverseBlueprint,normalizeUniverseBlueprint} from './blueprint.mjs';
 import { snapshotMemoriesForFork } from '../memory/store.mjs';
 import { snapshotFactsForFork } from '../memory/facts.mjs';
 import {
@@ -68,6 +69,11 @@ export function initializeWorldSchema(db, state, scopeWorldId = null) {
     );
     CREATE TABLE IF NOT EXISTS worlds (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS universe_blueprints (
+      world_id TEXT PRIMARY KEY REFERENCES worlds(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL CHECK(revision>=1),
+      document TEXT NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS world_revisions (
       id TEXT PRIMARY KEY, world_id TEXT NOT NULL REFERENCES worlds(id), version INTEGER NOT NULL,
@@ -164,6 +170,35 @@ export class WorldRepository {
       this.db.exec('COMMIT');
       return { ...record, revision: { ...record.revision, worldId: record.id } };
     } catch (err) { this.db.exec('ROLLBACK'); throw err; }
+  }
+
+  getBlueprint(worldId) {
+    if(!this.db.prepare('SELECT 1 FROM worlds WHERE id=?').get(worldId))
+      throw Error('Connical Universe not found');
+    const row=this.db.prepare('SELECT revision,document FROM universe_blueprints WHERE world_id=?').get(worldId);
+    return {worldId,revision:row?.revision||0,
+      sections:row?normalizeUniverseBlueprint(JSON.parse(row.document)):emptyUniverseBlueprint()};
+  }
+
+  saveBlueprint({worldId,revision,sections}) {
+    if(typeof worldId!=='string'||!worldId||!Number.isSafeInteger(revision)||revision<0)
+      throw Error('Invalid universe blueprint revision');
+    const normalized=normalizeUniverseBlueprint(sections);
+    this.db.exec('BEGIN IMMEDIATE');
+    try{
+      const current=this.getBlueprint(worldId);
+      if(current.revision!==revision)throw Error('Universe blueprint changed; reload before overwriting');
+      const next=revision+1;
+      const json=JSON.stringify(normalized);
+      if(revision===0)
+        this.db.prepare('INSERT INTO universe_blueprints(world_id,revision,document,updated_at) VALUES(?,?,?,?)')
+          .run(worldId,next,json,Date.now());
+      else
+        this.db.prepare('UPDATE universe_blueprints SET revision=?,document=?,updated_at=? WHERE world_id=? AND revision=?')
+          .run(next,json,Date.now(),worldId,revision);
+      this.db.exec('COMMIT');
+      return {worldId,revision:next,sections:normalized};
+    }catch(error){if(this.db.isTransaction)this.db.exec('ROLLBACK');throw error;}
   }
 
   updateWorldIdentity({worldId,name,description,expectedName,expectedDescription}) {

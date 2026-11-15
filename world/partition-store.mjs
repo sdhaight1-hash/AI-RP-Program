@@ -115,9 +115,12 @@ export class WorldPartitionStore {
 
   makeWorldApi() {
     return {
-      list: () => ({...this.current.worlds.list(),worlds:catalogRows(this.registry),activeWorldId:this.activeWorldId}),
+      list: () => ({...this.current.worlds.list(),worlds:catalogRows(this.registry),
+        activeWorldId:this.activeWorldId,
+        blueprint:this.current.worlds.getBlueprint(this.activeWorldId)}),
       createWorld: input => this.createWorld(input),
       updateWorld: input => this.updateWorld(input),
+      saveBlueprint: input => {this.assertWorld(input.worldId);return this.current.worlds.saveBlueprint(input);},
       createTimeline: input => {this.assertWorld(input.worldId);return this.current.worlds.createTimeline(input);},
       forkTimeline: input => this.current.worlds.forkTimeline(input),
       createLocation: input => {this.assertWorld(input.worldId);return this.current.worlds.createLocation(input);},
@@ -334,6 +337,9 @@ export class WorldPartitionStore {
     let record;
     try {
       record=temporary.worlds.createWorld(input);
+      if(input?.blueprint)temporary.worlds.saveBlueprint({
+        worldId:record.id,revision:0,sections:input.blueprint
+      });
       temporary.save(makeEmptyWorldState(),0);
     } catch(error) {temporary.close();rmSync(tempDir,{recursive:true,force:true});throw error;}
     temporary.close();

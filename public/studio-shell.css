@@ -1208,3 +1208,13 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
 .universe-identity-editor[hidden]{display:none}
 .universe-identity-editor #universe-edit-description{min-height:170px}
 .universe-identity-editor #universe-edit-state{overflow-wrap:anywhere}
+
+/* A blueprint is a structured, optional layer—not an endless mandatory form. */
+.universe-blueprint-details{margin-top:18px;border:1px solid var(--ux-line);border-radius:12px;padding:16px;background:var(--ux-faint)}
+.universe-blueprint-details summary{cursor:pointer;font:500 18px var(--ux-serif);padding:4px 0}
+.universe-blueprint-details[open] summary{margin-bottom:12px}
+.universe-blueprint-fields{display:grid;gap:12px}
+.universe-blueprint-field{min-width:0}
+.universe-blueprint-field textarea{display:block;width:100%;min-height:84px;box-sizing:border-box;resize:vertical;line-height:1.55}
+.universe-blueprint-details .world-composer-grid{padding-top:12px}
+.universe-blueprint-details .help{line-height:1.6}
