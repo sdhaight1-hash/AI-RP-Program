@@ -1291,8 +1291,13 @@ function renderWorkspace(){
       nav.append(button);
     }
     host.append(nav);
-    if(worldEditorView==='atlas'){renderAtlasPanel(host,scene);return;}
-    if(worldEditorView==='relations'){renderRelationsPanel(host);return;}
+    if(worldEditorView!=='overview'){
+      const editor=el('section','','world-editor-content');
+      host.append(editor);
+      if(worldEditorView==='atlas')renderAtlasPanel(editor,scene);
+      else renderRelationsPanel(editor);
+      return;
+    }
   }
   if(mode==='encounters'){
     renderEncounterStudio(host,{
