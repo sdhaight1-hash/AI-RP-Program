@@ -69,7 +69,9 @@ export function renderWorldTimelineEditor(host,s,api) {
         if($('world-select').value!==activeWorldId)throw Error('Open that world before creating its timeline.');
         const res=await fetch('/api/timelines',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId:$('world-select').value,name:$('timeline-new-name').value})});
         const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create timeline');
-        showError();await refreshWorldLibrary();$('timeline-select').value=data.id;
+        showError();await refreshWorldLibrary();
+        const picker=$('timeline-select');picker.value=data.id;
+        picker.dispatchEvent(new Event('change'));
       }catch(error){showError(error.message);}
     };
     $('timeline-assign').disabled=!s;
