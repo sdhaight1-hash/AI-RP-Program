@@ -38,6 +38,7 @@ const ALLOWED = new Map([
   ['/world-scene-assist.mjs', ['world-scene-assist.mjs', 'text/javascript; charset=utf-8']],
   ['/authoring/world-scene.mjs', ['../authoring/world-scene.mjs', 'text/javascript; charset=utf-8']],
   ['/world/blueprint.mjs', ['../world/blueprint.mjs', 'text/javascript; charset=utf-8']],
+  ['/world/discovery.mjs', ['../world/discovery.mjs', 'text/javascript; charset=utf-8']],
   ['/encounters/library.mjs', ['../encounters/library.mjs', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/studio-shell.css', ['studio-shell.css', 'text/css; charset=utf-8']],
@@ -239,6 +240,12 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         requireWorldScope(data.worldId);
         try {return json(res,201,store.worlds.createEntity(data));}
         catch(err){return json(res,400,{error:err.message});}
+      }
+      if (req.method === 'PATCH' && path === '/api/worlds/entities') {
+        const data=await readJson(req,8000);
+        requireWorldScope(data.worldId);
+        try{return json(res,200,store.worlds.updateEntity(data));}
+        catch(error){return json(res,/changed; reload/.test(error.message)?409:422,{error:error.message});}
       }
       if (req.method === 'POST' && path === '/api/eval/semantic-local') {
         const input=await readJson(req,1000);

@@ -106,6 +106,11 @@ export function initializeWorldSchema(db, state, scopeWorldId = null) {
       id TEXT PRIMARY KEY,world_id TEXT NOT NULL REFERENCES worlds(id),
       name TEXT NOT NULL,kind TEXT NOT NULL,source_character_id TEXT,created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS world_entity_details (
+      entity_id TEXT PRIMARY KEY REFERENCES world_entities(id) ON DELETE CASCADE,
+      world_id TEXT NOT NULL REFERENCES worlds(id),
+      description TEXT NOT NULL DEFAULT ''
+    );
     CREATE TABLE IF NOT EXISTS world_relationships (
       id TEXT PRIMARY KEY,world_id TEXT NOT NULL REFERENCES worlds(id),
       from_id TEXT NOT NULL REFERENCES world_entities(id), to_id TEXT NOT NULL REFERENCES world_entities(id),
@@ -151,7 +156,9 @@ export class WorldRepository {
     const revisions = this.db.prepare('SELECT id,world_id AS worldId,version,label,created_at AS createdAt FROM world_revisions ORDER BY world_id,version').all();
     const timelines = this.db.prepare('SELECT id,world_id AS worldId,canon_id AS canonId,name,parent_timeline_id AS parentTimelineId,created_at AS createdAt FROM timelines ORDER BY created_at,id').all();
     const locations=this.db.prepare('SELECT id,world_id AS worldId,parent_id AS parentId,name,kind,description FROM world_locations ORDER BY name').all();
-    const entities=this.db.prepare('SELECT id,world_id AS worldId,name,kind,source_character_id AS sourceCharacterId FROM world_entities ORDER BY name').all();
+    const entities=this.db.prepare(`SELECT e.id,e.world_id AS worldId,e.name,e.kind,
+      e.source_character_id AS sourceCharacterId,COALESCE(d.description,'') AS description
+      FROM world_entities e LEFT JOIN world_entity_details d ON d.entity_id=e.id ORDER BY e.name`).all();
     const relationships=this.db.prepare('SELECT id,world_id AS worldId,from_id AS fromId,to_id AS toId,kind,notes FROM world_relationships ORDER BY created_at').all();
     const clocks=this.db.prepare('SELECT timeline_id AS timelineId,instant_ms AS instantMs,time_zone AS timeZone,is_explicit AS isExplicit FROM timeline_clocks').all();
     const connections=this.db.prepare('SELECT id,world_id AS worldId,from_id AS fromId,to_id AS toId,kind,travel_minutes AS travelMinutes FROM location_connections').all();
@@ -299,17 +306,59 @@ export class WorldRepository {
     return value;
   }
 
-  createEntity({worldId,name,kind='character',sourceCharacterId=null}) {
+  createEntity({worldId,name,kind='character',sourceCharacterId=null,description=''}) {
     if(!ENTITY_KINDS.includes(kind))throw new TypeError('Invalid entity kind');
     if(sourceCharacterId!==null&&(typeof sourceCharacterId!=='string'||sourceCharacterId.length>160))throw new TypeError('Invalid character reference');
     if(!this.db.prepare('SELECT id FROM worlds WHERE id=?').get(worldId))throw new Error('World does not exist');
     if(sourceCharacterId&&this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND source_character_id=? LIMIT 1')
       .get(worldId,sourceCharacterId))
       throw new Error('Character already has a linked world entity; edit the existing person instead');
-    const value={id:randomUUID(),worldId,name:cleanTitle(name,'Entity name'),kind,sourceCharacterId};
-    this.db.prepare('INSERT INTO world_entities(id,world_id,name,kind,source_character_id,created_at) VALUES (?,?,?,?,?,?)')
-      .run(value.id,worldId,value.name,kind,sourceCharacterId,now());
-    return value;
+    const value={id:randomUUID(),worldId,name:cleanTitle(name,'Entity name'),kind,sourceCharacterId,
+      description:bounded(description,'entity description',4000)};
+    const exists=this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND name=? COLLATE NOCASE LIMIT 1')
+      .get(worldId,value.name);
+    if(exists&&!sourceCharacterId)
+      throw Error('A canon entity with this name already exists. Link the existing entry instead.');
+    // Character-to-world approvals and world-repair already hold a transaction.
+    // A SAVEPOINT works both inside and outside those callers.
+    this.db.exec('SAVEPOINT create_canon_entity');
+    try{
+      this.db.prepare('INSERT INTO world_entities(id,world_id,name,kind,source_character_id,created_at) VALUES (?,?,?,?,?,?)')
+        .run(value.id,worldId,value.name,kind,sourceCharacterId,now());
+      this.db.prepare('INSERT INTO world_entity_details(entity_id,world_id,description) VALUES(?,?,?)')
+        .run(value.id,worldId,value.description);
+      this.db.exec('RELEASE SAVEPOINT create_canon_entity');
+      return value;
+    }catch(error){
+      this.db.exec('ROLLBACK TO SAVEPOINT create_canon_entity');
+      this.db.exec('RELEASE SAVEPOINT create_canon_entity');
+      throw error;
+    }
+  }
+
+  updateEntity({worldId,id,name,kind,description,expectedName,expectedKind,expectedDescription}){
+    const previous=this.db.prepare(`SELECT e.name,e.kind,e.source_character_id AS sourceCharacterId,
+      COALESCE(d.description,'') AS description FROM world_entities e
+      LEFT JOIN world_entity_details d ON d.entity_id=e.id WHERE e.id=? AND e.world_id=?`).get(id,worldId);
+    if(!previous)throw Error('Canon entry not found in this universe');
+    if(previous.sourceCharacterId)throw Error('Edit linked people through Character Studio');
+    if(previous.name!==expectedName||previous.kind!==expectedKind||previous.description!==expectedDescription)
+      throw Error('Canon entry changed; reload before overwriting');
+    if(!ENTITY_KINDS.includes(kind))throw Error('Invalid entity kind');
+    const title=cleanTitle(name,'Entity name'),detail=bounded(description,'entity description',4000);
+    const duplicate=this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND name=? COLLATE NOCASE AND id<>? LIMIT 1')
+      .get(worldId,title,id);
+    if(duplicate)throw Error('Another canon entity already has that name');
+    this.db.exec('BEGIN IMMEDIATE');
+    try{
+      this.db.prepare('UPDATE world_entities SET name=?,kind=? WHERE id=? AND world_id=?')
+        .run(title,kind,id,worldId);
+      this.db.prepare(`INSERT INTO world_entity_details(entity_id,world_id,description)
+        VALUES(?,?,?) ON CONFLICT(entity_id) DO UPDATE SET description=excluded.description`)
+        .run(id,worldId,detail);
+      this.db.exec('COMMIT');
+      return {id,worldId,name:title,kind,description:detail};
+    }catch(error){if(this.db.isTransaction)this.db.exec('ROLLBACK');throw error;}
   }
 
   createRelationship({worldId,fromId,toId,kind='acquaintance',notes=''}) {

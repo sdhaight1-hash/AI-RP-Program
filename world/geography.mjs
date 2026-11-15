@@ -1,6 +1,6 @@
 // Data validation for the authored world atlas and timeline clock.
 export const LOCATION_KINDS=Object.freeze(['region','town','neighborhood','building','room','outdoor','other']);
-export const ENTITY_KINDS=Object.freeze(['character','faction','organization','object','concept']);
+export const ENTITY_KINDS=Object.freeze(['character','organization','faction','family','community','culture','group','object','concept']);
 
 export function bounded(value, label, max=2000) {
   if(typeof value!=='string'||value.length>max)throw new TypeError(`Invalid ${label}`);

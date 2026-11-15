@@ -130,6 +130,7 @@ export class WorldPartitionStore {
         if(input.sourceCharacterId && !this.current.load().state?.characters?.some(c=>c.id===input.sourceCharacterId))throw new Error('Linked character is not in this world');
         return this.current.worlds.createEntity(input);
       },
+      updateEntity: input => {this.assertWorld(input.worldId);return this.current.worlds.updateEntity(input);},
       createRelationship: input => {this.assertWorld(input.worldId);return this.current.worlds.createRelationship(input);},
       deleteEntry: input => {this.assertWorld(input.worldId);return deleteWorldRecord(this,input);},
       setClock: input => this.current.worlds.setClock(input),

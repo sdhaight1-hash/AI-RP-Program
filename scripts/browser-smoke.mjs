@@ -188,12 +188,18 @@ async function main(){
         [...document.querySelectorAll('#relations-list .lore-card strong')]
           .some(x=>x.textContent===${JSON.stringify(inlineEntityName)});
     `),'inline Relations refreshed with newly saved entity');
+    assert.equal(await script(`
+      return !!document.querySelector('#relations-entity-kind option[value="culture"]')
+        &&!!document.querySelector('#relations-entity-kind option[value="family"]')
+        &&!!document.querySelector('#relations-entity-kind option[value="community"]')
+        &&!!document.querySelector('.universe-mention-panel');
+    `),true,'Worldbuilding editor must expose rich collective types and source-backed recommendations');
     await screenshot('02d-inline-relations');
     assert.equal(await script(`
       window.confirm=()=>true;
       const row=[...document.querySelectorAll('#relations-list .lore-card')]
         .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(inlineEntityName)});
-      row?.querySelector('button')?.click();
+      [...row.querySelectorAll('button')].find(b=>b.textContent==='Permanently delete entity')?.click();
       return !!row;
     `),true,'World inline entities must expose guarded deletion');
     await until(async()=>{
@@ -538,7 +544,7 @@ async function main(){
       window.confirm=()=>true;
       const card=[...document.querySelectorAll('#relations-list .lore-card')]
         .find(row=>row.querySelector('strong')?.textContent===${JSON.stringify(disposableName)});
-      const button=card?.querySelector('button');
+      const button=[...card?.querySelectorAll('button')||[]].find(b=>b.textContent==='Permanently delete entity');
       if(!button)return false;
       button.click();
       return true;
