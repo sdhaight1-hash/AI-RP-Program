@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createCharacter} from '../engine.mjs';
-import {AUTHORING_CONTRACTS,makeWorldAuthoringRequest,makeSceneAuthoringRequest,
+import {AUTHORING_CONTRACTS,makeWorldAuthoringRequest,makeSceneAuthoringRequest,makeLocationAuthoringRequest,
   parseAuthoringSuggestions,selectReviewedSuggestions} from '../authoring/world-scene.mjs';
 import {createApp} from '../server.mjs';
 import {StudioStore} from '../storage.mjs';
@@ -121,4 +121,35 @@ test('ongoing scene generator sees only active-world cast and existing scenes wi
   assert.match(req.messages[1].content,/A call at sunset/);
   assert.deepEqual(parseAuthoringSuggestions('{"direction":"The conversation stays tentative."}',req),
     {direction:'The conversation stays tentative.'});
+});
+
+test('World Atlas AI drafts are grounded in existing canon and typed location hierarchy',()=>{
+  const req=makeLocationAuthoringRequest({worldId,library,parentId:'quay',kind:'building',
+    name:'',description:'',target:'all',guidance:'Fishermen gather at first light.'});
+  assert.deepEqual(req.fields,['name','description']);
+  assert.match(req.messages[0].content,/ONE place inside an already established fictional world/);
+  assert.match(req.messages[0].content,/belongs inside South Quay/);
+  assert.match(req.messages[1].content,/Saltshore/);
+  assert.match(req.messages[1].content,/Busy fishing docks/);
+  assert.doesNotMatch(req.messages[1].content,/Forbidden Tower/);
+  assert.deepEqual(selectReviewedSuggestions({request:req,
+    output:'{"name":"Netmakers Hall","description":"A wooden net-weaving workshop."}',
+    checked:{name:true,description:true},
+    edits:{description:'A weathered workshop beside the docks.'}}),
+    {name:'Netmakers Hall',description:'A weathered workshop beside the docks.'});
+  assert.throws(()=>makeLocationAuthoringRequest({worldId,library,kind:'underwater castle'}),/Unknown location kind/);
+  assert.throws(()=>makeLocationAuthoringRequest({worldId,library,kind:'room',parentId:'foreign'}),/does not belong/);
+  assert.throws(()=>makeLocationAuthoringRequest({worldId:'another-world',library}),/correct world/);
+});
+
+test('Location generation rejects duplicate canon names and invalidates drafts on parent or kind changes',()=>{
+  const req=makeLocationAuthoringRequest({worldId,library,kind:'building'});
+  assert.throws(()=>parseAuthoringSuggestions('{"name":"South Quay"}',req),/already exists/);
+  assert.throws(()=>selectReviewedSuggestions({request:req,
+    output:'{"name":"New Quay"}',checked:{name:true},edits:{name:'South Quay'}}),
+    /already exists/);
+  assert.notEqual(req.basis,makeLocationAuthoringRequest({worldId,library,kind:'room'}).basis);
+  assert.notEqual(req.basis,makeLocationAuthoringRequest({worldId,library,kind:'building',parentId:'quay'}).basis);
+  assert.notEqual(req.basis,makeLocationAuthoringRequest({worldId,library,kind:'building',
+    guidance:'Different creative direction'}).basis);
 });
