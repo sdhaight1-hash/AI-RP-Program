@@ -5,7 +5,7 @@ import {LOCATION_KINDS} from '../world/geography.mjs';
 
 export const AUTHORING_CONTRACTS=Object.freeze({
   world:Object.freeze({
-    name:{label:'World name',max:120,purpose:'A distinctive name for the independent fictional universe',boundary:'Do not reuse a different world identity'},
+    name:{label:'Connical Universe name',max:120,purpose:'A distinctive name for the independent fictional universe',boundary:'Do not reuse a different world identity'},
     description:{label:'Setting foundation',max:4000,purpose:'Era, geography, institutions, ordinary life, tone, tensions and plausible constraints',boundary:'Only establish new setting ideas in this new world; no cross-world canon or automatic timeline events'}
   }),
   universe:Object.freeze({
