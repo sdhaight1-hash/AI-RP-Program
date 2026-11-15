@@ -266,6 +266,27 @@ async function main(){
       'editing the universe must not switch or replace continuity');
     assert.equal(store.forWorld(initialUniverse.id).db.prepare(
       'SELECT name FROM worlds WHERE id=?').get(initialUniverse.id).name,'Revised Browser Connical Universe');
+    // A universe blueprint changes only after the author explicitly saves it.
+    const blueprintBefore=store.forWorld(initialUniverse.id).worlds.list().blueprint;
+    assert.equal(await script(`
+      const panel=document.querySelector('#universe-edit-blueprint');
+      panel.open=true;
+      const rules=document.querySelector('#edit-universe-rules');
+      if(!rules)return false;
+      rules.value='Magic cannot reverse an established historical event.';
+      rules.dispatchEvent(new Event('input',{bubbles:true}));
+      return !document.querySelector('#universe-blueprint-save').disabled;
+    `),true,'structured universe rules are editable');
+    assert.equal(store.forWorld(initialUniverse.id).worlds.list().blueprint.revision,
+      blueprintBefore.revision,'typing blueprint fields never auto-commits');
+    await script("document.querySelector('#universe-blueprint-save').click();return true");
+    await until(async()=>store.forWorld(initialUniverse.id).worlds.list().blueprint.sections.rules
+      .includes('Magic cannot reverse'),'universe blueprint rule persisted');
+    assert.equal(store.forWorld(initialUniverse.id).worlds.list().blueprint.revision,
+      blueprintBefore.revision+1);
+    assert.equal(store.worlds.list().worlds.length,initialWorldCount,
+      'blueprint editing cannot create a new universe');
+    await screenshot('03c-reviewed-universe-blueprint');
     await screenshot('03b-in-place-universe-revision');
     await screenshot('03-world-timelines-editor');
     const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
@@ -1047,6 +1068,12 @@ async function main(){
       if(!field)return false;
       field.value='Reliable Browser World';
       field.dispatchEvent(new Event('input',{bubbles:true}));
+      const details=document.querySelector('#universe-new-blueprint');
+      details.open=true;
+      const rules=document.querySelector('#new-universe-rules');
+      if(!rules)return false;
+      rules.value='Astral travel is limited to one world at a time.';
+      rules.dispatchEvent(new Event('input',{bubbles:true}));
       const button=document.querySelector('#world-create');
       button.click();button.click();
       return button.disabled;
@@ -1058,6 +1085,12 @@ async function main(){
       'rapid world submission cannot create duplicate universes');
     const resultingWorld=store.worlds.list().worlds.find(w=>w.name==='Reliable Browser World');
     assert.ok(resultingWorld,'world creation survives registry persistence');
+    const seededBlueprint=store.forWorld(resultingWorld.id).worlds.list().blueprint;
+    assert.equal(seededBlueprint.sections.rules,'Astral travel is limited to one world at a time.');
+    assert.equal(seededBlueprint.revision,1,'creation seeds blueprint with its own revision');
+    assert.equal(store.forWorld(initialUniverse.id).worlds.list().blueprint.sections.rules,
+      'Magic cannot reverse an established historical event.');
+
     assert.deepEqual((await(await fetch(base+'/api/state?worldId='+
       encodeURIComponent(resultingWorld.id))).json()).state.sessions,[],
       'new world must not inherit old scene history');
