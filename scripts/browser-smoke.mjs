@@ -36,7 +36,7 @@ async function main(){
     if(target.endsWith('/api/extra/true_max_context_length'))return Response.json({value:4096});
     if(target.endsWith('/api/extra/tokencount'))return Response.json({value:400});
     if(target.endsWith('/chat/completions'))
-      return new Response('data: '+JSON.stringify({choices:[{delta:{content:browserReply}}]})+'\\n\\ndata: [DONE]\\n\\n');
+      return new Response('data: '+JSON.stringify({choices:[{delta:{content:browserReply}}]})+'\n\ndata: [DONE]\n\n');
     throw Error('Unexpected local model probe: '+target);
   }});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
