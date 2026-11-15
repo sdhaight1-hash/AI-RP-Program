@@ -1069,3 +1069,9 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
 .character-roster-pager.hidden{display:none}
 .character-roster-pager button:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:760px){.character-roster-tools input[type="search"]{max-width:none;width:100%}}
+
+/* One-click entry into a specific field's existing, reviewed AI workflow. */
+.builder-field-assist{margin-top:10px;font-size:11px;padding:8px 12px}
+.builder-field-assist:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.builder-nav button{line-height:1.45;text-align:left}
+@media(max-width:760px){.builder-field-assist{width:100%}}
