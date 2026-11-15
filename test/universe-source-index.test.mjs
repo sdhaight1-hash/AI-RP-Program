@@ -51,9 +51,19 @@ test('source indexing is atomic with story saves; edits and purges never leave g
     assert.equal(findUniverseSources(db,{query:'Lantern Guild'}).length,0);
     assert.ok(findUniverseSources(db,{query:'Market Square'}).length>0);
     assert.equal((await discover('locations')).suggestions.some(x=>x.name==='Cedar Market'),false);
+    const archived=store.forWorld(worldId).load().state;
+    archived.sessions[0].trashedAt=Date.now();
+    archived.characters[0].trashedAt=Date.now();
+    store.forWorld(worldId).save(archived,saved.revision+1,{worldId});
+    assert.equal(findUniverseSources(db,{query:'Market Square'}).length,0,
+      'archiving a scene must remove its text from discovery');
+    assert.equal(findUniverseSources(db,{query:'Docks Council'}).length,0,
+      'archiving a character must remove their backstory from discovery');
     const purged=store.forWorld(worldId).load().state;
     purged.sessions=[];purged.characters=[];
-    store.forWorld(worldId).save(purged,saved.revision+1,{worldId,purgedSceneId:scene.id,purgedCharacterId:character.id});
+    store.forWorld(worldId).save(purged,saved.revision+2,{
+      worldId,purgedSceneId:scene.id,purgedCharacterId:character.id
+    });
     assert.equal(findUniverseSources(db,{query:'Market Square'}).length,0);
     assert.equal(findUniverseSources(db,{query:'Docks Council'}).length,0);
     assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
