@@ -39,7 +39,7 @@ export function renderAtlasPanel(host,session,api) {
 }
 export function renderRelationsPanel(host,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,addWorldChooser,selectedWorld,
-    postWorld,permanentlyDeleteWorldEntry,state,showError}=api;
+    postWorld,permanentlyDeleteWorldEntry,state,showError,openCharacterProfile}=api;
   host.innerHTML=`<h2 class="panel-title">Relationship Codex</h2><p class="help">Create or permanently delete world people, entities and relationships. Archived character profiles are hidden until restored; deleting an independent world entity also deletes its linked relationships.</p><div class="group"><label class="field-label" for="relations-world">World</label><select id="relations-world"></select></div><div id="relations-list"></div><div class="group"><label class="field-label" for="relations-entity-name">Add person or entity</label><input id="relations-entity-name" maxlength="120" placeholder="Name"/><select id="relations-entity-kind"><option value="character">Character</option><option value="organization">Organization</option><option value="faction">Faction</option><option value="object">Object</option><option value="concept">Concept</option></select><button id="relations-add-entity" class="subtle-button">Add to world</button></div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="3" maxlength="2000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
   addWorldChooser('relations-world');
@@ -54,9 +54,25 @@ export function renderRelationsPanel(host,api) {
   for(const entity of entities){
     const row=el('div','','lore-card');
     row.append(el('strong',entity.name),el('p',entity.kind,'help'));
-    const remove=el('button','Permanently delete entity','mini-action');
-    remove.onclick=()=>{void permanentlyDeleteWorldEntry('entity',entity,world.id);};
-    row.append(remove);list.append(row);
+    const character=entity.sourceCharacterId
+      ?state.characters.find(c=>c.id===entity.sourceCharacterId&&!c.trashedAt):null;
+    if(character){
+      row.append(el('p','Linked character profile · archive and permanently delete from Characters → Trash. This entity is a world identity mirror.','help'));
+      const edit=el('button','Edit character profile','subtle-button');
+      edit.onclick=()=>openCharacterProfile(character);
+      row.append(edit);
+      const copies=entities.filter(e=>e.sourceCharacterId===entity.sourceCharacterId).length;
+      if(copies>1){
+        const duplicate=el('button','Delete duplicate world entry','mini-action');
+        duplicate.onclick=()=>{void permanentlyDeleteWorldEntry('entity',entity,world.id);};
+        row.append(duplicate);
+      }
+    }else{
+      const remove=el('button','Permanently delete entity','mini-action');
+      remove.onclick=()=>{void permanentlyDeleteWorldEntry('entity',entity,world.id);};
+      row.append(remove);
+    }
+    list.append(row);
   }
   if(!entities.length)list.append(el('p','Add a couple of characters before connecting them.','empty-note'));
   for(const edge of worldLibrary.relationships?.filter(r=>r.worldId===world.id &&
