@@ -153,6 +153,10 @@ test('reviewed mention creates one linked canon record and retains source proven
     });
     assert.notEqual(cross.status,201);
     assert.deepEqual(store.forWorld(foreign.id).worlds.list().entryProvenance,[]);
+    store.forWorld(worldId).worlds.deleteEntry({worldId,kind:'entity',id:entity.id});
+    store.forWorld(worldId).worlds.deleteEntry({worldId,kind:'location',id:place.id});
+    assert.deepEqual(store.forWorld(worldId).worlds.list().entryProvenance,[],
+      'Permanent canon deletion must also purge only that entry provenance');
     assert.equal(store.forWorld(worldId).db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   }finally{await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
 });
