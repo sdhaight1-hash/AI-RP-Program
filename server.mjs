@@ -37,6 +37,7 @@ const ALLOWED = new Map([
   ['/world-timelines.mjs', ['world-timelines.mjs', 'text/javascript; charset=utf-8']],
   ['/world-scene-assist.mjs', ['world-scene-assist.mjs', 'text/javascript; charset=utf-8']],
   ['/authoring/world-scene.mjs', ['../authoring/world-scene.mjs', 'text/javascript; charset=utf-8']],
+  ['/world/blueprint.mjs', ['../world/blueprint.mjs', 'text/javascript; charset=utf-8']],
   ['/encounters/library.mjs', ['../encounters/library.mjs', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/studio-shell.css', ['studio-shell.css', 'text/css; charset=utf-8']],
