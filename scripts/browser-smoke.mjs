@@ -231,6 +231,17 @@ async function main(){
     `);
     assert.deepEqual(timelinesView,{pane:'timelines',create:true,clock:true,nav:true,focused:false},
       'World & timelines must be an inline editor, not a second focused overlay');
+    const worldComposer=await script(`
+      return {
+        create:!!document.querySelector('.world-create-composer #world-create'),
+        assistant:!!document.querySelector('.world-composer-assist .ai-authoring-panel'),
+        library:!!document.querySelector('.world-existing-list #world-library-list'),
+        administration:!!document.querySelector('.world-admin-tools #world-impact-preview'),
+        columns:getComputedStyle(document.querySelector('.world-composer-layout')).gridTemplateColumns
+      };
+    `);
+    assert.ok(worldComposer.create&&worldComposer.assistant&&worldComposer.library&&worldComposer.administration,
+      'World creation, co-author, library and administration must be separate panels');
     await screenshot('03-world-timelines-editor');
     const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
       encodeURIComponent(store.activeWorldId))).json()).revision;
@@ -811,10 +822,36 @@ async function main(){
       document.querySelector('#close-inspector').click();
       document.querySelector('button[data-workspace="story"]').click();
       document.querySelector('#new-session').click();
+      return document.querySelector('#new-scene-dialog').open;
+    `);
+    const composed=await script(`
+      const dialog=document.querySelector('#new-scene-dialog');
+      const parts=['scene-setup-panel','scene-draft-panel','scene-assist-panel'].every(name=>
+        !!dialog.querySelector('.'+name));
+      return {open:dialog.open,parts,footer:!!dialog.querySelector('.scene-composer-footer'),
+        world:document.querySelector('#new-scene-world-context').textContent,
+        context:document.querySelector('#new-scene-context-summary').textContent};
+    `);
+    assert.ok(composed.open&&composed.parts&&composed.footer,
+      'Scene composition must clearly separate cast, writing and co-author');
+    assert.ok(composed.world.length&&composed.context.length,'Scene setup should explain its active context');
+    await screenshot('07c-new-scene-composer-desktop');
+    await size(390,760);
+    const narrow=await script(`
+      const dialog=document.querySelector('#new-scene-dialog');
+      const rect=dialog.getBoundingClientRect();
+      const footer=dialog.querySelector('.scene-composer-footer').getBoundingClientRect();
+      return {width:window.innerWidth,dialogWidth:rect.width,footerWidth:footer.width,
+        bodyWidth:document.documentElement.scrollWidth,footerVisible:footer.top>=0&&footer.bottom<=window.innerHeight+5};
+    `);
+    assert.ok(narrow.dialogWidth<=narrow.width+3&&narrow.bodyWidth<=narrow.width+8&&narrow.footerVisible,
+      'Mobile scene dialog must not overflow or hide creation actions: '+JSON.stringify(narrow));
+    await screenshot('07d-new-scene-composer-mobile');
+    await size(1440,900);
+    await script(`
       const target=document.querySelector('#new-scene-ai-host select[aria-label="AI generation focus"]');
       if(!target)return false;
-      const button=document.querySelector('#new-scene-ai-host .ai-draft-generate');
-      button.click();
+      document.querySelector('#new-scene-ai-host .ai-draft-generate').click();
       return true;
     `);
     await until(async()=>script(`
