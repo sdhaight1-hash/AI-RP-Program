@@ -242,6 +242,31 @@ async function main(){
     `);
     assert.ok(worldComposer.create&&worldComposer.assistant&&worldComposer.library&&worldComposer.administration,
       'World creation, co-author, library and administration must be separate panels');
+    // Editing universe identity must not allocate a replacement universe,
+    // alter scene IDs, or change the user's active continuity.
+    const initialUniverse=store.worlds.list().worlds.find(w=>w.id===store.activeWorldId);
+    const initialWorldCount=store.worlds.list().worlds.length;
+    assert.equal(await script(`
+      const section=document.querySelector('#universe-identity-editor');
+      const name=document.querySelector('#universe-edit-name');
+      const description=document.querySelector('#universe-edit-description');
+      if(!section||!name||!description)return false;
+      name.value='Revised Browser Connical Universe';
+      name.dispatchEvent(new Event('input',{bubbles:true}));
+      description.value='A preserved continuity with a revised introductory foundation.';
+      description.dispatchEvent(new Event('input',{bubbles:true}));
+      return !document.querySelector('#universe-edit-save').disabled;
+    `),true,'existing universe identity must be directly editable');
+    await script("document.querySelector('#universe-edit-save').click();return true");
+    await until(async()=>store.worlds.list().worlds.some(x=>x.id===initialUniverse.id&&
+      x.name==='Revised Browser Connical Universe'),'universe rename persisted');
+    assert.equal(store.worlds.list().worlds.length,initialWorldCount,
+      'in-place revision cannot create another universe');
+    assert.equal(store.activeWorldId,initialUniverse.id,
+      'editing the universe must not switch or replace continuity');
+    assert.equal(store.forWorld(initialUniverse.id).db.prepare(
+      'SELECT name FROM worlds WHERE id=?').get(initialUniverse.id).name,'Revised Browser Connical Universe');
+    await screenshot('03b-in-place-universe-revision');
     await screenshot('03-world-timelines-editor');
     const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
       encodeURIComponent(store.activeWorldId))).json()).revision;
