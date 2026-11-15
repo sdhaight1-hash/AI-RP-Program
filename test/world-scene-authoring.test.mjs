@@ -89,3 +89,36 @@ test('world and scene authoring JS modules are explicitly served over local HTTP
     assert.equal((await fetch(base+'/authoring/private.mjs')).status,404);
   }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test('changing guidance, selected field, cast, or current chronology invalidates an unfinished review',()=>{
+  assert.notEqual(
+    makeWorldAuthoringRequest({name:'Harbor',guidance:'Grounded'}).basis,
+    makeWorldAuthoringRequest({name:'Harbor',guidance:'Surreal'}).basis);
+  assert.notEqual(
+    makeWorldAuthoringRequest({name:'Harbor',target:'description'}).basis,
+    makeWorldAuthoringRequest({name:'Harbor',target:'name'}).basis);
+  const base={worldId,library,characters:[character],characterId:character.id,
+    channelId:'text_message',scene:{id:'scene-1',recentDialogue:[{role:'user',content:'Hello'}]}};
+  assert.notEqual(makeSceneAuthoringRequest({...base,guidance:'Calm'}).basis,
+    makeSceneAuthoringRequest({...base,guidance:'Suspenseful'}).basis);
+  assert.notEqual(makeSceneAuthoringRequest(base).basis,
+    makeSceneAuthoringRequest({...base,scene:{id:'scene-1',recentDialogue:[{role:'user',content:'Goodbye'}]}}).basis);
+  assert.throws(()=>makeSceneAuthoringRequest({...base,castIds:['foreign-actor',character.id]}),
+    /unavailable or foreign-world/);
+});
+
+test('ongoing scene generator sees only active-world cast and existing scenes without rewriting old dialogue',()=>{
+  const colleague={...createCharacter('Colleague'),worldId};
+  const req=makeSceneAuthoringRequest({worldId,library,characters:[character,colleague],
+    characterId:character.id,castIds:[character.id,colleague.id],
+    channelId:'phone_call',target:'direction',scene:{id:'scene-1',
+      recentDialogue:[{role:'user',content:'Where did the registry go?'}]},
+    existing:{direction:'A call at sunset'}});
+  assert.match(req.messages[0].content,/CURRENT direction of an ongoing/);
+  assert.match(req.messages[0].content,/do not rewrite/i);
+  assert.match(req.messages[1].content,/Colleague/);
+  assert.match(req.messages[1].content,/Where did the registry go/);
+  assert.match(req.messages[1].content,/A call at sunset/);
+  assert.deepEqual(parseAuthoringSuggestions('{"direction":"The conversation stays tentative."}',req),
+    {direction:'The conversation stays tentative.'});
+});

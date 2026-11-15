@@ -761,6 +761,42 @@ function renderInspector() {
   } else if (currentTab === 'scene') {
     host.innerHTML=`<h2 class="panel-title">Scene direction</h2><p class="help">These details describe the shared, witnessed scene. Secret plot notes belong in private lore, not here.</p>${field('location','Location',s.location)}${field('worldTime','Fictional time',s.worldTime)}${field('atmosphere','Environment and atmosphere',s.atmosphere,{multiline:true,rows:3})}${field('publicSummary','What every present character knows',s.publicSummary,{multiline:true,rows:4})}${field('direction','Direction: tempo, focus and tone',s.direction,{multiline:true,rows:4})}<h3 class="field-label">Narrative director</h3><div class="group"><label class="field-label" for="director-mode">Direction mode</label><select id="director-mode"><option value="sandbox">Sandbox · Emergent</option><option value="collaborative">Collaborative · Balanced</option><option value="directed">Directed · Story beats</option></select></div><div id="director-controls"></div><h3 class="field-label">Manual scene appraisal (local scene state)</h3><select id="event-kind"><option>observation</option><option>action</option><option>revelation</option><option>relationship</option><option>world-change</option></select><textarea id="event-description" rows="3" placeholder="What objectively happened? No automatic emotional inference."></textarea><div id="appraisal-controls"></div><button id="event-record" class="subtle-button">Commit witnessed event + appraisal</button><div id="scene-events"></div>`;
     attachFields((key,val)=>{s[key]=val;});
+    // Scene AI is a reviewed authoring aid, not an event writer. The current
+    // world, cast, channel and conversation form its immutable draft basis.
+    const aiSceneHost=el('div','','group');
+    const directorHeading=[...host.querySelectorAll('h3')]
+      .find(node=>node.textContent==='Narrative director');
+    directorHeading?.before(aiSceneHost);
+    const sourceWorldId=activeWorldId,sourceSceneId=s.id;
+    const currentScene=()=>activeWorldId===sourceWorldId&&activeSession()?.id===sourceSceneId&&
+      currentTab==='scene'&&!running;
+    const sceneRequest=(target,guidance)=>makeSceneAuthoringRequest({
+      worldId:sourceWorldId,library:worldLibrary,characters:state.characters,
+      characterId:s.characterId,castIds:[...s.castIds],channelId:s.channelId,
+      existing:Object.fromEntries(['title','direction','atmosphere','authorNote'].map(key=>[key,s[key]||''])),
+      scene:{id:s.id,timelineId:s.timelineId,location:s.location,
+        publicSummary:String(s.publicSummary||'').slice(0,1300),
+        sceneMemory:String(s.summary||'').slice(0,1300),
+        recentDialogue:s.messages.slice(-10).map(m=>({role:m.role,
+          speaker:m.role==='assistant'?state.characters.find(c=>c.id===m.speakerId)?.name||'NPC':'Player',
+          content:String(m.content||'').slice(0,320)}))},
+      lore:state.lore,guidance,target
+    });
+    mountWorldSceneAssistant(aiSceneHost,{
+      mode:'scene',getModel:()=>state.settings.model,isCurrent:currentScene,
+      beforeGenerate:async()=>{await requireSavedStory();if(!worldLibrary)await refreshWorldLibrary();},
+      getRequest:sceneRequest,
+      applyMessage:'Reviewed scene direction saved. Existing dialogue, NPC memories and timeline events were not changed.',
+      onApply:patch=>{
+        if(!currentScene())throw Error('Switch back to the original scene before approving.');
+        for(const [key,value] of Object.entries(patch)){
+          s[key]=value;
+          const editable=$('field-'+key);
+          if(editable)editable.value=value;
+        }
+        save();renderLists();renderHeader();
+      }
+    });
     s.director ||= {mode:'collaborative',pace:.5,tension:.5,initiative:.5,narration:.5};
     $('director-mode').value=s.director.mode;
     $('director-mode').onchange=e=>{s.director.mode=e.target.value;save();};
