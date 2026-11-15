@@ -4,12 +4,13 @@ import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
 // The workspace is rebuilt after world-catalog refreshes. Keep the local,
 // uncommitted creation draft outside the disposable DOM, not in world canon.
 let pendingWorldDraft={name:'',description:''};
+let creatingWorld=false;
 // World and timeline editor presentation, wired to explicit world-scoped
 // callbacks. Avoids mutating the browser's active-world selection implicitly.
 export function renderWorldTimelineEditor(host,s,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
     activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
-    save,renderInspector,showError,running,fetch,getModel,beforeCreateWorld}=api;
+    save,renderInspector,showError,running,fetch,getModel,beforeCreateWorld,getCurrentWorldId}=api;
 
   host.innerHTML = `
   <div class="world-creation-shell">
@@ -110,6 +111,7 @@ export function renderWorldTimelineEditor(host,s,api) {
   const rememberWorldDraft=()=>{
     pendingWorldDraft={name:worldName.value,description:worldDescription.value};
   };
+  $('world-create').disabled=creatingWorld;
   worldName.addEventListener('input',rememberWorldDraft);
   worldDescription.addEventListener('input',rememberWorldDraft);
   // Drafting a world never imports another world's private canon.
@@ -211,7 +213,6 @@ export function renderWorldTimelineEditor(host,s,api) {
       showError();renderHeader();
     }catch(err){showError(err.message);}
   };
-  let creatingWorld=false;
   $('world-create').onclick=async()=>{
     if(creatingWorld)return;
     const button=$('world-create');
@@ -220,6 +221,7 @@ export function renderWorldTimelineEditor(host,s,api) {
     try{
       if(!serverStorage)throw Error('The SQLite server must be connected to create worlds.');
       const name=worldName.value.trim();
+      const sourceWorldId=getCurrentWorldId();
       if(!name)throw Error('Give the new world a name before creating it.');
       // Confirm pending replies, unsent messages and SQLite writes BEFORE
       // committing a durable new world, never after the POST succeeds.
@@ -230,6 +232,8 @@ export function renderWorldTimelineEditor(host,s,api) {
       const data=await res.json();if(!res.ok)throw Error(data.error||'Could not create world');
       created=data;
       pendingWorldDraft={name:'',description:''};
+      if(getCurrentWorldId()!==sourceWorldId)
+        throw Error('The active world changed while this world was being created.');
       const switched=await switchWorld(data.id,{confirmed:true});
       if(!switched)throw Error('World was created, but could not be opened automatically.');
       showError();
@@ -242,7 +246,7 @@ export function renderWorldTimelineEditor(host,s,api) {
       }else showError(error.message);
     }finally{
       creatingWorld=false;
-      if(button.isConnected)button.disabled=false;
+      if($('world-create'))$('world-create').disabled=false;
     }
   };
   $('timeline-create').onclick=async()=>{
