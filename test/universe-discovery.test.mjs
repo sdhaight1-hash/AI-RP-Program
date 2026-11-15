@@ -108,7 +108,6 @@ test('canon group entries are independently editable with scoped optimistic conf
     assert.equal(store.forWorld(world).db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   }finally{
     await new Promise(resolve=>app.close(resolve));
-    store.close();
     rmSync(dir,{recursive:true,force:true});
   }
 });
