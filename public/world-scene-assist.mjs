@@ -24,14 +24,14 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
   guidance.placeholder='Optional creative direction…';
   const reference=make('p','','help');
   const actions=make('div','','inline-actions');
-  const generate=make('button','Generate suggestions','subtle-button');generate.type='button';
+  const generate=make('button','Generate suggestions','subtle-button');generate.type='button';generate.classList.add('ai-draft-generate');
   const stop=make('button','Stop','subtle-button');stop.type='button';stop.classList.add('hidden');
   actions.append(generate,stop);
   const status=make('p','','help');status.setAttribute('role','status');
   const preview=make('div','','group');preview.hidden=true;
   const raw=make('textarea');raw.rows=5;raw.maxLength=16000;raw.setAttribute('aria-label','Editable model JSON');
   const changes=make('div','','group');
-  const apply=make('button','Review and apply checked fields','primary-button');apply.type='button';
+  const apply=make('button','Review and apply checked fields','primary-button');apply.type='button';apply.classList.add('ai-draft-apply');
   preview.append(make('label','AI response (editable JSON)','field-label'),raw,changes,apply);
   panel.append(title,help,make('label','What to develop','field-label'),target,reference,
     make('label','Creative direction','field-label'),guidance,actions,status,preview);
