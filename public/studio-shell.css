@@ -1008,14 +1008,17 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
   padding:10px 15px;min-height:40px;border-radius:10px;font-size:12px;font-weight:650}
 .world-editor-tab:hover{background:var(--ux-soft);color:var(--text)}
 .world-editor-tab.active{background:var(--ux-soft);color:var(--text);border-color:var(--accent)}
-.workspace-content > .panel-title{font-family:var(--ux-serif);font-size:30px;margin:8px 0 0}
-.workspace-content > .group{max-width:680px}
-.workspace-content > #atlas-places,.workspace-content > #relations-list{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-.workspace-content > #atlas-places .lore-card,.workspace-content > #relations-list .lore-card{margin:0;min-width:0}
-.workspace-content > .group .field-label{margin:13px 0 7px}
-.workspace-content > .group :where(input,textarea,select){max-width:680px}
+.world-editor-content > .panel-title{font-family:var(--ux-serif);font-size:30px;margin:8px 0 0}
+.world-editor-content > .group{max-width:680px}
+.world-editor-content > #atlas-places,.world-editor-content > #relations-list{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.world-editor-content > #atlas-places .lore-card,.world-editor-content > #relations-list .lore-card{margin:0;min-width:0}
+.world-editor-content > .group .field-label{margin:13px 0 7px}
+.world-editor-content > .group :where(input,textarea,select){max-width:680px}
 @media(max-width:760px){
   .world-editor-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
   .world-editor-tab{font-size:11px;padding:8px 5px}
-  .workspace-content > #atlas-places,.workspace-content > #relations-list{grid-template-columns:1fr}
+  .world-editor-content > #atlas-places,.world-editor-content > #relations-list{grid-template-columns:1fr}
 }
+
+.world-editor-content{min-width:0;display:grid;gap:12px}
+.world-editor-content > .help{margin:0 0 8px}
