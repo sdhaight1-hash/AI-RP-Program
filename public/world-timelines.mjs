@@ -7,9 +7,101 @@ export function renderWorldTimelineEditor(host,s,api) {
     activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
     save,renderInspector,showError,running,fetch,getModel}=api;
 
-  host.innerHTML = `<h2 class="panel-title">Worlds, timelines & fictional clocks</h2><p class="help">Every world has independent canon and timelines. Open a world explicitly before creating or editing its timelines. Places and relationships are in the adjacent World sections.</p><div id="world-library-list"></div><div class="group"><label class="field-label" for="world-new-name">New world</label><input id="world-new-name" maxlength="120" placeholder="e.g. Seaside Apartments"/><label class="field-label" for="world-new-description">World description</label><textarea id="world-new-description" rows="3" maxlength="4000" placeholder="Setting, era, tone and everyday life..."></textarea><button class="primary-button" id="world-create">Create world</button></div><div class="group"><label class="field-label" for="timeline-new-name">New timeline in the current world</label><input id="timeline-new-name" maxlength="120" placeholder="Timeline name"/><button class="subtle-button" id="timeline-create">Create timeline</button></div><div class="group"><label class="field-label" for="timeline-select">Timeline in this world</label><select id="timeline-select"></select><p class="help">Selecting a timeline lets you set its clock below. Applying it to the active scene is a separate action.</p><button id="timeline-assign" class="subtle-button">Place this scene in selected timeline</button></div><div class="group"><label class="field-label" for="timeline-clock-utc">Timeline clock · UTC reference</label><input id="timeline-clock-utc" type="datetime-local"/><label class="field-label" for="timeline-clock-zone">Display time zone (IANA)</label><input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/><button class="subtle-button" id="timeline-clock-save">Set fictional time</button><p class="help">Historical scenes retain their manually written dates until you explicitly set a timeline clock.</p></div><div class="group" id="world-deletion-impact"><h3 class="builder-subtitle">Deletion impact — read only</h3><p class="help">Inspect which records depend on a world or timeline before any future permanent removal. The preview cannot delete or modify anything; world and timeline destruction are not yet enabled.</p><div class="inline-actions"><button id="world-impact-preview" class="subtle-button">Preview this world</button><button id="timeline-impact-preview" class="subtle-button">Preview selected timeline</button></div><div id="world-impact-report" aria-live="polite"></div></div><div class="group"><h3 class="builder-subtitle">Encounter templates</h3><p class="help">Reusable openings and communication modes live in their own Encounters workspace. Use it to remove templates blocking permanent character deletion.</p><button id="world-manage-encounters" class="subtle-button">Manage encounters</button></div><p class="footer-note">Each world has its own characters, lore, locations, timelines, and templates. Existing stories were imported into separate world storage.</p>`;
+  host.innerHTML = `
+  <div class="world-creation-shell">
+    <header class="world-editor-hero">
+      <span class="eyebrow">UNIVERSE WORKSPACE</span>
+      <h2 class="panel-title">Worlds & timelines</h2>
+      <p>Every world is an independent continuity. Create a setting, then develop its people, places and timelines inside that world. AI suggestions are drafts until you approve them.</p>
+    </header>
+    <div class="world-composer-layout">
+      <section class="world-create-composer" aria-labelledby="world-compose-heading">
+        <div class="world-section-heading">
+          <span class="world-step">01 / CREATE</span>
+          <h3 id="world-compose-heading">Begin a new world</h3>
+          <p>Start with a seed idea or write everything yourself. Nothing is copied from another world.</p>
+        </div>
+        <div class="world-composer-grid">
+          <div class="world-composer-fields">
+            <label class="field-label" for="world-new-name">World identity</label>
+            <input id="world-new-name" maxlength="120" placeholder="Name your universe…" autocomplete="off"/>
+            <label class="field-label" for="world-new-description">Setting foundation</label>
+            <textarea id="world-new-description" rows="9" maxlength="4000" placeholder="The time period, geography, cultures, ordinary life, tensions, atmosphere…"></textarea>
+            <p class="help">This establishes the world's starting premise—not its complete history. You can develop locations, people and relationships afterward.</p>
+            <div class="world-create-action">
+              <span class="world-save-note">Separate continuity · No automatic canon changes</span>
+              <button class="primary-button" id="world-create">Create & open world</button>
+            </div>
+          </div>
+          <div class="world-composer-assist" id="world-ai-slot" aria-label="World creation writing partner"></div>
+        </div>
+      </section>
+      <aside class="world-existing-list" aria-labelledby="world-existing-heading">
+        <div class="world-section-heading">
+          <span class="world-step">02 / EXPLORE</span>
+          <h3 id="world-existing-heading">Your universes <span id="world-library-count" class="world-count"></span></h3>
+          <p>Open an existing world without merging its story or canon into another.</p>
+        </div>
+        <div id="world-library-list" class="world-library-entries"></div>
+      </aside>
+    </div>
+    <section class="world-timeline-tools" aria-labelledby="world-timeline-heading">
+      <div class="world-section-heading">
+        <span class="world-step">CURRENT WORLD</span>
+        <h3 id="world-timeline-heading">Timeline & continuity</h3>
+        <p>Each timeline belongs to the world you currently have open. Changing the scene's timeline is always a separate decision.</p>
+      </div>
+      <div class="world-timeline-grid">
+        <div class="world-tool-card">
+          <h4>New timeline</h4>
+          <label class="field-label" for="timeline-new-name">Timeline name</label>
+          <input id="timeline-new-name" maxlength="120" placeholder="Main continuity, alternate ending…"/>
+          <button class="subtle-button" id="timeline-create">Create timeline</button>
+        </div>
+        <div class="world-tool-card">
+          <h4>Selected timeline</h4>
+          <label class="field-label" for="timeline-select">Current-world timelines</label>
+          <select id="timeline-select"></select>
+          <button id="timeline-assign" class="subtle-button">Place current scene here</button>
+          <p class="help">This affects the active scene only, not other scenes.</p>
+        </div>
+        <div class="world-tool-card">
+          <h4>Fictional clock</h4>
+          <label class="field-label" for="timeline-clock-utc">UTC reference date & time</label>
+          <input id="timeline-clock-utc" type="datetime-local"/>
+          <label class="field-label" for="timeline-clock-zone">Display time zone</label>
+          <input id="timeline-clock-zone" value="UTC" placeholder="America/Los_Angeles"/>
+          <button class="subtle-button" id="timeline-clock-save">Set fictional time</button>
+          <p class="help">Written historical dates do not change automatically.</p>
+        </div>
+      </div>
+    </section>
+    <section class="world-admin-tools" aria-label="World safety and encounter tools">
+      <div class="world-section-heading">
+        <span class="world-step">ADMINISTRATION</span>
+        <h3>Review & manage</h3>
+        <p>These tools inspect dependencies and manage reusable openings. They do not affect the world creation draft above.</p>
+      </div>
+      <div class="world-admin-grid">
+        <div class="world-tool-card" id="world-deletion-impact">
+          <h4>Deletion impact — read only</h4>
+          <p class="help">See records affected before any future permanent removal. Destructive world and timeline removal is not enabled.</p>
+          <div class="inline-actions">
+            <button id="world-impact-preview" class="subtle-button">Preview world dependencies</button>
+            <button id="timeline-impact-preview" class="subtle-button">Preview selected timeline</button>
+          </div>
+          <div id="world-impact-report" aria-live="polite"></div>
+        </div>
+        <div class="world-tool-card">
+          <h4>Encounter templates</h4>
+          <p class="help">Edit reusable openings and communication modes in the Encounters workspace. Remove obsolete templates here before permanently deleting linked characters.</p>
+          <button id="world-manage-encounters" class="subtle-button">Manage encounter templates</button>
+        </div>
+      </div>
+    </section>
+  </div>`;
   // Drafting a world never imports another world's private canon.
-  mountWorldSceneAssistant($('world-create').parentElement,{
+  mountWorldSceneAssistant($('world-ai-slot'),{
     mode:'world',getModel,isCurrent:()=>host.isConnected&&!running,
     getRequest:(target,guidance)=>makeWorldAuthoringRequest({
       name:$('world-new-name').value,description:$('world-new-description').value,target,guidance
@@ -25,12 +117,15 @@ export function renderWorldTimelineEditor(host,s,api) {
     if (!loadingWorlds) refreshWorldLibrary();
     return;
   }
+  $('world-library-count').textContent='('+worldLibrary.worlds.length+')';
   const timelineSelect=$('timeline-select');
   for(const world of worldLibrary.worlds){
      const card=el('div','','lore-card');
-    const title=el('strong',world.name);const desc=el('p',world.description||'Blank canon world','help');
+    const title=el('strong',world.name);const desc=el('p',world.description||'No setting description yet','help');
+    card.classList.add('world-library-card');
+    if(world.id===activeWorldId)card.classList.add('is-current');
     card.append(title,desc);
-    const open=el('button',world.id===activeWorldId?'Current World':'Open World','subtle-button');
+    const open=el('button',world.id===activeWorldId?'Currently open':'Open world','subtle-button');
     open.disabled=world.id===activeWorldId;
     open.onclick=()=>{void switchWorld(world.id).catch(error=>showError(error.message));};
     card.append(open);
