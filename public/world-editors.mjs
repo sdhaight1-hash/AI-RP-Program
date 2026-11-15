@@ -1,9 +1,11 @@
+import {makeLocationAuthoringRequest} from '../authoring/world-scene.mjs';
+import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
 // World-scoped Atlas and Relations editors. The caller owns world identity,
 // writes and the selected scene; this module owns only editor presentation.
 // All interactions invoke the same guarded endpoints as the original UI.
 export function renderAtlasPanel(host,session,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,addWorldChooser,selectedWorld,
-    postWorld,permanentlyDeleteWorldEntry,save,renderHeader,renderInspector,showError}=api;
+    postWorld,permanentlyDeleteWorldEntry,save,renderHeader,renderInspector,showError,getModel}=api;
   host.innerHTML=`<h2 class="panel-title">World Atlas</h2><p class="help">Create and connect locations within the active universe. Places can be a character’s usual home or workplace without declaring where they are in the current scene.</p><div class="group"><label class="field-label" for="atlas-world">Selected canon world</label><select id="atlas-world"></select></div><div id="atlas-places"></div><div class="group"><label class="field-label" for="atlas-name">New location</label><input id="atlas-name" maxlength="120" placeholder="e.g. Mara's Apartment"/><select id="atlas-kind"><option value="region">Region</option><option value="town">Town</option><option value="neighborhood">Neighborhood</option><option value="building">Building</option><option value="room">Room</option><option value="outdoor">Outdoor area</option><option value="other">Other</option></select><label class="field-label" for="atlas-parent">Inside</label><select id="atlas-parent"></select><textarea id="atlas-description" rows="3" maxlength="4000" placeholder="Description, atmosphere, daily life..."></textarea><button class="primary-button" id="atlas-create">Create place</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
   addWorldChooser('atlas-world');
@@ -32,6 +34,18 @@ export function renderAtlasPanel(host,session,api) {
     remove.onclick=()=>{void permanentlyDeleteWorldEntry('location',loc,world.id);};
     card.append(remove);container.append(card);
   }
+  mountWorldSceneAssistant($('atlas-create').parentElement,{
+    mode:'location',getModel,isCurrent:()=>host.isConnected&&selectedWorld()?.id===world.id,
+    getRequest:(target,guidance)=>makeLocationAuthoringRequest({
+      worldId:world.id,library:worldLibrary,kind:$('atlas-kind').value,
+      parentId:$('atlas-parent').value||null,name:$('atlas-name').value,
+      description:$('atlas-description').value,guidance,target
+    }),
+    onApply:patch=>{
+      if(patch.name!==undefined)$('atlas-name').value=patch.name;
+      if(patch.description!==undefined)$('atlas-description').value=patch.description;
+    }
+  });
   $('atlas-create').onclick=async()=>{
     try{await postWorld('/api/worlds/locations',{worldId:world.id,name:$('atlas-name').value,kind:$('atlas-kind').value,parentId:$('atlas-parent').value||null,description:$('atlas-description').value});showError();}
     catch(err){showError(err.message);}
