@@ -186,6 +186,12 @@ test('SSE model reader never authenticates truncated, errored or invalid streams
   for(const byte of bytes)valid.feed(new Uint8Array([byte]));
   assert.equal(valid.text,'café');
   assert.equal(valid.completed(),true);
+  const crlf=createReplyStreamReader();
+  const payload=('data: '+JSON.stringify({choices:[{delta:{content:'Split frames work'}}]})+
+    '\r\n\r\ndata: [DONE]\r\n\r\n');
+  for(const piece of payload)crlf.feed(piece);
+  assert.equal(crlf.text,'Split frames work');
+  assert.equal(crlf.completed(),true);
 });
 
 
