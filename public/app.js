@@ -253,6 +253,8 @@ function openNewSceneDialog() {
   if(running||sceneCreationInFlight)return;
   sceneCreatedUnconfirmed=false;
   $('new-scene-confirm').disabled=false;
+  $('new-scene-cancel').disabled=false;
+  $('new-scene-manage-encounters').disabled=false;
   const actors=state.characters.filter(c=>!c.trashedAt);
   if(!actors.length)return showError('Create a character inside this world first.');
   const chosen=$('new-scene-character');chosen.replaceChildren();
@@ -616,6 +618,7 @@ const renderWorldTimelineEditor=(host,s)=>drawTimelines(host,s,{
   $,el,worldLibrary,loadingWorlds,refreshWorldLibrary,
   activeWorldId,serverStorage,postWorld,switchWorld,setWorkspace,renderHeader,
   save,renderInspector,showError,running,fetch,getModel:()=>state.settings.model,
+  getCurrentWorldId:()=>activeWorldId,
   beforeCreateWorld:async()=>{
     if(switchingWorld||destructiveActionInFlight||running||aiDraftController||
        fidelityController||localEvalController||worldEntryController)
@@ -2342,11 +2345,16 @@ for(const channel of CHANNEL_OPTIONS){
     $(id).add(new Option(channel.icon+' '+channel.label,channel.id));
 }
 $('new-session').onclick=()=>openNewSceneDialog();
-$('new-scene-cancel').onclick=()=>$('new-scene-dialog').close();
+$('new-scene-cancel').onclick=()=>{if(!sceneCreationInFlight)$('new-scene-dialog').close();};
+$('new-scene-dialog').addEventListener('cancel',event=>{
+  if(sceneCreationInFlight)event.preventDefault();
+});
 $('new-scene-confirm').onclick=async()=>{
   if(sceneCreationInFlight||sceneCreatedUnconfirmed)return;
   const button=$('new-scene-confirm');
   sceneCreationInFlight=true;button.disabled=true;
+  $('new-scene-cancel').disabled=true;
+  $('new-scene-manage-encounters').disabled=true;
   let created=null;
   try {
     if(running||switchingWorld)throw Error('Finish the current operation before starting a scene.');
@@ -2377,10 +2385,15 @@ $('new-scene-confirm').onclick=async()=>{
       :error.message);
   } finally {
     sceneCreationInFlight=false;
-    if(!sceneCreatedUnconfirmed)button.disabled=false;
+    if(!sceneCreatedUnconfirmed){
+      button.disabled=false;
+      $('new-scene-cancel').disabled=false;
+      $('new-scene-manage-encounters').disabled=false;
+    }
   }
 };
 $('new-scene-manage-encounters').onclick=()=>{
+  if(sceneCreationInFlight)return;
   const templateId=$('new-scene-encounter').value||null;
   $('new-scene-dialog').close();
   openEncounterManager(templateId);
