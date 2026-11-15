@@ -1,7 +1,7 @@
 // One durable SQLite database per fictional world. The registry contains only
 // world labels and selection state: no lore, character data or story history.
 import { DatabaseSync } from 'node:sqlite';
-import {syncUniverseSources,discoverIndexedUniverseMentions} from './source-index.mjs';
+import {syncUniverseSources,discoverIndexedUniverseMentions,createSourcedUniverseEntry,listUniverseEntryProvenance} from './source-index.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, existsSync, readdirSync, renameSync, copyFileSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
@@ -135,6 +135,11 @@ export class WorldPartitionStore {
       createTimeline: input => {this.assertWorld(input.worldId);return this.current.worlds.createTimeline(input);},
       forkTimeline: input => this.current.worlds.forkTimeline(input),
       createLocation: input => {this.assertWorld(input.worldId);return this.current.worlds.createLocation(input);},
+      createReviewedEntry: input => {
+        this.assertWorld(input.worldId);
+        return createSourcedUniverseEntry(this.current.db,this.current.worlds,input);
+      },
+      entryProvenance: () => listUniverseEntryProvenance(this.current.db,this.activeWorldId),
       connectLocations: input => {this.assertWorld(input.worldId);return this.current.worlds.connectLocations(input);},
       createEntity: input => {
         this.assertWorld(input.worldId);
