@@ -45,6 +45,20 @@ A culture may transcend political groups; a family may function as a clan, merch
 
 **Commit** validates world ID, source version and expected known-entry revision. Persist any approved source link in the same transaction as a new/updated entity. A stale or deleted quote invalidates the candidate; archive/retraction must not leave phantom canon.
 
+## Integration checkpoint — persistent source index (PR #66)
+
+The lexically reviewed first stage now has a durable, per-universe SQLite source registry and FTS5 index:
+
+- **Canon storage:** every world database owns its own indexed source texts and fingerprinted source IDs; normal story saves synchronize the index within the same SQLite transaction as the canonical state.
+- **Authoring inputs:** character histories (including familyHistory and formativeEvents), physical/virtual location descriptions, cultures, groups, relationship notes, universe blueprint facets, lore and scene/dialogue text are indexed independently with source kind, record ID, field, and trust label.
+- **Discovery surface:** Atlas and Relationship Codex issue scoped searches against the canonical index rather than only scanning the browser's recent state. Older indexed material is available through search; automatic suggestions are capped for UI responsiveness.
+- **Reviewed canon provenance:** selecting a discovered entry requires a second explicit Create action. The server validates the exact source quote and fingerprint in the owning universe transaction before creating a location/entity and writing its immutable source link. Deleting the canon entry removes its provenance. Source edits retain the approved quote while marking the source as changed or removed.
+- **Character creation:** universe blueprint and established social entry details contribute to creator-level context; modifications invalidate unfinished AI drafts.
+- **Live NPC roleplay:** only globally constraining rules, technological era and geographic scope are provided as bounded narrator-level constraints. Source mentions and private/cultural secrets do **not** automatically become a character's knowledge.
+- **Regression suite:** tests exercise cross-universe isolation, archive-before-purge, stale source evidence, source deletion, long transcripts, SQLite integrity and real browser Character Studio → Atlas → verified provenance.
+
+Remaining work is distinct from these verified capabilities: source aliases/coreference, a reindex/recovery command, source navigation and dismissal, robust contradiction classification, claim provenance for timeline events, and actual language-model-assisted extraction for implicit references. No source-index claim should imply automatic truth, actor omniscience or complete semantic recall.
+
 ## Implementation phases
 
 ### Phase 0 — completed initial checkpoint

@@ -26,7 +26,7 @@ export const characterDraftVersion = character => fingerprint({
   frequentPlaces:character?.frequentPlaces||[],
 });
 export const worldDraftVersion = library => fingerprint({id:library?.activeWorldId,
-  worlds:library?.worlds,locations:library?.locations,entities:library?.entities,relationships:library?.relationships});
+  worlds:library?.worlds,blueprint:library?.blueprint,locations:library?.locations,entities:library?.entities,relationships:library?.relationships});
 
 export function gatherCharacterWorldContext({worldLibrary,worldId,character,lore=[]}) {
   if(!worldLibrary || worldId!==worldLibrary.activeWorldId)throw new Error('Open the character\'s world before requesting AI assistance');
@@ -45,6 +45,14 @@ export function gatherCharacterWorldContext({worldLibrary,worldId,character,lore
   const linked=locations.filter(x=>connectedIds.has(x.id));
   const otherPlaces=locations.filter(x=>!connectedIds.has(x.id));
   const lines=[`World: ${world.name}`,`Established setting: ${String(world.description||'').slice(0,900)}`];
+  const blueprint=worldLibrary.blueprint?.worldId===worldId?worldLibrary.blueprint.sections:null;
+  if(blueprint){
+    const facets=['scope','era','rules','society','conflicts','themes']
+      .filter(key=>typeof blueprint[key]==='string'&&blueprint[key].trim())
+      .map(key=>key+': '+blueprint[key].trim().slice(0,330));
+    if(facets.length)lines.push('Reviewed universe blueprint (creator reference; not automatic NPC knowledge):\n'+
+      facets.join('\n'));
+  }
   if(linked.length)lines.push('Established character places (usual associations, NOT current position):\n'+
     linked.slice(0,10).map(x=>`[place:${x.id}] ${x.name} (${x.kind}) — ${String(x.description||'').slice(0,180)}`).join('\n'));
   if(social.length)lines.push('Existing relationships of this character (not automatically another person\'s private thoughts):\n'+
@@ -52,7 +60,7 @@ export function gatherCharacterWorldContext({worldLibrary,worldId,character,lore
   if(otherPlaces.length)lines.push('Other places available in this world (do not invent duplicates):\n'+
     otherPlaces.slice(0,14).map(x=>`[place:${x.id}] ${x.name} (${x.kind}) — ${String(x.description||'').slice(0,110)}`).join('\n'));
   if(entities.length)lines.push('People, groups and institutions already in this world:\n'+
-    entities.slice(0,16).map(e=>`[entity:${e.id}] ${e.name} (${e.kind})`).join('\n'));
+    entities.slice(0,16).map(e=>`[entity:${e.id}] ${e.name} (${e.kind})${e.description?' — '+String(e.description).slice(0,140):''}`).join('\n'));
   const relevantLore=lore.filter(e=>e && typeof e.content==='string' && !e.disabled && (!e.sessionIds || !e.sessionIds.length));
   if(relevantLore.length)lines.push('Approved world lore (creator-visible; never automatically NPC knowledge):\n'+
     relevantLore.slice(0,7).map(x=>`[lore:${x.id}] ${String(x.title||'').slice(0,100)}: ${x.content.slice(0,300)}`).join('\n'));

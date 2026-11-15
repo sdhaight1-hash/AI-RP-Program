@@ -1,3 +1,4 @@
+import {initializeUniverseSourceIndex} from './world/source-index.mjs';
 // Single-user, local SQLite snapshot store. SQLite gives atomic commits without
 // adding a native npm dependency or changing the existing browser state shape.
 import { DatabaseSync } from 'node:sqlite';
@@ -69,6 +70,7 @@ export class StudioStore {
       this.db.close();throw error;
     }
     initializeWorldSchema(this.db, persisted, this.scopeWorldId);
+    initializeUniverseSourceIndex(this.db);
     initializeEventLedger(this.db);
     initializeMemorySchema(this.db);
     initializeFactSchema(this.db);
