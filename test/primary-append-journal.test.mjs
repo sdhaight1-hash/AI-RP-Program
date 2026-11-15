@@ -244,16 +244,19 @@ test('journal player turns cannot impersonate NPC events; existing accepted NPC 
   const store=new StudioStore(':memory:');
   try{
     store.save(makeInitialState(),0);activate(store);
+    const original=store.load().state.sessions[0];
+    const npc=original.messages.find(m=>m.role==='assistant');
+    assert.ok(npc);
+    // World events must cite the latest eligible NPC turn, not an older
+    // assistant turn after the player has already continued the scene.
+    const proposal=store.events.propose({sceneId:original.id,timelineId:original.timelineId,
+      sourceMessageId:npc.id,description:'The NPC opened the encounter.'});
+    store.events.decide({proposalId:proposal.id,decision:'accept'});
     append(store,{id:'journal-player',text:'The player describes a possible promise.'});
     const before=store.load(),scene=before.state.sessions[0];
     assert.throws(()=>store.events.propose({sceneId:scene.id,timelineId:scene.timelineId,
       sourceMessageId:'journal-player',description:'Unapproved player-origin event'}),
-      /Source must be an NPC reply/);
-    const npc=scene.messages.find(m=>m.role==='assistant');
-    assert.ok(npc);
-    const proposal=store.events.propose({sceneId:scene.id,timelineId:scene.timelineId,
-      sourceMessageId:npc.id,description:'The NPC opened the encounter.'});
-    store.events.decide({proposalId:proposal.id,decision:'accept'});
+      /Source must be an NPC reply|Event must reference the latest selected NPC reply/);
     const altered=structuredClone(before.state);
     altered.sessions[0].messages.find(m=>m.id===npc.id).content='Contradictory rewritten NPC opening.';
     assert.throws(()=>store.save(altered,before.revision),/Accepted world event locks/i);
