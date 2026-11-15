@@ -1127,6 +1127,10 @@ function workspaceRows(items,display){
   return wrap;
 }
 function openDetailDesk(tab) {
+  // Atlas and relationships now have one authoritative editor surface.
+  // Keeping their old inspector copies open would duplicate DOM IDs and make
+  // writes target whichever form document.getElementById finds first.
+  if(tab==='atlas'||tab==='relations')return openWorldEditor(tab);
   if(!document.querySelector(`[data-tab="${tab}"]`))return;
   if(!visibleDetailTabs(activeWorkspace).includes(tab)){
     const target=Object.keys(WORKSPACE_META).find(w=>w!=='encounters'&&visibleDetailTabs(w).includes(tab));
