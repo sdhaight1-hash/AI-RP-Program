@@ -48,3 +48,16 @@ test('repeat one-message saves also preserve normalized-primary parity',()=>{
   assert.equal(row.memoryRows,83);
   assert.equal(row.integrity,'ok');
 });
+
+test('experimental journal records a real incremental SQLite write without claiming whole-turn speed',()=>{
+  assert.throws(()=>measureStorageScale(20,{journal:true}),/requires normalized-primary/);
+  const row=measureStorageScale(80,{primary:true,journal:true,samples:3});
+  assert.equal(row.storageMode,'normalized-primary-journal-prototype');
+  assert.equal(row.memoryRows,83);
+  assert.equal(row.oneTurnResaveSamplesMs.length,3);
+  assert.equal(row.integrity,'ok');
+  const report=runStorageScaleEvaluation([24],{primary:true,journal:true,samples:2});
+  assert.equal(report.rows.length,1);
+  assert.equal(report.rows[0].memoryRows,26);
+  assert.match(report.note,/NOT benchmarked/);
+});
