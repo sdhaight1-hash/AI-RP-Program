@@ -2130,6 +2130,11 @@ async function generateBuilderDraft() {
     renderBuilderAIChanges();
     $('builder-ai-status').textContent = 'Draft ready. Review individual fields; nothing has been applied.';
   } catch(err) {
+    // A canceled, failed, or superseded response must never remain approvable.
+    if(aiDraftRequest===request){
+      aiDraftRequest=null; aiDraftTarget=null;
+      $('builder-ai-preview').classList.add('hidden');
+    }
     $('builder-ai-status').textContent = err.name === 'AbortError' ? 'Suggestion canceled.' : err.message;
   } finally {
     aiDraftController = null;$('builder-ai-generate').disabled=false;
