@@ -10,6 +10,8 @@ The workspace shell now has six direct destinations: **World**, **Characters**, 
 
 **Deletion and cleanup:** The × button archives rather than erases. To remove a character and its derived database records, archive it and select **Permanently delete** in **Library & Trash**. If encounters block deletion, the archived character's Trash row now names the exact templates and includes a **Manage linked encounters** button, followed by **Back to Trash**. Remove dependent scenes separately first. Atlas places, independent world entities, and relationships now have explicit delete controls. Old character projections left by earlier builds are reconciled when that world opens. See [deletion rules and recovery limitations](docs/durable-deletion.md). Backups and media files are not automatically wiped.
 
+**NPC reply consistency:** Responses now carry a durable world-change basis throughout model streaming. Partial or stale text is never added to SQLite; after a completed model stream, the local server commits the exact reply and its witness identity atomically with a story revision check. Changing a clock, character location, approved facts or canon during generation invalidates the unsaved draft and prompts a retry. Flagged format/agency replies still require manual review. See [world epoch and safe reply-commit protocol](docs/npc-reply-epoch-and-commit.md).
+
 See [the new navigation, encounter editing, and communication-media guide](docs/encounters-and-ux-v4.md) and [the existing Studio Experience v3 architecture](docs/studio-experience-v3.md). For headless browser verification (optional ChromeDriver installation), run `npm run test:browser`; GitHub Actions on Node 22 archives desktop/mobile screenshots as `ui-review-screenshots`.
 
 ## Requirements
