@@ -30,3 +30,9 @@ Evaluate the optional real local embedding model against annotated larger corpor
 Measure separate p50/p95 times for candidate SQL, embedding API, similarity ranking, token packing and full NPC reply. The current middle-era sample is bounded and cannot guarantee finding an arbitrary old memory. Persistent privacy-aware vectors should be considered only if the measured recall and CPU cost justify their extra storage and synchronization.
 
 Run `npm run eval:semantic` for deterministic regression. Use the in-app synthetic real-model assessment or `npm run eval:local` for local chat model behavior on the actual target machine.
+
+## Annotated per-stage source metrics
+
+The deterministic evaluator now emits `evidenceMetrics` with separate results for **lexical-only**, **semantic retrieval**, and **post-trim prompt evidence** at 2,048 / 4,096 / 8,192 context tokens. Each case records the actual source message IDs selected at each stage, not just the number of snippets. Source precision counts non-gold source IDs as irrelevant, including extra memories retrieved alongside a correct source; source recall measures the fraction of annotated gold sources still present. Negative-query false-positive rate is the fraction of unrelated questions that retrieve any dialogue source.
+
+These synthetic metrics answer whether the existing evidence pipeline drops or leaks known fixtures, not whether a real model recognizes paraphrases reliably. The benchmark still needs external annotated multi-world/fork corpora, local-model runtime p50/p95, and cache/CPU measurements before Issue #32 can be closed.
