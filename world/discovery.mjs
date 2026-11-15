@@ -25,7 +25,7 @@ export function sourcesFor({state={},library={},worldId}){
   if(library.blueprint?.worldId===worldId)
     for(const [field,value] of Object.entries(library.blueprint.sections||{}))
       add('blueprint',worldId,field,value,'established');
-  for(const person of (state.characters||[]).filter(c=>!c.trashedAt&&(!c.worldId||c.worldId===worldId)).slice(0,1000)){
+  for(const person of (state.characters||[]).filter(c=>!c.trashedAt&&(!c.worldId||c.worldId===worldId))){
     for(const field of ['description','backstory','familyHistory','formativeEvents','personality','occupation','family','relationships','preferredEnvironment','dailyRoutine','socialHabits','hobbies','frequentPlacesText','history','goals','fears','secrets']){
       add('character',person.id,field,person[field],'profile');
     }
@@ -36,20 +36,20 @@ export function sourcesFor({state={},library={},worldId}){
         add('character',person.id,field,value,'profile');
     }
   }
-  for(const place of (library.locations||[]).filter(x=>x.worldId===worldId).slice(0,1500))
+  for(const place of (library.locations||[]).filter(x=>x.worldId===worldId))
     add('location',place.id,'description',place.description,'established');
-  for(const entity of (library.entities||[]).filter(x=>x.worldId===worldId).slice(0,1500))
+  for(const entity of (library.entities||[]).filter(x=>x.worldId===worldId))
     add('entity',entity.id,'description',entity.description,'established');
-  for(const relationship of (library.relationships||[]).filter(x=>x.worldId===worldId).slice(0,1500))
+  for(const relationship of (library.relationships||[]).filter(x=>x.worldId===worldId))
     add('relationship',relationship.id,'notes',relationship.notes,'established');
-  for(const entry of (state.lore||[]).slice(0,1500)){
+  for(const entry of (state.lore||[])){
     if(entry.worldId&&entry.worldId!==worldId)continue;
     for(const field of ['title','content','body','description'])add('lore',entry.id,field,entry[field],
       entry.private?'private':'lore');
   }
-  for(const scene of (state.sessions||[]).filter(s=>!s.trashedAt&&(!s.worldId||s.worldId===worldId)).slice(-800)){
+  for(const scene of (state.sessions||[]).filter(s=>!s.trashedAt&&(!s.worldId||s.worldId===worldId))){
     for(const field of ['direction','publicSummary','location','atmosphere'])add('scene',scene.id,field,scene[field],'scene');
-    for(const message of (scene.messages||[]).slice(-250))
+    for(const message of (scene.messages||[]))
       add('dialogue',message.id,'content',message.content,'unverified');
   }
   return sources;
