@@ -23,7 +23,10 @@ export function createReplyStreamReader(){
   };
   return {
     feed(chunk){
-      buffer+=(typeof chunk==='string'?chunk:decoder.decode(chunk,{stream:true})).replace(/\r\n/g,'\n');
+      // Normalize AFTER joining with the preceding partial chunk: CRLF can
+      // split exactly between \r and \n on the wire.
+      buffer=(buffer+(typeof chunk==='string'?chunk:decoder.decode(chunk,{stream:true})))
+        .replace(/\r\n/g,'\n');
       const parts=buffer.split('\n\n');
       buffer=parts.pop()||'';
       for(const part of parts)frame(part);
