@@ -522,6 +522,32 @@ async function main(){
     await request('POST','/session/'+sessionId+'/refresh',{});
     await until(async()=>script("return document.querySelector('#world-label')?.textContent==='Revised Browser Connical Universe'"),'world after character save reload');
 
+    // The saved Character Studio family history is discoverable in Atlas,
+    // and an explicitly reviewed entry retains its original source version.
+    await script(`
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-tab="atlas"]').click();
+      return true;
+    `);
+    await until(async()=>script(`
+      return [...document.querySelectorAll('.universe-mention-item strong')]
+        .some(x=>x.textContent==='Seabrook');
+    `),'saved character family history indexed and recommended to Atlas');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.universe-mention-item')]
+        .find(x=>x.querySelector('strong')?.textContent==='Seabrook');
+      const evidenced=row?.textContent.includes('familyHistory');
+      row?.querySelector('button')?.click();
+      return evidenced && document.querySelector('#atlas-name')?.value==='Seabrook';
+    `),true,'citation-backed recommendation must remain an explicit user choice');
+    await script("document.querySelector('#atlas-create').click();return true");
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld))).json();
+      const place=catalog.locations.find(x=>x.name==='Seabrook');
+      return !!place&&catalog.entryProvenance?.some(p=>
+        p.entryType==='location'&&p.entryId===place.id&&p.quote.includes('Seabrook'));
+    },'reviewed Atlas candidate and its source proof persisted in SQLite');
+    await screenshot('06d1-reviewed-family-source-atlas-entry');
 
     // The relationship codex must delete a real SQLite entry, not just hide a
     // client card or leave an orphaned world entity after refresh.
