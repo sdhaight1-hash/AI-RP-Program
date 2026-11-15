@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createCharacter} from '../engine.mjs';
-import {AUTHORING_CONTRACTS,makeWorldAuthoringRequest,makeSceneAuthoringRequest,makeLocationAuthoringRequest,
+import {AUTHORING_CONTRACTS,makeWorldAuthoringRequest,makeSceneAuthoringRequest,makeLocationAuthoringRequest,makeEntityAuthoringRequest,
   parseAuthoringSuggestions,selectReviewedSuggestions} from '../authoring/world-scene.mjs';
 import {createApp} from '../server.mjs';
 import {StudioStore} from '../storage.mjs';
@@ -152,4 +152,39 @@ test('Location generation rejects duplicate canon names and invalidates drafts o
   assert.notEqual(req.basis,makeLocationAuthoringRequest({worldId,library,kind:'building',parentId:'quay'}).basis);
   assert.notEqual(req.basis,makeLocationAuthoringRequest({worldId,library,kind:'building',
     guidance:'Different creative direction'}).basis);
+});
+
+test('social and cultural AI generation stays within universe, genre, and entry-kind constraints',()=>{
+  const local={
+    ...library,
+    blueprint:{worldId,revision:2,sections:{society:'Guilds coordinate fisheries.',
+      rules:'No supernatural abilities'}},
+    entities:[
+      {id:'g',worldId,name:'South Quay Council',kind:'organization',
+        description:'Coordinates docks'},
+      {id:'f',worldId:'other-world',name:'Foreign Court',kind:'family'}
+    ],
+    relationships:[]
+  };
+  const req=makeEntityAuthoringRequest({
+    worldId,library:local,kind:'culture',target:'description',
+    name:'Tideborn Culture',description:'Traditional river fishing people',
+    guidance:'Focus on seasonal ritual and everyday practice'
+  });
+  assert.equal(req.mode,'entity');
+  assert.deepEqual(req.fields,['description']);
+  assert.match(req.messages[0].content,/culture is a shared pattern/i);
+  assert.match(req.messages[1].content,/Guilds coordinate fisheries/);
+  assert.match(req.messages[1].content,/South Quay Council/);
+  assert.doesNotMatch(req.messages[1].content,/Foreign Court/);
+  assert.deepEqual(parseAuthoringSuggestions('{"description":"An annual fishing festival."}',req),
+    {description:'An annual fishing festival.'});
+  const names=makeEntityAuthoringRequest({worldId,library:local,kind:'organization',target:'name'});
+  assert.throws(()=>parseAuthoringSuggestions('{"name":"South Quay Council"}',names),/already exists/);
+  assert.throws(()=>makeEntityAuthoringRequest({worldId,library:local,kind:'not-a-kind'}),/Unknown entity kind/);
+  assert.throws(()=>makeEntityAuthoringRequest({worldId:'another-world',library:local,kind:'culture'}),/correct world/);
+  assert.notEqual(req.basis,makeEntityAuthoringRequest({...{
+    worldId,library:local,kind:'culture',target:'description',
+    name:'Tideborn Culture',description:'Traditional river fishing people'
+  },guidance:'Different focus'}).basis);
 });
