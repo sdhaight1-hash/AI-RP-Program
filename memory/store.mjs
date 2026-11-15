@@ -54,6 +54,36 @@ export function syncConversationMemories(db, state) {
   for (const id of existing.keys()) if (!expected.has(id)) remove.run(id);
 }
 
+// An append-only primary journal must not rescan the entire transcript to
+// create one witnessed memory. This reproduces the exact source-ID/hash/text
+// contract of syncConversationMemories for one verified player message.
+export function syncAppendedPlayerMemory(db,scene,message){
+  if(!db.isTransaction)throw Error('Direct append memory requires a SQLite transaction');
+  if(message.role!=='user'||!scene.timelineId)throw Error('Invalid player memory source');
+  const cast=new Set(scene.castIds||[scene.characterId]);
+  const witnesses=new Set(message.witnessIds||[]);
+  if(witnesses.size!==(message.witnessIds||[]).length)
+    throw Error('Duplicate message witnesses');
+  const sourceHash=digest(JSON.stringify([message.role,null,message.content,message.channelId,
+    [...witnesses].sort(),Boolean(message.pinned)]));
+  const upsert=db.prepare("INSERT INTO actor_memories(id,timeline_id,scene_id,actor_id,source_message_id,source_hash,text,occurred_at,pinned,origin) VALUES(?,?,?,?,?,?,?,?,?, 'direct') ON CONFLICT(id) DO UPDATE SET source_hash=excluded.source_hash,text=excluded.text,occurred_at=excluded.occurred_at,pinned=excluded.pinned");
+  let saved=0;
+  for(const actorId of witnesses){
+    if(!cast.has(actorId))throw Error('Witness is outside the scene cast');
+    const actor=db.prepare("SELECT controller FROM timeline_actors WHERE timeline_id=? AND actor_id=?").get(scene.timelineId,actorId);
+    if(!actor||actor.controller!=='npc')throw Error('Witness actor is not registered in this timeline');
+    const record=db.prepare('SELECT document FROM story_projection_characters WHERE character_id=?').get(actorId);
+    const person=record?JSON.parse(record.document):null;
+    if(!person||person.trashedAt)throw Error('Witness is not an active world character');
+    const identifier=digest(JSON.stringify([scene.timelineId,scene.id,actorId,message.id]));
+    const occurredAt=Number.isFinite(message.sentAt)?message.sentAt:Number(scene.updatedAt)||0;
+    upsert.run(identifier,scene.timelineId,scene.id,actorId,message.id,sourceHash,
+      'Player said: '+message.content.slice(0,1400),occurredAt,message.pinned?1:0);
+    saved++;
+  }
+  return saved;
+}
+
 // Forked timelines snapshot all memories known at the fork instant. Later
 // updates/deletes in the parent cannot rewrite that branch's experiences.
 export function snapshotMemoriesForFork(db, parentTimelineId, childTimelineId) {
