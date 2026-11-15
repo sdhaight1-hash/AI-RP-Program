@@ -804,7 +804,43 @@ async function main(){
       return facts.facts?.some(f=>f.text===reviewedMemory&&f.sourceMessageId===witnessedPlayer.id&&f.validSource);
     },'source-verified subjective memory stored without world-canon mutation');
     await screenshot('09-source-verified-actor-memory');
-    console.log('Browser UI smoke: reviewed world sources, actor memory provenance, responsive worlds, and ticketed NPC commit passed.');
+
+    // Fidelity runs must stay in their own sandbox: the reviewed output is
+    // recorded on the character, never appended to the live scene transcript.
+    const beforeLab=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(editableWorld))).json()).state.sessions.length;
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="characters"]').click();
+      const row=[...document.querySelectorAll('#character-list .character-row')]
+        .find(x=>x.querySelector('strong')?.textContent==='Browser Source Review Character');
+      if(!row)return false;
+      row.querySelector('button.character-item').click();
+      document.querySelector('[data-builder-tab="lab"]').click();
+      return !!document.querySelector('#fidelity-run')&&
+        !!document.querySelector('#fidelity-probe');
+    `),true,'standalone fidelity lab must remain reachable from Character Studio');
+    await script("document.querySelector('#fidelity-run').click();return true");
+    await until(async()=>script(`
+      return document.querySelector('#fidelity-reply')?.textContent
+        .includes('Ticketed NPC reply committed from the local-model stream.');
+    `),'isolated model fidelity test completed',18000);
+    assert.equal(await script(`
+      document.querySelector('#fidelity-rating-voice').value='4';
+      document.querySelector('#fidelity-notes').value='Browser-verified isolated response.';
+      document.querySelector('#fidelity-save').click();
+      return true;
+    `),true,'human rating authorizes the standalone fidelity review');
+    await until(async()=>{
+      const state=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
+      return state.characters.some(c=>c.name==='Browser Source Review Character'&&
+        c.fidelityReviews?.some(r=>r.ratings.voice===4&&r.reply===browserReply));
+    },'reviewed fidelity report saved to character only');
+    const afterLab=(await(await fetch(base+'/api/state?worldId='+
+      encodeURIComponent(editableWorld))).json()).state.sessions.length;
+    assert.equal(afterLab,beforeLab,'fidelity lab must not create or mutate live scenes');
+    await screenshot('10-reviewed-fidelity-lab');
+    await script("document.querySelector('#builder-close').click();return true");
+    console.log('Browser UI smoke: world source review, actor memory provenance, fidelity sandbox, and ticketed NPC commit passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');
