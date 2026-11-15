@@ -19,6 +19,7 @@ import { removeEncounterTemplate,encounterDependencies } from '/encounters/libra
 import { renderEncounterStudio } from '/encounter-studio.mjs';
 import {renderAtlasPanel as drawAtlas,renderRelationsPanel as drawRelations} from '/world-editors.mjs';
 import {renderWorldTimelineEditor as drawTimelines} from '/world-timelines.mjs';
+import {renderActorMemoryEditor} from '/actor-memory-editor.mjs';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
@@ -861,136 +862,12 @@ function renderInspector() {
     const reasons=$('psy-reasons');for(const reason of [...e.reasons].reverse().slice(0,8))reasons.append(el('p',`${reason.primary} · ${reason.summary}`,'help'));
     $('advance-time').onclick=()=>{if(running)return;const hours=Number($('advance-hours').value);if(!Number.isFinite(hours)||hours<=0||hours>168)return showError('Choose between 0 and 168 hours.');for(const id of s.castIds)s.psychologyByActor[id]=advanceMindTime(s.psychologyByActor[id]||createMind(),hours);s.timeHoursElapsed=(s.timeHoursElapsed||0)+hours;save();renderInspector();};
   } else if (currentTab === 'context') {
-    const actor=sceneActor(s);
-    if(!actor){host.innerHTML='<h2 class="panel-title">No available actor</h2><p class="help">Restore or add an actor first.</p>';return;}
-    host.innerHTML='<h2 class="panel-title">Context inspector</h2><p class="help">Reading the exact actor-visible context from SQLite…</p>';
-    const requestedScene=s.id,requestedWorld=activeWorldId;
-    void (async()=>{
-      try {
-        await requireSavedStory();
-        const result=await fetch('/api/actor/context',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({worldId:requestedWorld,sceneId:requestedScene,actorId:actor.id,
-            mode:'preview',contextWindow:state.settings.contextWindow||4096,
-            max_tokens:state.settings.max_tokens,revision})});
-        const prompt=await result.json();
-        if(!result.ok)throw new Error(prompt.error||'Context retrieval failed');
-        if(currentTab!=='context'||activeWorldId!==requestedWorld||activeSession()?.id!==requestedScene)return;
-        const allText=prompt.messages.map(m=>`[${m.role.toUpperCase()}]
-${m.content}`).join('\n\n');
-        host.innerHTML=`<h2 class="panel-title">Context inspector</h2><p class="help">Server-assembled, actor-scoped prompt. Token numbers are ${escapeHtml(prompt.metadata.countMethod)}.</p><div class="context-stats"><div><strong>${prompt.metadata.promptTokens.toLocaleString()}</strong><span>Prompt tokens</span></div><div><strong>${prompt.metadata.contextWindow.toLocaleString()}</strong><span>Context window</span></div><div><strong>${prompt.metadata.recalled}</strong><span>Retrieved memories</span></div></div><div class="inline-actions"><button id="copy-context" class="subtle-button">Copy prompt</button></div><pre class="context-text" id="context-text"></pre>`;
-        const semantic=prompt.metadata.semantic;
-        const recallStatus=el('p',
-          semantic?.status==='disabled'?'Semantic recall disabled (lexical only).':
-          semantic?.status==='fallback'?'Local semantic model unavailable; lexical fallback used.':
-          semantic?.status==='no-match'?'Semantic recall enabled; no strong additional match.':
-          `Semantic recall: ${semantic?.selected||0} evidence item(s) in final prompt from ${semantic?.candidates||0} candidate(s).`,
-          'help');
-        $('context-text').before(recallStatus);
-        $('context-text').textContent=allText;
-        $('copy-context').onclick=async()=>{try{await navigator.clipboard.writeText(allText);}catch{showError('Clipboard unavailable.');}};
-
-        // Reviewed personal knowledge is stored outside the scene transcript.
-        // The actor must have witnessed the selected evidence before saving.
-        const factsUrl='/api/actor/facts?worldId='+encodeURIComponent(requestedWorld)+
-          '&timelineId='+encodeURIComponent(s.timelineId)+'&actorId='+encodeURIComponent(actor.id);
-        const factsResponse=await fetch(factsUrl);
-        const factData=await factsResponse.json();
-        if(!factsResponse.ok)throw new Error(factData.error||'Cannot read character memories');
-        if(currentTab!=='context'||activeWorldId!==requestedWorld||activeSession()?.id!==requestedScene)return;
-        const section=el('section','','group');
-        section.append(el('h3','Character memory notebook','builder-subtitle'),
-          el('p','Record a concise belief, promise, or meaningful personal detail. The source must be something this character actually heard or said. These notes are subjective memories, never world canon.','help'));
-        for(const fact of factData.facts.slice(0,15)){
-          const entry=el('div','','lore-card');
-          entry.append(el('strong',fact.kind+' · '+fact.status+(fact.validSource?'':' · source changed (not recalled)')),el('p',fact.text,'help'));
-          if(fact.status==='active'){
-            const revoke=el('button','Revoke memory','subtle-button');
-            revoke.onclick=async()=>{
-              try{
-                const response=await fetch('/api/actor/facts/revoke',{method:'POST',headers:{'Content-Type':'application/json'},
-                  body:JSON.stringify({worldId:requestedWorld,timelineId:s.timelineId,actorId:actor.id,id:fact.id})});
-                const result=await response.json();
-                if(!response.ok)throw Error(result.error||'Memory revocation failed');
-                renderInspector();
-              }catch(error){showError(error.message);}
-            };
-            entry.append(revoke);
-          }
-          section.append(entry);
-        }
-        const visibleSources=s.messages.filter(m=>m.id && (
-          (m.witnessIds||[]).includes(actor.id) || (m.role==='assistant' && m.speakerId===actor.id)
-        )).slice(-40);
-        const source=el('select');source.id='fact-source';
-        for(const m of visibleSources){
-          const label=(m.role==='user'?'Player':m.speakerId===actor.id?'Self':'Other NPC')+': '+m.content.slice(0,85);
-          source.add(new Option(label,m.id));
-        }
-        const kind=el('select');kind.id='fact-kind';
-        for(const value of ['belief','promise','relationship','autobiography','observation'])kind.add(new Option(value,value));
-        const supersedes=el('select');supersedes.id='fact-supersedes';
-        supersedes.add(new Option('No correction — new memory',''));
-        for(const fact of factData.facts.filter(x=>x.status==='active' && x.validSource))
-          supersedes.add(new Option('Correct: '+fact.text.slice(0,65),fact.id));
-        const note=el('textarea');note.id='fact-note';note.rows=3;note.maxLength=700;
-        note.placeholder='What does this NPC now remember or believe?';
-        const suggestFact=el('button','Ask local AI to suggest memories','subtle-button');
-        const suggestionsHost=el('div','','group');
-        suggestFact.disabled=!state.settings.model||!visibleSources.length;
-        suggestFact.onclick=async()=>{
-          suggestFact.disabled=true;
-          suggestFact.textContent='Looking for important moments…';
-          suggestionsHost.replaceChildren();
-          try{
-            await requireSavedStory();
-            const response=await fetch('/api/actor/facts/suggest',{method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({worldId:requestedWorld,sceneId:requestedScene,
-                actorId:actor.id,revision,model:state.settings.model})});
-            const data=await response.json();
-            if(!response.ok)throw Error(data.error||'Memory suggestions failed');
-            if(currentTab!=='context'||activeWorldId!==requestedWorld||activeSession()?.id!==requestedScene)return;
-            if(!data.suggestions.length)suggestionsHost.append(el('p','No significant new memories found in the recent conversation.','help'));
-            for(const proposal of data.suggestions){
-              const row=el('div','','lore-card');
-              row.append(el('strong',proposal.kind),el('p',proposal.text,'help'),
-                el('p','From: “'+proposal.quote+'”','help'));
-              const review=el('button','Review this suggestion','subtle-button');
-              review.onclick=()=>{
-                source.value=proposal.sourceMessageId;
-                kind.value=proposal.kind;
-                note.value=proposal.text;
-                note.focus();
-              };
-              row.append(review);suggestionsHost.append(row);
-            }
-          }catch(error){showError(error.message);}
-          finally{suggestFact.disabled=false;suggestFact.textContent='Ask local AI to suggest memories';}
-        };
-        const saveFact=el('button','Remember this detail','primary-button');
-        saveFact.disabled=!visibleSources.length;
-        saveFact.onclick=async()=>{
-          if(!note.value.trim())return showError('Write a short character memory first.');
-          try {
-            await requireSavedStory();
-            const response=await fetch('/api/actor/facts',{method:'POST',headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({worldId:requestedWorld,sceneId:requestedScene,actorId:actor.id,
-                sourceMessageId:source.value,kind:kind.value,text:note.value,revision,
-                supersedesId:supersedes.value||null})});
-            const result=await response.json();
-            if(!response.ok)throw Error(result.error||'Memory was not saved');
-            renderInspector();showError();
-          }catch(error){showError(error.message);}
-        };
-        section.append(el('label','Source conversation message','field-label'),source,
-          el('label','Kind of memory','field-label'),kind,
-          el('label','Correct an earlier belief (optional)','field-label'),supersedes,
-          el('label','Subjective memory','field-label'),note,saveFact,suggestFact,suggestionsHost);
-        if(!visibleSources.length)section.append(el('p','No witnessed source messages in this scene yet.','help'));
-        host.append(section);
-
-      }catch(error){if(currentTab==='context')host.innerHTML='<h2 class="panel-title">Context inspector</h2><p class="help"></p>',host.querySelector('p').textContent=error.message;}
-    })();
+    renderActorMemoryEditor(host,s,{
+      $,el,escapeHtml,sceneActor,requireSavedStory,fetch,renderInspector,showError,
+      getCurrentTab:()=>currentTab,getActiveWorldId:()=>activeWorldId,
+      getActiveSession:activeSession,getRevision:()=>revision,
+      getSettings:()=>state.settings
+    });
   } else if (currentTab === 'setup') {
     host.innerHTML = `<h2 class="panel-title">Studio settings</h2><p class="help">This studio talks only to your local inference server. Start LM Studio or KoboldCpp first, then refresh the model list.</p><h3 class="field-label">Color atmosphere</h3><div class="theme-tiles">${THEMES.map(t => `<button class="theme-tile ${state.settings.theme === t.id ? 'selected' : ''}" data-theme-choice="${t.id}" aria-pressed="${state.settings.theme === t.id}"><span class="theme-dot" style="background:${t.accent}"></span>${escapeHtml(t.name)}</button>`).join('')}</div><div class="group"><label class="field-label" for="custom-accent">Override accent</label><input id="custom-accent" type="color" value="${escapeHtml(state.settings.customAccent || (THEMES.find(t => t.id === state.settings.theme)?.accent || THEMES[0].accent))}" /></div><button class="subtle-button" id="accent-reset">Use theme default accent</button><p class="help">Choose a complete palette or adjust its accent. This preference is stored locally.</p><div class="group"><label class="field-label" for="model-select">Loaded model</label><select id="model-select"><option value="">Select a model</option>${models.map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===state.settings.model?'selected':''}>${escapeHtml(m.id)}</option>`).join('')}</select></div><button class="subtle-button" id="refresh-models">↻ Find local models</button><p id="backend-address" class="help">Backend: ${escapeHtml(backend)}</p>${field('temperature','Temperature',state.settings.temperature,{type:'number'})}${field('max_tokens','Max output tokens',state.settings.max_tokens,{type:'number'})}${field('contextWindow','Active model context tokens',state.settings.contextWindow||4096,{type:'number'})}<h2 class="panel-title">Player persona</h2>${field('personaName','Your character name',state.persona.name)}${field('personaDescription','Your character',state.persona.description,{multiline:true,rows:5})}<p class="footer-note">Default server: KoboldCpp at 127.0.0.1:5001/v1. To use LM Studio instead, set INFERENCE_URL to http://127.0.0.1:1234/v1 before launching. Keep both servers on localhost.</p>`;
     host.querySelectorAll('[data-theme-choice]').forEach(btn => btn.onclick = () => {
