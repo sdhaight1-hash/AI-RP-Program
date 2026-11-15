@@ -18,7 +18,7 @@ const library={activeWorldId:worldId,
 test('world draft asks only for permitted field and preserves the existing authored seed',()=>{
   const req=makeWorldAuthoringRequest({name:'Ashfall',description:'Cold volcanic peninsula',target:'description',guidance:'Ordinary daily life'});
   assert.deepEqual(req.fields,['description']);
-  assert.match(req.messages[0].content,/independent fictional universe/);
+  assert.match(req.messages[0].content,/NEW, isolated world/);
   assert.match(req.messages[1].content,/Cold volcanic peninsula/);
   assert.match(req.messages[1].content,/Ordinary daily life/);
   assert.deepEqual(parseAuthoringSuggestions('{"description":"Coastal trade towns"}',req),
@@ -87,5 +87,5 @@ test('world and scene authoring JS modules are explicitly served over local HTTP
       assert.match(await r.text(),new RegExp(symbol));
     }
     assert.equal((await fetch(base+'/authoring/private.mjs')).status,404);
-  }finally{await new Promise(resolve=>app.close(resolve));store.close();}
+  }finally{await new Promise(resolve=>app.close(resolve));}
 });
