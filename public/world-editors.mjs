@@ -1,35 +1,63 @@
 import {makeLocationAuthoringRequest,makeEntityAuthoringRequest} from '../authoring/world-scene.mjs';
-import {discoverUniverseMentions} from '../world/discovery.mjs';
 
-function mountMentionRecommendations(host,{$,el,library,state,worldId,focus,onChoose}){
+function mountMentionRecommendations(host,{el,worldId,focus,onChoose,fetch}){
   const section=el('section','','universe-mention-panel group');
   section.setAttribute('aria-label',focus==='locations'?'Suggested places from prior mentions':'Suggested social and cultural entries');
   section.append(el('h3',focus==='locations'?'Discovered place mentions':'Discovered groups & cultures','builder-subtitle'),
-    el('p','Candidate names come from earlier writing in this universe. Verify each source before adding canon; dialogue and private notes may be incomplete or unreliable.','help'));
-  const results=discoverUniverseMentions({worldId,library,state,focus});
-  const summary=el('p',`Scanned ${results.scannedSources} available source fields · ${results.suggestions.length} unregistered suggestions`,'help');
-  summary.setAttribute('role','status');section.append(summary);
-  const candidates=el('div','','universe-mention-items');section.append(candidates);
-  if(!results.suggestions.length)candidates.append(el('p','No explicit unregistered names detected yet. Write established names in character histories, lore, scenes or the universe blueprint.','help'));
-  for(const candidate of results.suggestions){
-    const row=el('div','','lore-card universe-mention-item');
-    row.append(el('strong',candidate.name),el('small',candidate.kind+' · mentioned, not canon','help'));
-    for(const source of candidate.evidence.slice(0,2)){
-      const details=el('p',`${source.type} / ${source.field}: “${source.quote}”`,'help');
-      row.append(details);
-    }
-    const use=el('button','Review as new entry','subtle-button');
-    use.type='button';use.onclick=()=>onChoose(candidate);
-    row.append(use);candidates.append(row);
-  }
-  if(results.existingLinks.length){
-    const existing=el('details','','universe-mention-existing');
-    existing.append(el('summary',`${results.existingLinks.length} existing entries also mentioned`));
-    for(const match of results.existingLinks)
-      existing.append(el('p',`${match.name} · already linked by name; no new entry needed`,'help'));
-    section.append(existing);
-  }
+    el('p','Search established source text. A mention is evidence, not canon; dialogue, rumors and private notes may be unreliable. Review the quotation before saving.','help'));
+  const search=el('input','','universe-mention-search');
+  search.type='search';search.maxLength=120;
+  search.placeholder='Filter source passages by keywords…';
+  search.setAttribute('aria-label','Search universe evidence');
+  const summary=el('p','Loading indexed universe references…','help');
+  summary.setAttribute('role','status');
+  const candidates=el('div','','universe-mention-items');
+  section.append(search,summary,candidates);
   host.append(section);
+  let lastRequest=0,timer=null;
+  const render=result=>{
+    candidates.replaceChildren();
+    summary.textContent=`Indexed ${result.scannedSources} source passages · ${result.suggestions.length} unregistered suggestions`;
+    if(!result.suggestions.length)candidates.append(el('p','No matching unregistered names. Try another keyword or add a new entry manually.','help'));
+    for(const candidate of result.suggestions){
+      const row=el('div','','lore-card universe-mention-item');
+      row.append(el('strong',candidate.name),el('small',candidate.kind+' · mentioned, not canon','help'));
+      for(const source of candidate.evidence.slice(0,3))
+        row.append(el('p',`${source.type} / ${source.field} (${source.trust}): “${source.quote}”`,'help'));
+      const use=el('button','Review as new entry','subtle-button');use.type='button';
+      use.onclick=()=>onChoose(candidate);
+      row.append(use);candidates.append(row);
+    }
+    if(result.existingLinks?.length){
+      const existing=el('details','','universe-mention-existing');
+      existing.append(el('summary',`${result.existingLinks.length} existing entries mentioned`));
+      for(const match of result.existingLinks)
+        existing.append(el('p',`${match.name} · existing canon; do not create a duplicate`,'help'));
+      section.append(existing);
+    }
+  };
+  const reload=async()=>{
+    const version=++lastRequest;
+    try{
+      const params=new URLSearchParams({worldId,focus});
+      if(search.value.trim())params.set('query',search.value.trim());
+      const response=await fetch('/api/worlds/discovery?'+params);
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||'Could not load evidence index');
+      if(!section.isConnected||version!==lastRequest)return;
+      section.querySelector('.universe-mention-existing')?.remove();
+      render(data);
+    }catch(error){
+      if(!section.isConnected||version!==lastRequest)return;
+      summary.textContent='Discovery unavailable: '+error.message;
+      candidates.replaceChildren();
+    }
+  };
+  search.oninput=()=>{
+    clearTimeout(timer);
+    timer=setTimeout(reload,180);
+  };
+  void reload();
   return section;
 }
 
@@ -39,7 +67,7 @@ import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
 // All interactions invoke the same guarded endpoints as the original UI.
 export function renderAtlasPanel(host,session,api) {
   const {$,el,worldLibrary,loadingWorlds,refreshWorldLibrary,addWorldChooser,selectedWorld,
-    postWorld,permanentlyDeleteWorldEntry,save,renderHeader,renderInspector,showError,getModel,state}=api;
+    postWorld,permanentlyDeleteWorldEntry,save,renderHeader,renderInspector,showError,getModel,state,fetch}=api;
   host.innerHTML=`<h2 class="panel-title">World Atlas</h2><p class="help">Create and connect locations within the active universe. Places can be a character’s usual home or workplace without declaring where they are in the current scene.</p><div class="group"><label class="field-label" for="atlas-world">Selected canon world</label><select id="atlas-world"></select></div><div id="atlas-places"></div><div class="group"><label class="field-label" for="atlas-name">New location</label><input id="atlas-name" maxlength="120" placeholder="e.g. Mara's Apartment"/><select id="atlas-kind"><option value="region">Region</option><option value="town">Town</option><option value="neighborhood">Neighborhood</option><option value="building">Building</option><option value="room">Room</option><option value="outdoor">Outdoor area</option><option value="other">Other</option></select><label class="field-label" for="atlas-parent">Inside</label><select id="atlas-parent"></select><textarea id="atlas-description" rows="3" maxlength="4000" placeholder="Description, atmosphere, daily life..."></textarea><button class="primary-button" id="atlas-create">Create place</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
   addWorldChooser('atlas-world');
@@ -69,7 +97,7 @@ export function renderAtlasPanel(host,session,api) {
     card.append(remove);container.append(card);
   }
   const placeMentions=mountMentionRecommendations(host,{
-    $,el,library:worldLibrary,state,worldId:world.id,focus:'locations',
+    el,fetch,worldId:world.id,focus:'locations',
     onChoose:candidate=>{
       $('atlas-name').value=candidate.name;
       $('atlas-kind').value='other';
@@ -187,7 +215,7 @@ export function renderRelationsPanel(host,api) {
   }
   for(const entity of entities){$('relations-from').add(new Option(entity.name,entity.id));$('relations-to').add(new Option(entity.name,entity.id));}
   const groupMentions=mountMentionRecommendations(host,{
-    $,el,library:worldLibrary,state,worldId:world.id,focus:'groups',
+    el,fetch,worldId:world.id,focus:'groups',
     onChoose:candidate=>{
       $('relations-entity-name').value=candidate.name;
       $('relations-entity-kind').value=candidate.kind;
