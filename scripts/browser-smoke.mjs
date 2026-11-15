@@ -27,7 +27,18 @@ const driverBinary=()=>{
 async function main(){
   const workDir=mkdtempSync(join(tmpdir(),'rp-browser-smoke-'));
   const store=new WorldPartitionStore(join(workDir,'worlds'));
-  const server=createApp({store,fetchImpl:async()=>{throw Error('Offline local model expected in browser QA')}});
+  let modelAvailable=false;
+  const browserReply='Ticketed NPC reply committed from the local-model stream.';
+  const server=createApp({store,fetchImpl:async url=>{
+    if(!modelAvailable)throw Error('Offline local model expected in browser QA');
+    const target=String(url);
+    if(target.endsWith('/models'))return Response.json({data:[{id:'browser-leased-model'}]});
+    if(target.endsWith('/api/extra/true_max_context_length'))return Response.json({value:4096});
+    if(target.endsWith('/api/extra/tokencount'))return Response.json({value:400});
+    if(target.endsWith('/chat/completions'))
+      return new Response('data: '+JSON.stringify({choices:[{delta:{content:browserReply}}]})+'\\n\\ndata: [DONE]\\n\\n');
+    throw Error('Unexpected local model probe: '+target);
+  }});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const base='http://127.0.0.1:'+server.address().port;
   const driverPort=await openPort();
@@ -496,7 +507,48 @@ async function main(){
         await script("document.querySelector('#close-inspector').click();return true");
       }
     }
-    console.log('Browser UI smoke: parallel world tabs, persisted character editing, durable character and canon deletion, desktop, focused editors, command palette, character workshop, and 3 responsive widths passed.');
+    // The real browser must consume the server-owned rp_complete SSE trailer,
+    // commit via /api/actor/reply/commit, and display canonical SQLite text.
+    // Earlier smoke assertions deliberately ran with the model offline.
+    await size(1440,900);
+    modelAvailable=true;
+    assert.equal(await script(`
+      document.querySelector('button[data-workspace="tools"]').click();
+      document.querySelector('[data-tab="setup"]').click();
+      document.querySelector('#refresh-models').click();
+      return true;
+    `),true);
+    await until(async()=>script(`
+      return document.querySelector('#model-select')?.value==='browser-leased-model';
+    `),'browser selected the available local mock model');
+    await until(async()=>{
+      const state=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
+      return state.settings.model==='browser-leased-model';
+    },'model choice persisted before actor generation');
+    await script(`
+      document.querySelector('#close-inspector').click();
+      document.querySelector('button[data-workspace="story"]').click();
+      document.querySelector('#new-session').click();
+      document.querySelector('#new-scene-confirm').click();
+      return true;
+    `);
+    await until(async()=>script("return document.body.dataset.workspace==='story' && !!document.querySelector('#message-input')"),'live scene editor');
+    await script(`
+      document.querySelector('#message-input').value='Do you hear the character speaking?';
+      document.querySelector('#send').click();
+      return true;
+    `);
+    await until(async()=>{
+      const state=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
+      return state.sessions.some(scene=>scene.messages.some(message=>
+        message.role==='assistant'&&message.content===browserReply));
+    },'browser generated reply committed via ticket',18000);
+    assert.equal(await script(`
+      return [...document.querySelectorAll('#messages .message-text')]
+        .some(node=>node.textContent.includes('Ticketed NPC reply committed'));
+    `),true,'browser must render the committed model response');
+    await screenshot('08-ticketed-model-reply-committed');
+    console.log('Browser UI smoke: deletion, responsive navigation, cross-world isolation, and server-ticketed NPC streaming commit passed.');
   }finally{
     if(sessionId)await request('DELETE','/session/'+sessionId).catch(()=>{});
     chrome.kill('SIGTERM');
