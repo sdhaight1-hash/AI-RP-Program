@@ -138,11 +138,11 @@ async function main(){
       const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
       return catalog.locations.some(l=>l.name===atlasName);
     },'inline Atlas place persisted');
-    assert.equal(await script(`
+    await until(async()=>script(`
       return document.querySelector('[data-world-view="atlas"]')?.getAttribute('aria-pressed')==='true' &&
         [...document.querySelectorAll('#atlas-places .lore-card strong')]
           .some(x=>x.textContent===${JSON.stringify(atlasName)});
-    `),true,'Atlas editor must remain open after its save and show the new place');
+    `),'inline Atlas refreshed with newly saved place');
     await screenshot('02c-inline-atlas');
 
     const inlineEntityName='Inline Relations Test Entity';
@@ -162,11 +162,11 @@ async function main(){
       const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(store.activeWorldId))).json();
       return catalog.entities.some(e=>e.name===inlineEntityName);
     },'inline world entity persisted');
-    assert.equal(await script(`
+    await until(async()=>script(`
       return document.querySelector('[data-world-view="relations"]')?.getAttribute('aria-pressed')==='true' &&
         [...document.querySelectorAll('#relations-list .lore-card strong')]
           .some(x=>x.textContent===${JSON.stringify(inlineEntityName)});
-    `),true,'Relations editor should remain open after saving');
+    `),'inline Relations refreshed with newly saved entity');
     await screenshot('02d-inline-relations');
     assert.equal(await script(`
       window.confirm=()=>true;
