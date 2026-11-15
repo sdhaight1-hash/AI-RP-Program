@@ -133,7 +133,13 @@ ${m.content}`).join('\n\n');
         if(!visibleSources.length)section.append(el('p','No witnessed source messages in this scene yet.','help'));
         host.append(section);
 
-      }catch(error){if(getCurrentTab()==='context')host.innerHTML='<h2 class="panel-title">Context inspector</h2><p class="help"></p>',host.querySelector('p').textContent=error.message;}
+      }catch(error){
+        if(getCurrentTab()==='context'&&getActiveWorldId()===requestedWorld&&
+          getActiveSession()?.id===requestedScene){
+          host.innerHTML='<h2 class="panel-title">Context inspector</h2><p class="help"></p>';
+          host.querySelector('p').textContent=error.message;
+        }
+      }
     })();
 
 }
