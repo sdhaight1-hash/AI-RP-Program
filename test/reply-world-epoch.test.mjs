@@ -172,8 +172,8 @@ test('another world cannot redeem a completed NPC reply ticket',{timeout:18000},
 
 test('SSE model reader never authenticates truncated, errored or invalid streams',()=>{
   for(const frames of [
-    modelChunk,
-    modelChunk+'data: {"error":"bad backend"}\n\n'+modelDone,
+    modelChunk('I can still hear you.'),
+    modelChunk('I can still hear you.')+'data: {"error":"bad backend"}\n\n'+modelDone,
     'data: invalid-json\n\n'+modelDone,
     'data: [DONE]\n\n',
   ]){
