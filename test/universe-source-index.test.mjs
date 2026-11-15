@@ -190,3 +190,19 @@ test('the full stored scene transcript is searchable beyond the former 250-messa
     assert.equal(indexed,300);
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('evidence after character field offset 9000 remains searchable',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-long-character-index-'));
+  const store=new WorldPartitionStore(dir);
+  try{
+    const worldId=store.activeWorldId;
+    const character=createCharacter('Iris');
+    character.backstory='A quiet life. '.repeat(780)+'Iris works at Cliffhaven Tower.';
+    assert.ok(character.backstory.indexOf('Cliffhaven Tower')>9000);
+    const state=makeEmptyWorldState();state.characters=[character];
+    const scope=store.forWorld(worldId);
+    scope.save(state,scope.load().revision,{worldId});
+    assert.ok(findUniverseSources(scope.db,{query:'Cliffhaven Tower'})
+      .some(source=>source.id===character.id&&source.field==='backstory'));
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});
