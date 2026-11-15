@@ -36,6 +36,8 @@ let switchingWorld = false;
 let selectedWorldId = null;
 let worldEditorView='overview';
 let selectedCharacterId = null;
+let characterRosterQuery='';
+let characterRosterPage=0;
 let activeWorldId = sessionStorage.getItem('ai-rp-selected-world') || null;
 // The selected world belongs to this browser tab. Every stateful request
 // carries its world ID, regardless of other tabs' selections.
@@ -444,6 +446,7 @@ async function switchWorld(worldId) {
   comfyJob=null;comfyImages=[]; // Do not expose another world's generated assets after switching.
   $('message-input').value='';
   aiDraftTarget=null;builderCharacterId=null;selectedCharacterId=null;fidelityDraft=null;
+  characterRosterQuery='';characterRosterPage=0;
   $('character-builder')?.close();
   activeWorldId=result.worldId;
   selectedWorldId=result.worldId;
@@ -1324,6 +1327,7 @@ function renderWorkspace(){
     rosterSearch.type='search';rosterSearch.placeholder='Search this world’s characters';
     rosterSearch.setAttribute('aria-label','Search characters in current world');
     rosterSearch.autocomplete='off';
+    rosterSearch.value=characterRosterQuery;
     const rosterCount=el('p','','help');
     rosterTools.append(rosterSearch,rosterCount);
     const rosterList=el('div','','workspace-entity-list');
@@ -1333,13 +1337,14 @@ function renderWorkspace(){
     const rosterPageLabel=el('span','','workspace-entity-meta');
     rosterPager.append(previous,rosterPageLabel,next);
     const pageSize=25;
-    let page=0;
+    let page=characterRosterPage;
     const drawRoster=()=>{
       const query=rosterSearch.value.trim().toLocaleLowerCase();
       const matches=characters.filter(c=>
         [c.name,c.occupation,c.tagline].some(value=>String(value||'').toLocaleLowerCase().includes(query)));
       const pages=Math.max(1,Math.ceil(matches.length/pageSize));
       page=Math.max(0,Math.min(page,pages-1));
+      characterRosterPage=page;
       rosterList.replaceChildren();
       rosterCount.textContent=query
         ? `${matches.length} of ${characters.length} characters match`
@@ -1360,7 +1365,7 @@ function renderWorkspace(){
       next.disabled=page>=pages-1;
       rosterPager.classList.toggle('hidden',pages===1);
     };
-    rosterSearch.addEventListener('input',()=>{page=0;drawRoster();});
+    rosterSearch.addEventListener('input',()=>{characterRosterQuery=rosterSearch.value;page=0;drawRoster();});
     drawRoster();
     roster.append(rosterTools);
     roster.append(rosterList,rosterPager);grid.append(roster);
