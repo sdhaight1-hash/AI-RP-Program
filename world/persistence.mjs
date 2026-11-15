@@ -166,6 +166,19 @@ export class WorldRepository {
     } catch (err) { this.db.exec('ROLLBACK'); throw err; }
   }
 
+  updateWorldIdentity({worldId,name,description,expectedName,expectedDescription}) {
+    const old=this.db.prepare('SELECT id,name,description FROM worlds WHERE id=?').get(worldId);
+    if(!old)throw Error('Connical Universe not found');
+    if(old.name!==expectedName||old.description!==expectedDescription)
+      throw Error('Universe details changed; reload and review before saving');
+    const cleanName=cleanTitle(name,'Universe name');
+    if(typeof description!=='string'||description.length>4000)
+      throw Error('Universe foundation must be 4,000 characters or fewer');
+    this.db.prepare('UPDATE worlds SET name=?,description=? WHERE id=? AND name=? AND description=?')
+      .run(cleanName,description.trim(),worldId,expectedName,expectedDescription);
+    return {id:worldId,name:cleanName,description:description.trim()};
+  }
+
   createTimeline({ worldId, name, parentTimelineId = null }) {
     if (typeof worldId !== 'string') throw new TypeError('World required');
     const canon = this.db.prepare('SELECT id FROM world_revisions WHERE world_id=? ORDER BY version DESC LIMIT 1').get(worldId);
