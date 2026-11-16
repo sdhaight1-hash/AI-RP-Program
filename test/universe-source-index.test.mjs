@@ -206,3 +206,33 @@ test('evidence after character field offset 9000 remains searchable',()=>{
       .some(source=>source.id===character.id&&source.field==='backstory'));
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('reviewed canon cannot approve stale blueprint evidence after an independent edit',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-stale-blueprint-evidence-'));
+  const store=new WorldPartitionStore(dir);
+  try{
+    const worldId=store.activeWorldId;
+    const scope=store.forWorld(worldId);
+    const initial=scope.worlds.list().blueprint;
+    const created=scope.worlds.saveBlueprint({worldId,revision:initial.revision,
+      sections:{...initial.sections,society:'The Silver Guild governs the docks.'}});
+    const candidate=scope.worlds.discoverSources({worldId,focus:'groups'})
+      .suggestions.find(x=>x.name==='Silver Guild');
+    assert.ok(candidate?.evidence?.[0]?.fingerprint);
+    const target=scope.worlds.createEntity({worldId,name:'Harbor Association',
+      kind:'organization',description:'Local dockworkers'});
+    scope.worlds.saveBlueprint({worldId,revision:created.revision,
+      sections:{...initial.sections,society:'Independent neighborhood cooperatives.'}});
+    assert.throws(()=>scope.worlds.createReviewedEntry({
+      worldId,entryType:'entity',name:'Silver Guild',kind:'organization',
+      sourceProof:candidate.evidence[0]}),/Source changed/);
+    assert.throws(()=>scope.worlds.reviewMention({
+      worldId,action:'link',focus:'groups',name:'Silver Guild',targetId:target.id,
+      sourceProof:candidate.evidence[0]}),/Source changed/);
+    assert.equal(scope.worlds.list().entities.some(e=>e.name==='Silver Guild'),false);
+    assert.equal(scope.worlds.list().aliases.length,0);
+    assert.equal(findUniverseSources(scope.db,{query:'Silver Guild'}).length,0);
+    assert.equal(scope.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});
