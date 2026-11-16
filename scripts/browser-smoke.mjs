@@ -601,6 +601,18 @@ async function main(){
       return !found.suggestions?.some(x=>x.name==='Seabrook Guild');
     },'dismissed group mention removed from recommendations');
     await screenshot('06d3-dismissed-social-mention');
+    assert.equal(await script(`
+      const review=document.querySelector('.universe-claim-conflicts');
+      if(!review?.querySelector('summary'))return false;
+      review.open=true;
+      return true;
+    `),true,'Relations exposes optional, non-destructive claim conflict review');
+    await until(async()=>script(`
+      const review=document.querySelector('.universe-claim-conflicts');
+      const status=review?.querySelector('[role="status"]')?.textContent||'';
+      return status.includes('No conflicting explicit claims')||status.includes('potential discrepancies');
+    `),'source-backed conflict review query completes in browser');
+    await screenshot('06d4-claim-conflict-review');
 
     // The relationship codex must delete a real SQLite entry, not just hide a
     // client card or leave an orphaned world entity after refresh.
