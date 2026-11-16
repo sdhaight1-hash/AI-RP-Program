@@ -4,15 +4,17 @@ export function mountEntryPhotoGallery(host,{
   worldId,entryType,entryId,entryName,photos=[],fetchImpl=fetch,
   refreshWorldLibrary,showError
 }){
-  const root=document.createElement('section');
+  const attached=photos.filter(x=>x.worldId===worldId&&x.entryType===entryType&&x.entryId===entryId);
+  const root=document.createElement('details');
   root.className='entry-photo-gallery';
   root.setAttribute('aria-label','Photos of '+entryName);
-  const header=document.createElement('div');header.className='entry-photo-gallery-heading';
+  root.open=attached.length>0;
+  const header=document.createElement('summary');header.className='entry-photo-gallery-heading';
   const heading=document.createElement('strong');heading.textContent='Photos & visual references';
-  const count=document.createElement('small');count.textContent=String(photos.length)+' images';
+  const count=document.createElement('small');count.textContent=String(attached.length)+' images';
   header.append(heading,count);root.append(header);
   const gallery=document.createElement('div');gallery.className='entry-photo-grid';
-  for(const photo of photos.filter(x=>x.worldId===worldId&&x.entryType===entryType&&x.entryId===entryId)){
+  for(const photo of attached){
     const item=document.createElement('figure');item.className='entry-photo-item';
     const link=document.createElement('a');
     const uri='/api/worlds/photos/'+encodeURIComponent(photo.id)+'?worldId='+encodeURIComponent(worldId);
