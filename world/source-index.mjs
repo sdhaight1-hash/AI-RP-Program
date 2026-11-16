@@ -122,6 +122,19 @@ export function findUniverseSources(db,{query='',limit=400}={}){
   }
   return rows;
 }
+export function listSourceExcerpts(db,{query='',limit=12}={}){
+  const rows=findUniverseSources(db,{query,limit:Math.min(12,Math.max(1,limit))});
+  const phrase=String(query).trim().toLocaleLowerCase();
+  const word=phrase.split(/\s+/u)[0];
+  return rows.map(source=>{
+    const index=phrase?source.text.toLocaleLowerCase().indexOf(phrase):-1;
+    const wordIndex=word?source.text.toLocaleLowerCase().indexOf(word):-1;
+    const match=index>=0?index:wordIndex;
+    const start=match>=0?Math.max(0,match-250):0;
+    return {...source,text:source.text.slice(start,start+1600)};
+  });
+}
+
 export function discoverIndexedUniverseMentions(db,{worldId,library,focus='locations',query='',limit=14}={}){
   const sourcesOverride=findUniverseSources(db,{query,limit:query?750:1000});
   return discoverUniverseMentions({worldId,library,focus,limit,sourcesOverride});

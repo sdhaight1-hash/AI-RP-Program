@@ -71,6 +71,16 @@ Remaining work is distinct from these verified capabilities: source aliases/core
 
 **Still pending:** full NLP/coreference extraction beyond explicit naming patterns; claim-level contradiction and temporal resolution; author-selected source navigation and explanatory confidence; optional small-local-model candidate extraction. Never represent heuristic similarity as proof of identity, and never treat conflicting dialogue as fact.
 
+## Optional local-model extraction (PR #68)
+
+- Author-selected indexed source excerpts (at most 1,600 characters) can be analyzed by the configured local model through the existing `/api/chat` infrastructure. Nothing runs continuously or automatically in the background.
+- Results must use a strict JSON schema: no more than five `{name,kind,quote}` objects, with an **exact source substring** for each quotation. The parser rejects unquoted or invented names, unknown entry kinds and unrelated output fields.
+- The browser first displays model results as unverified suggestions using the same Create, Link alias, and Dismiss actions. Model output cannot commit canon or insert personal NPC memories.
+- Canonical save and link routes **independently recheck** the current full source fingerprint and quote in the target universe SQLite transaction; stale model evidence cannot approve facts.
+- The user can cancel extraction and is protected from applying results after source selection changes.
+- The extracted source is selected in Atlas or Relationship Codex; no data from a different universe is returned by the scoped source endpoint.
+- Results are intentionally limited to explicit names in selected passages. This is **not** arbitrary LLM-powered timeline reconciliation, an authoritative truth detector, or fully solved coreference.
+
 ## Implementation phases
 
 ### Phase 0 — completed initial checkpoint
