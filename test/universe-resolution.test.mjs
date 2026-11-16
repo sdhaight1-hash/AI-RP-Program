@@ -6,6 +6,8 @@ import {tmpdir} from 'node:os';
 import {WorldPartitionStore} from '../world/partition-store.mjs';
 import {createApp} from '../server.mjs';
 import {createCharacter,makeEmptyWorldState} from '../engine.mjs';
+import {gatherCharacterWorldContext,worldDraftVersion} from '../character/authoring.mjs';
+import {makeSceneAuthoringRequest} from '../authoring/world-scene.mjs';
 
 test('existing canon aliases link only on explicit source-backed review and survive restart',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'rp-alias-review-'));
@@ -65,6 +67,19 @@ test('existing canon aliases link only on explicit source-backed review and surv
     assert.equal(catalog.locations.filter(x=>x.name==='Harbor District').length,1);
     assert.equal(catalog.entities.filter(x=>x.name==='Dockworkers Association').length,1);
     assert.equal(catalog.aliases.length,2);
+    const authored=store.forWorld(worldId).load().state.characters[0];
+    const charContext=gatherCharacterWorldContext({worldLibrary:catalog,worldId,character:authored});
+    assert.match(charContext.context,/Harbor Annex → Harbor District/);
+    assert.match(charContext.context,/Silver Guild → Dockworkers Association/);
+    const sceneContext=makeSceneAuthoringRequest({
+      worldId,library:catalog,characters:[authored],characterId:authored.id,
+      channelId:'in_person'
+    });
+    assert.match(sceneContext.messages[1].content,/Harbor Annex/);
+    assert.match(sceneContext.messages[1].content,/Silver Guild/);
+    assert.notEqual(worldDraftVersion(catalog),worldDraftVersion({...catalog,aliases:[]}),
+      'alias review changes invalidate stale character authoring drafts');
+
     const collision=await post('/api/worlds/locations',{
       worldId,name:'Harbor Annex',kind:'building',description:'Would overlap existing alias'
     });
