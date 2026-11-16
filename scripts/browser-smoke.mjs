@@ -31,6 +31,10 @@ async function main(){
   const browserReply='Ticketed NPC reply committed from the local-model stream.';
   const newWorldDraft=JSON.stringify({description:'An independent harbor civilization shaped by seasonal trade.'});
   const locationDraft=JSON.stringify({name:'Browser AI Docks',description:'A salt-stained boat repair shed.'});
+  const extractedSourceName=JSON.stringify({candidates:[{
+    name:'Lantern House',kind:'other',
+    quote:'Her aunt Nessa ran the Lantern House near Seabrook.'
+  }]});
   const ongoingSceneDraft=JSON.stringify({direction:'Keep the harbor conversation grounded in Nessa’s independent decisions.'});
   const newSceneDraft=JSON.stringify({title:'Harbor Call at Dusk',
     direction:'The player calls Nessa about an unsigned harbor map.',
@@ -51,7 +55,8 @@ async function main(){
       const isWorld=String(payload.messages?.[0]?.content||'')
         .includes('OPTIONAL world-atlas additions');
       const system=String(payload.messages?.[0]?.content||'');
-      const content=system.includes('ONE place inside an already established fictional world')?locationDraft:
+      const content=system.includes('Extract up to 5 explicitly named fictional places')?extractedSourceName:
+        system.includes('ONE place inside an already established fictional world')?locationDraft:
         system.includes('NEW, isolated world')?newWorldDraft:
         system.includes('CURRENT direction of an ongoing')?ongoingSceneDraft:
         system.includes('STARTING CONFIGURATION')?newSceneDraft:
@@ -548,6 +553,44 @@ async function main(){
         p.entryType==='location'&&p.entryId===place.id&&p.quote.includes('Seabrook'));
     },'reviewed Atlas candidate and its source proof persisted in SQLite');
     await screenshot('06d1-reviewed-family-source-atlas-entry');
+
+    // A name missed by the lexical place scanner can be extracted by an
+    // opt-in local-model review of a selected, already-indexed family history.
+    assert.equal(await script(`
+      const panel=document.querySelector('.universe-mention-panel');
+      const query=panel?.querySelector('.universe-mention-search');
+      const details=panel?.querySelector('.universe-extract-panel');
+      if(!query||!details)return false;
+      query.value='Lantern House';query.dispatchEvent(new Event('input',{bubbles:true}));
+      details.open=true;
+      return true;
+    `),true,'Atlas exposes optional local-model passage analysis');
+    await until(async()=>script(`
+      const select=document.querySelector('.universe-extract-source');
+      return [...select?.options||[]].some(x=>x.textContent.includes('familyHistory'));
+    `),'Character Studio family-history source found for opt-in extraction');
+    assert.equal(await script(`
+      const select=document.querySelector('.universe-extract-source');
+      select.value=[...select.options].find(x=>x.textContent.includes('familyHistory')).value;
+      select.dispatchEvent(new Event('change',{bubbles:true}));
+      document.querySelector('.universe-extract-panel button')?.click();
+      return true;
+    `),true);
+    await until(async()=>script(`
+      return [...document.querySelectorAll('.universe-extract-panel .universe-mention-item strong')]
+        .some(x=>x.textContent==='Lantern House');
+    `),'source-quoted implicit location extracted with local model');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.universe-extract-panel .universe-mention-item')]
+        .find(x=>x.querySelector('strong')?.textContent==='Lantern House');
+      row?.querySelector('button')?.click();
+      const set=document.querySelector('#atlas-name')?.value==='Lantern House';
+      document.querySelector('#atlas-name').value='';
+      return set;
+    `),true,'local model extraction only fills reviewed editor and does not create canon');
+    assert.equal(store.worlds.list().locations.some(x=>x.name==='Lantern House'),false,
+      'unapproved local model names cannot write canon');
+    await screenshot('06d1a-opt-in-model-source-extraction');
 
     // An alias is a link to an existing canonical place, not a duplicate place.
     await until(async()=>script(`
