@@ -18,8 +18,28 @@ const likelyName=s=>{
 };
 export function sourcesFor({state={},library={},worldId}){
   const sources=[];
-  const add=(type,id,field,value,trust)=>{if(typeof value==='string'&&value.trim())
-    sources.push({type,id,field,text:value.slice(0,12000),trust});};
+  // Keep the full authored field searchable without putting it all into an AI
+  // prompt. Overlap chunks so names at a boundary are still discoverable.
+  const add=(type,id,field,value,trust)=>{
+    if(typeof value!=='string'||!value.trim())return;
+    const size=12000,overlap=200;
+    if(value.length<=size){
+      sources.push({type,id,field,text:value,trust});return;
+    }
+    let start=0,part=0;
+    while(start<value.length){
+      let end=Math.min(value.length,start+size);
+      // Do not split a UTF-16 surrogate pair inside an indexed source.
+      if(end<value.length&&value.charCodeAt(end-1)>=0xD800&&
+        value.charCodeAt(end-1)<=0xDBFF)end--;
+      sources.push({type,id,field:part===0?field:field+'#'+(part+1),
+        text:value.slice(start,end),trust});
+      if(end===value.length)break;
+      start=Math.max(start+1,end-overlap);
+      if(value.charCodeAt(start)>=0xDC00&&value.charCodeAt(start)<=0xDFFF)start--;
+      part++;
+    }
+  };
   const world=library.worlds?.find(w=>w.id===worldId);
   if(world)add('universe',worldId,'description',world.description,'established');
   if(library.blueprint?.worldId===worldId)
