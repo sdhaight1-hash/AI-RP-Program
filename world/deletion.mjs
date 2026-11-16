@@ -167,6 +167,9 @@ export function deleteWorldRecord(store,{worldId,kind,id}) {
         .run(worldId,kind,id);
     }
     db.prepare(`DELETE FROM ${table} WHERE id=? AND world_id=?`).run(id,worldId);
+    // Canon and the derived FTS/claim index must commit or roll back together;
+    // otherwise removed places and groups remain searchable until the next scan.
+    store.refreshSourceIndex();
     const remaining=db.prepare('PRAGMA foreign_key_check').all();
     if(remaining.length)throw new Error('World entry deletion would break a database reference');
     db.exec('COMMIT');
