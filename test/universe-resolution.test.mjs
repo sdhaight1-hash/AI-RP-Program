@@ -65,6 +65,26 @@ test('existing canon aliases link only on explicit source-backed review and surv
     assert.equal(catalog.locations.filter(x=>x.name==='Harbor District').length,1);
     assert.equal(catalog.entities.filter(x=>x.name==='Dockworkers Association').length,1);
     assert.equal(catalog.aliases.length,2);
+    const collision=await post('/api/worlds/locations',{
+      worldId,name:'Harbor Annex',kind:'building',description:'Would overlap existing alias'
+    });
+    assert.notEqual(collision.response.status,201);
+    const entityCollision=await post('/api/worlds/entities',{
+      worldId,name:'Silver Guild',kind:'organization',description:'Would duplicate an alias'
+    });
+    assert.notEqual(entityCollision.response.status,201);
+    const renamed=await fetch(base+'/api/worlds/entities',{
+      method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        worldId,id:guild.data.id,name:'Silver Guild',kind:'organization',
+        description:'Port labor guild',expectedName:'Dockworkers Association',
+        expectedKind:'organization',expectedDescription:'Port labor guild'
+      })
+    });
+    assert.equal(renamed.status,200,'own alias can be promoted to primary canon name');
+    assert.equal(store.forWorld(worldId).worlds.list().aliases.length,1,
+      'promoting alias removes its redundant alias record');
+
     const again=await post('/api/worlds/discovery/review',{
       worldId,focus:'locations',action:'link',name:'Harbor Annex',
       targetId:place.data.id,sourceProof:annex.evidence[0]
