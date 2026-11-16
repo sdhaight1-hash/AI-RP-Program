@@ -38,8 +38,9 @@ export function linkUniverseAlias(db,{worldId,focus,name,targetId,sourceProof}={
     const target=db.prepare(`SELECT id,name,kind FROM ${targetTable[entryType]}
       WHERE id=? AND world_id=?`).get(targetId,worldId);
     if(!target)throw Error('Target canon entry does not exist in this universe');
-    const canonical=db.prepare(`SELECT id FROM ${targetTable[entryType]}
-      WHERE world_id=? AND name=? COLLATE NOCASE`).get(worldId,name.trim());
+    const canonical=db.prepare(`SELECT id,name FROM ${targetTable[entryType]}
+      WHERE world_id=?`).all(worldId)
+      .find(item=>canonNameKey(item.name)===aliasKey);
     if(canonical)throw Error('A canon entry already has this name; use its existing identity');
     if(canonNameKey(target.name)===aliasKey)throw Error('This is already the canonical name');
     const existing=db.prepare(`SELECT entry_id AS entryId
@@ -97,7 +98,7 @@ export function resolveUniverseCandidates(db,{worldId,focus,library,result}){
   const entryType=focusType[focus];
   if(!entryType||worldId!==library.activeWorldId||result.worldId!==worldId)
     throw Error('Universe review scope mismatch');
-  const entries=(entryType==='location'?library.locations:library.entities||[])
+  const entries=(entryType==='location'?library.locations||[]:library.entities||[])
     .filter(x=>x.worldId===worldId);
   const aliases=listUniverseAliases(db,worldId).filter(x=>x.entryType===entryType);
   const aliasByKey=new Map(aliases.map(x=>[x.aliasKey,x]));
@@ -123,7 +124,7 @@ export function resolveUniverseCandidates(db,{worldId,focus,library,result}){
     if(ignored)continue;
     suggestions.push({...candidate,possibleMatches:possibleMatches(candidate,entries)});
   }
-  return {...result,suggestions,existingLinks};
+  return {...result,suggestions:suggestions.slice(0,14),existingLinks:existingLinks.slice(0,20)};
 }
 export function purgeUniverseReviewLinks(db,{worldId,kind,id}){
   if(!targetTable[kind])return;
