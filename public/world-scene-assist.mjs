@@ -10,6 +10,29 @@ function consumeFrames(text,emit){
   return {remaining:frames.pop(),frames:frames.filter(Boolean).map(frame=>
     frame.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n')).filter(Boolean)};
 }
+export async function readLocalModelText(response,{maxChars=16000}={}){
+  if(!response.body)throw Error('Model did not return a stream');
+  const reader=response.body.getReader(),decoder=new TextDecoder();
+  let buffer='',result='',finished=false;
+  while(!finished){
+    const chunk=await reader.read();if(chunk.done)break;
+    const decoded=consumeFrames(buffer+decoder.decode(chunk.value,{stream:true}));
+    buffer=decoded.remaining;
+    for(const line of decoded.frames){
+      if(line==='[DONE]'){finished=true;break;}
+      const item=JSON.parse(line);
+      if(item.error)throw Error(String(item.error));
+      result+=item.choices?.[0]?.delta?.content||'';\n      if(result.length>maxChars)throw Error('Model response exceeds the review limit');
+    }
+  }
+  const tail=consumeFrames(buffer+decoder.decode()+'\n\n');
+  for(const line of tail.frames)if(line!=='[DONE]'){
+    const item=JSON.parse(line);if(item.error)throw Error(String(item.error));
+    result+=item.choices?.[0]?.delta?.content||'';\n      if(result.length>maxChars)throw Error('Model response exceeds the review limit');
+  }
+  return result;
+}
+
 export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurrent,onApply,beforeGenerate=async()=>{},applyMessage='Approved fields applied to the editor. Save or create explicitly to persist them.'}){
   if(!AUTHORING_CONTRACTS[mode])throw Error('Unknown AI authoring mode');
   const contracts=AUTHORING_CONTRACTS[mode];
@@ -93,24 +116,7 @@ export function mountWorldSceneAssistant(host,{mode,getRequest,getModel,isCurren
         body:JSON.stringify({worldId:draft.worldId,model,temperature:0.45,max_tokens:mode==='blueprint'?2048:1400,messages:draft.messages})});
       if(!response.ok){const error=await response.json().catch(()=>({}));throw Error(error.error||'Local model unavailable');}
       if(!response.body)throw Error('Model did not return a stream');
-      const reader=response.body.getReader(),decoder=new TextDecoder();
-      let buffer='',result='',finished=false;
-      while(!finished){
-        const chunk=await reader.read();if(chunk.done)break;
-        const decoded=consumeFrames(buffer+decoder.decode(chunk.value,{stream:true}));
-        buffer=decoded.remaining;
-        for(const line of decoded.frames){
-          if(line==='[DONE]'){finished=true;break;}
-          const item=JSON.parse(line);
-          if(item.error)throw Error(String(item.error));
-          result+=item.choices?.[0]?.delta?.content||'';
-        }
-      }
-      const tail=consumeFrames(buffer+decoder.decode()+'\n\n');
-      for(const line of tail.frames)if(line!=='[DONE]'){
-        const item=JSON.parse(line);if(item.error)throw Error(String(item.error));
-        result+=item.choices?.[0]?.delta?.content||'';
-      }
+      const result=await readLocalModelText(response);
       if(controller.signal.aborted||active!==controller||!current())return;
       // A changed draft, cast, medium or world makes this output obsolete.
       if(getRequest(draft.target,guidance.value).basis!==draft.basis)
