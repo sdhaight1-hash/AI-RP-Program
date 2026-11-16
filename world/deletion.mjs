@@ -47,6 +47,7 @@ export function reconcileCharacterRecords(db, state, worldId,{
       removeEntityRelations(db,worldId,entity.id);
       db.prepare('DELETE FROM character_world_sources WHERE world_id=? AND entry_type=? AND entry_id=?').run(worldId,'entity',entity.id);
       db.prepare("DELETE FROM universe_entry_provenance WHERE world_id=? AND entry_type='entity' AND entry_id=?").run(worldId,entity.id);
+      db.prepare("DELETE FROM universe_entry_aliases WHERE world_id=? AND entry_type='entity' AND entry_id=?").run(worldId,entity.id);
       db.prepare('DELETE FROM world_entities WHERE id=? AND world_id=?').run(entity.id,worldId);
     }
     // Derived memories (including fork-inherited copies), reviewed facts,
@@ -159,9 +160,12 @@ export function deleteWorldRecord(store,{worldId,kind,id}) {
       db.prepare("DELETE FROM character_world_sources WHERE world_id=? AND entry_type='location' AND entry_id=?")
         .run(worldId,id);
     }
-    if(kind==='entity'||kind==='location')
+    if(kind==='entity'||kind==='location'){
       db.prepare('DELETE FROM universe_entry_provenance WHERE world_id=? AND entry_type=? AND entry_id=?')
         .run(worldId,kind,id);
+      db.prepare('DELETE FROM universe_entry_aliases WHERE world_id=? AND entry_type=? AND entry_id=?')
+        .run(worldId,kind,id);
+    }
     db.prepare(`DELETE FROM ${table} WHERE id=? AND world_id=?`).run(id,worldId);
     const remaining=db.prepare('PRAGMA foreign_key_check').all();
     if(remaining.length)throw new Error('World entry deletion would break a database reference');
