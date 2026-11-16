@@ -14,6 +14,15 @@ export function mountEntryPhotoGallery(host,{
   const count=document.createElement('small');count.textContent=String(attached.length)+' images';
   header.append(heading,count);root.append(header);
   const gallery=document.createElement('div');gallery.className='entry-photo-grid';
+  const patch=async(photo,payload)=>{
+    const response=await fetchImpl('/api/worlds/photos',{
+      method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({worldId,id:photo.id,...payload})
+    });
+    const data=await response.json();
+    if(!response.ok)throw Error(data.error||'Could not update photo');
+    await refreshWorldLibrary();showError();
+  };
   for(const photo of attached){
     const item=document.createElement('figure');item.className='entry-photo-item';
     const link=document.createElement('a');
@@ -25,6 +34,11 @@ export function mountEntryPhotoGallery(host,{
     link.append(img);item.append(link);
     const caption=document.createElement('figcaption');caption.textContent=photo.caption||'Untitled image';
     item.append(caption);
+    if(photo.isCover){
+      const coverLabel=document.createElement('span');
+      coverLabel.className='entry-photo-cover';
+      coverLabel.textContent='Cover image';item.append(coverLabel);
+    }
     const actions=document.createElement('div');actions.className='entry-photo-actions';
     const edit=document.createElement('button');edit.type='button';edit.textContent='Edit caption';
     edit.className='subtle-button';
@@ -55,7 +69,38 @@ export function mountEntryPhotoGallery(host,{
         await refreshWorldLibrary();showError();
       }catch(error){showError(error.message);remove.disabled=false;}
     };
-    actions.append(edit,remove);item.append(actions);gallery.append(item);
+    const cover=document.createElement('button');cover.type='button';
+    cover.textContent=photo.isCover?'Current cover':'Make cover';
+    cover.className='subtle-button';cover.disabled=!!photo.isCover;
+    cover.onclick=async()=>{cover.disabled=true;
+      try{await patch(photo,{cover:true});}catch(error){showError(error.message);cover.disabled=false;}
+    };
+    const visibility=document.createElement('select');
+    visibility.className='entry-photo-visibility';
+    visibility.setAttribute('aria-label','Who sees this photo in story view');
+    for(const [value,label] of [
+      ['public','Visible to players'],['spoiler','Spoiler — creator review'],
+      ['private','Creator only']
+    ])visibility.add(new Option(label,value));
+    visibility.value=photo.visibility||'public';
+    visibility.onchange=async()=>{visibility.disabled=true;
+      try{await patch(photo,{visibility:visibility.value});}
+      catch(error){showError(error.message);visibility.value=photo.visibility||'public';visibility.disabled=false;}
+    };
+    const previous=document.createElement('button');previous.type='button';
+    previous.className='subtle-button';previous.textContent='Move earlier';
+    previous.disabled=attached.indexOf(photo)===0;
+    previous.onclick=async()=>{previous.disabled=true;
+      try{await patch(photo,{move:'up'});}catch(error){showError(error.message);previous.disabled=false;}
+    };
+    const next=document.createElement('button');next.type='button';
+    next.className='subtle-button';next.textContent='Move later';
+    next.disabled=attached.indexOf(photo)===attached.length-1;
+    next.onclick=async()=>{next.disabled=true;
+      try{await patch(photo,{move:'down'});}catch(error){showError(error.message);next.disabled=false;}
+    };
+    actions.append(cover,previous,next,edit,remove);
+    item.append(visibility,actions);gallery.append(item);
   }
   root.append(gallery);
   const compose=document.createElement('div');compose.className='entry-photo-upload';
@@ -68,8 +113,7 @@ export function mountEntryPhotoGallery(host,{
   const button=document.createElement('button');button.type='button';
   button.className='subtle-button';button.textContent='Add selected photos';
   const status=document.createElement('span');status.className='help';status.setAttribute('role','status');
-  button.onclick=async()=>{
-    const files=[...input.files||[]];
+  const uploadFiles=async files=>{
     if(!files.length){status.textContent='Choose one or more photos first.';return;}
     button.disabled=true;input.disabled=true;
     let done=0;
@@ -98,6 +142,21 @@ export function mountEntryPhotoGallery(host,{
       if(done)await refreshWorldLibrary();
     }
   };
-  compose.append(caption,input,button,status);root.append(compose);host.append(root);
+  button.onclick=()=>void uploadFiles([...input.files||[]]);
+  const dropZone=document.createElement('div');
+  dropZone.className='entry-photo-drop-zone';
+  dropZone.textContent='Drop PNG, JPEG or WebP photos here, or choose files below';
+  dropZone.setAttribute('aria-label','Drop images for '+entryName);
+  dropZone.ondragover=event=>{
+    if(event.dataTransfer?.types.includes('Files')){
+      event.preventDefault();dropZone.classList.add('drag-over');
+    }
+  };
+  dropZone.ondragleave=()=>dropZone.classList.remove('drag-over');
+  dropZone.ondrop=event=>{
+    event.preventDefault();dropZone.classList.remove('drag-over');
+    if(!button.disabled)void uploadFiles([...event.dataTransfer?.files||[]]);
+  };
+  compose.append(dropZone,caption,input,button,status);root.append(compose);host.append(root);
   return root;
 }
