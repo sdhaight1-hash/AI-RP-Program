@@ -65,7 +65,7 @@ export function sourcesFor({state={},library={},worldId}){
   for(const entry of (state.lore||[])){
     if(entry.worldId&&entry.worldId!==worldId)continue;
     for(const field of ['title','content','body','description'])add('lore',entry.id,field,entry[field],
-      entry.private?'private':'lore');
+      entry.visibility==='private'||entry.private===true?'private':'lore');
   }
   for(const scene of (state.sessions||[]).filter(s=>!s.trashedAt&&(!s.worldId||s.worldId===worldId))){
     for(const field of ['direction','publicSummary','location','atmosphere'])add('scene',scene.id,field,scene[field],'scene');
