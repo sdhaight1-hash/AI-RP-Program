@@ -1,6 +1,7 @@
 import {makeLocationAuthoringRequest,makeEntityAuthoringRequest} from '../authoring/world-scene.mjs';
+import {makeSourceMentionRequest,parseSourceMentionSuggestions} from '../world/assisted-extraction.mjs';
 
-function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,fetch,onReviewComplete}){
+function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,fetch,getModel,onReviewComplete}){
   const section=el('section','','universe-mention-panel group');
   section.setAttribute('aria-label',focus==='locations'?'Suggested places from prior mentions':'Suggested social and cultural entries');
   section.append(el('h3',focus==='locations'?'Discovered place mentions':'Discovered groups & cultures','builder-subtitle'),
@@ -13,6 +14,18 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
   summary.setAttribute('role','status');
   const candidates=el('div','','universe-mention-items');
   section.append(search,summary,candidates);
+  const ai=el('details','','universe-extract-panel');
+  ai.append(el('summary','Optional local AI · find less obvious names'));
+  const intro=el('p','Select an indexed passage, then ask your local model for exact source-quoted names. This creates suggestions only, never canon.','help');
+  const sourcesSelect=el('select','','universe-extract-source');
+  sourcesSelect.setAttribute('aria-label','Indexed passage for name extraction');
+  const sourcePreview=el('p','','help universe-extract-preview');
+  const analyze=el('button','Analyze selected passage','subtle-button');
+  analyze.type='button';
+  const aiStatus=el('p','','help');aiStatus.setAttribute('role','status');
+  const aiCandidates=el('div','','universe-mention-items');
+  ai.append(intro,sourcesSelect,sourcePreview,analyze,aiStatus,aiCandidates);
+  section.append(ai);
   host.append(section);
   let lastRequest=0,timer=null,busy=false;
   const review=async(input,row)=>{
@@ -37,43 +50,44 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
       if(row.isConnected)controls.forEach(x=>x.disabled=false);
     }
   };
+  const renderCandidate=(candidate,target=candidates)=>{
+    const row=el('div','','lore-card universe-mention-item');
+    row.append(el('strong',candidate.name),el('small',candidate.kind+' · unverified mention','help'));
+    for(const source of candidate.evidence.slice(0,3))
+      row.append(el('p',`${source.type} / ${source.field} (${source.trust}): “${source.quote}”`,'help'));
+    if(candidate.possibleMatches?.length)
+      row.append(el('p','Possible existing match: '+
+        candidate.possibleMatches.map(x=>x.name).join(', ')+' — verify before linking','help'));
+    const create=el('button','Review as new entry','subtle-button');create.type='button';
+    create.onclick=()=>onChoose(candidate);
+    row.append(create);
+    const proof=candidate.evidence.find(x=>x.fingerprint);
+    if(proof&&entries.length){
+      const picker=el('select','','universe-mention-link-target');
+      picker.setAttribute('aria-label','Existing canon entry to link to '+candidate.name);
+      picker.add(new Option('Link to existing…',''));
+      for(const entry of entries)picker.add(new Option(entry.name+' ('+entry.kind+')',entry.id));
+      const link=el('button','Link alias','subtle-button');
+      link.type='button';link.onclick=()=>{
+        if(!picker.value)return;
+        void review({action:'link',name:candidate.name,targetId:picker.value,sourceProof:proof},row);
+      };
+      row.append(picker,link);
+    }
+    if(proof){
+      const dismiss=el('button','Dismiss mention','subtle-button');
+      dismiss.type='button';
+      dismiss.onclick=()=>void review({action:'dismiss',name:candidate.name,
+        evidence:candidate.evidence.filter(x=>x.fingerprint)},row);
+      row.append(dismiss);
+    }
+    target.append(row);
+  };
   const render=result=>{
     candidates.replaceChildren();
     summary.textContent=`Indexed ${result.scannedSources} passages · ${result.suggestions.length} unregistered suggestions`;
     if(!result.suggestions.length)candidates.append(el('p','No unregistered matches in these sources. Try another keyword, or add an entry manually.','help'));
-    for(const candidate of result.suggestions){
-      const row=el('div','','lore-card universe-mention-item');
-      row.append(el('strong',candidate.name),el('small',candidate.kind+' · unverified mention','help'));
-      for(const source of candidate.evidence.slice(0,3))
-        row.append(el('p',`${source.type} / ${source.field} (${source.trust}): “${source.quote}”`,'help'));
-      if(candidate.possibleMatches?.length)
-        row.append(el('p','Possible existing match: '+
-          candidate.possibleMatches.map(x=>x.name).join(', ')+' — verify before linking','help'));
-      const create=el('button','Review as new entry','subtle-button');create.type='button';
-      create.onclick=()=>onChoose(candidate);
-      row.append(create);
-      const proof=candidate.evidence.find(x=>x.fingerprint);
-      if(proof&&entries.length){
-        const picker=el('select','','universe-mention-link-target');
-        picker.setAttribute('aria-label','Existing canon entry to link to '+candidate.name);
-        picker.add(new Option('Link to existing…',''));
-        for(const entry of entries)picker.add(new Option(entry.name+' ('+entry.kind+')',entry.id));
-        const link=el('button','Link alias','subtle-button');
-        link.type='button';link.onclick=()=>{
-          if(!picker.value)return;
-          void review({action:'link',name:candidate.name,targetId:picker.value,sourceProof:proof},row);
-        };
-        row.append(picker,link);
-      }
-      if(proof){
-        const dismiss=el('button','Dismiss mention','subtle-button');
-        dismiss.type='button';
-        dismiss.onclick=()=>void review({action:'dismiss',name:candidate.name,
-          evidence:candidate.evidence.filter(x=>x.fingerprint)},row);
-        row.append(dismiss);
-      }
-      candidates.append(row);
-    }
+    for(const candidate of result.suggestions)renderCandidate(candidate);
     section.querySelector('.universe-mention-existing')?.remove();
     if(result.existingLinks?.length){
       const existing=el('details','','universe-mention-existing');
@@ -99,15 +113,77 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
       candidates.replaceChildren();
     }
   };
+  let sourceList=[],sourceRequest=0,extracting=false;
+  const updateSourcePreview=()=>{
+    const item=sourceList[Number(sourcesSelect.value)];
+    sourcePreview.textContent=item?item.text.slice(0,450):'No indexed source selected.';
+    analyze.disabled=!item||extracting;
+  };
+  const loadSources=async()=>{
+    const version=++sourceRequest;
+    try{
+      const params=new URLSearchParams({worldId});
+      if(search.value.trim())params.set('query',search.value.trim());
+      const response=await fetch('/api/worlds/discovery/sources?'+params);
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||'Could not retrieve indexed passages');
+      if(!section.isConnected||version!==sourceRequest)return;
+      sourceList=data.sources||[];
+      sourcesSelect.replaceChildren();
+      sourceList.forEach((source,i)=>sourcesSelect.add(
+        new Option(source.type+' / '+source.field+' · '+source.text.slice(0,65),String(i))));
+      aiStatus.textContent=sourceList.length?
+        sourceList.length+' current indexed passages available for optional extraction.':
+        'No indexed passages. Write some universe, character, lore, or scene content first.';
+      updateSourcePreview();
+    }catch(error){
+      if(version!==sourceRequest||!section.isConnected)return;
+      aiStatus.textContent=error.message;sourceList=[];sourcesSelect.replaceChildren();
+      updateSourcePreview();
+    }
+  };
+  sourcesSelect.onchange=updateSourcePreview;
+  ai.ontoggle=()=>{if(ai.open)void loadSources();};
+  analyze.onclick=async()=>{
+    if(extracting)return;
+    const source=sourceList[Number(sourcesSelect.value)];
+    if(!source)return;
+    const model=getModel?.();
+    if(!model){aiStatus.textContent='Select a local model in Settings & tools first.';return;}
+    extracting=true;updateSourcePreview();aiCandidates.replaceChildren();
+    aiStatus.textContent='Analyzing this passage with the local model…';
+    const chosen=source;
+    try{
+      const request=makeSourceMentionRequest({
+        worldId,focus,source:chosen,existingNames:entries.map(x=>x.name)
+      });
+      const response=await fetch('/api/chat',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({worldId,model,temperature:0.2,max_tokens:1100,messages:request.messages})
+      });
+      if(!response.ok){
+        const message=await response.json().catch(()=>({}));
+        throw Error(message.error||'Local model unavailable');
+      }
+      const raw=await readLocalModelText(response,{maxChars:6500});
+      if(!section.isConnected)return;
+      const found=parseSourceMentionSuggestions(raw,request);
+      aiStatus.textContent=found.length?
+        found.length+' source-quoted suggestions. Review each before committing canon.':
+        'No additional grounded names found in this passage.';
+      for(const candidate of found)renderCandidate(candidate,aiCandidates);
+    }catch(error){if(section.isConnected)aiStatus.textContent=error.message;}
+    finally{extracting=false;if(section.isConnected)updateSourcePreview();}
+  };
   search.oninput=()=>{
     clearTimeout(timer);
-    timer=setTimeout(reload,180);
+    timer=setTimeout(()=>{void reload();if(ai.open)void loadSources();},180);
   };
   void reload();
   return section;
 }
 
-import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
+import {mountWorldSceneAssistant,readLocalModelText} from './world-scene-assist.mjs';
 // World-scoped Atlas and Relations editors. The caller owns world identity,
 // writes and the selected scene; this module owns only editor presentation.
 // All interactions invoke the same guarded endpoints as the original UI.
@@ -146,7 +222,7 @@ export function renderAtlasPanel(host,session,api) {
   }
   let selectedPlaceProof=null;
   const placeMentions=mountMentionRecommendations(host,{
-    el,fetch,worldId:world.id,focus:'locations',entries:locations,onReviewComplete:refreshWorldLibrary,
+    el,fetch,worldId:world.id,focus:'locations',entries:locations,getModel,onReviewComplete:refreshWorldLibrary,
     onChoose:candidate=>{
       $('atlas-name').value=candidate.name;
       selectedPlaceProof=candidate.evidence.find(x=>x.fingerprint)||null;
@@ -278,7 +354,7 @@ export function renderRelationsPanel(host,api) {
   for(const entity of entities){$('relations-from').add(new Option(entity.name,entity.id));$('relations-to').add(new Option(entity.name,entity.id));}
   let selectedGroupProof=null;
   const groupMentions=mountMentionRecommendations(host,{
-    el,fetch,worldId:world.id,focus:'groups',entries:entities,onReviewComplete:refreshWorldLibrary,
+    el,fetch,worldId:world.id,focus:'groups',entries:entities,getModel,onReviewComplete:refreshWorldLibrary,
     onChoose:candidate=>{
       $('relations-entity-name').value=candidate.name;
       selectedGroupProof=candidate.evidence.find(x=>x.fingerprint)||null;
