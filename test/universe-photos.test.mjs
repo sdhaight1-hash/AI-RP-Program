@@ -140,7 +140,7 @@ test('cover selection, gallery ordering and spoiler visibility are saved without
       'deleting cover automatically selects remaining image');
   }finally{
     await new Promise(resolve=>server.close(resolve));
-    store.close();rmSync(dir,{recursive:true,force:true});
+    rmSync(dir,{recursive:true,force:true});
   }
 });
 
@@ -180,5 +180,5 @@ test('universe SQLite export includes canon, story and gallery BLOBs in a readab
     const other=new DatabaseSync(foreignPath);
     try{assert.equal(other.prepare('SELECT count(*) AS n FROM universe_entry_photos').get().n,0);}
     finally{other.close();}
-  }finally{await new Promise(resolve=>server.close(resolve));store.close();rmSync(dir,{recursive:true,force:true});}
+  }finally{await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
 });
