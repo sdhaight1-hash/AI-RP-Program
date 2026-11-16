@@ -176,3 +176,36 @@ test('dismissed mentions hide only the reviewed source revision and resurface af
     rmSync(dir,{recursive:true,force:true});
   }
 });
+
+test('review decisions persist across SQLite restart without importing another universe',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-restart-reviews-'));
+  const store=new WorldPartitionStore(dir);
+  const worldId=store.activeWorldId;
+  const scope=store.forWorld(worldId);
+  const person=createCharacter('Marin');
+  person.familyHistory='The Silver Guild guided trading vessels. The Rowan Family owned fishing boats.';
+  const state=makeEmptyWorldState();state.characters=[person];
+  scope.save(state,scope.load().revision,{worldId});
+  const target=scope.worlds.createEntity({
+    worldId,name:'Dockworkers Association',kind:'organization',description:'Boat labor and navigation'
+  });
+  const first=scope.worlds.discoverSources({worldId,focus:'groups'});
+  const guild=first.suggestions.find(x=>x.name==='Silver Guild');
+  const family=first.suggestions.find(x=>x.name==='Rowan Family');
+  assert.ok(guild&&family);
+  scope.worlds.reviewMention({worldId,action:'link',focus:'groups',name:guild.name,
+    targetId:target.id,sourceProof:guild.evidence[0]});
+  scope.worlds.reviewMention({worldId,action:'dismiss',focus:'groups',name:family.name,
+    evidence:family.evidence});
+  store.close();
+  const reopened=new WorldPartitionStore(dir);
+  try{
+    const library=reopened.forWorld(worldId).worlds.list();
+    assert.equal(library.aliases.find(x=>x.alias==='Silver Guild')?.entryId,target.id);
+    const found=reopened.forWorld(worldId).worlds.discoverSources({worldId,focus:'groups'});
+    assert.ok(!found.suggestions.some(x=>x.name==='Rowan Family'));
+    assert.ok(found.existingLinks.some(x=>x.status==='alias'&&
+      x.name==='Silver Guild'&&x.id===target.id));
+    assert.equal(reopened.forWorld(worldId).db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{reopened.close();rmSync(dir,{recursive:true,force:true});}
+});
