@@ -43,9 +43,18 @@ export function initializeEntryPhotos(db){
   if(!columns.has('visibility'))
     db.exec("ALTER TABLE universe_entry_photos ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'");
   db.exec('CREATE INDEX IF NOT EXISTS entry_photo_sort ON universe_entry_photos(world_id,entry_type,entry_id,sort_order,created_at)');
-  // Legacy photos retain upload order. This runs only for previously unmigrated
-  // records; subsequent user-selected order is never overwritten.
-
+  // When upgrading an old gallery, select its oldest photo as cover only if
+  // no cover has been chosen. Existing explicit cover choices remain intact.
+  db.exec(`UPDATE universe_entry_photos SET is_cover=1 WHERE id IN (
+    SELECT p.id FROM universe_entry_photos p
+    WHERE p.id=(SELECT oldest.id FROM universe_entry_photos oldest
+      WHERE oldest.world_id=p.world_id AND oldest.entry_type=p.entry_type
+        AND oldest.entry_id=p.entry_id
+      ORDER BY oldest.sort_order,oldest.created_at,oldest.id LIMIT 1)
+      AND NOT EXISTS(SELECT 1 FROM universe_entry_photos chosen
+        WHERE chosen.world_id=p.world_id AND chosen.entry_type=p.entry_type
+          AND chosen.entry_id=p.entry_id AND chosen.is_cover=1)
+  )`);
 }
 
 export function verifyEntryImage(bytes,mimeType){
