@@ -167,7 +167,7 @@ export function updateEntryPhoto(db,{worldId,id,caption,visibility,cover,move}){
       }
     }
     db.exec('RELEASE SAVEPOINT entry_photo_update');
-    return {worldId,id,updated:true};
+    return {worldId,id,updated:true,...(caption!==undefined?{caption:caption.trim()}:{})};
   }catch(error){
     db.exec('ROLLBACK TO SAVEPOINT entry_photo_update');
     db.exec('RELEASE SAVEPOINT entry_photo_update');
