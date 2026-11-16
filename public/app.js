@@ -455,13 +455,15 @@ function renderHeader() {
   const currentLocation=worldLibrary?.locations?.find(x=>x.worldId===activeWorldId&&
     (x.id===s?.locationId||(!s?.locationId&&s?.location&&x.name===s.location)));
   const placePhotos=(worldLibrary?.photos||[]).filter(x=>
-    x.worldId===activeWorldId&&
+    x.worldId===activeWorldId&&x.visibility!=='spoiler'&&x.visibility!=='private'&&
     (currentLocation?x.entryType==='location'&&x.entryId===currentLocation.id:
-      x.entryType==='universe'&&x.entryId===activeWorldId)).slice(0,4);
+      x.entryType==='universe'&&x.entryId===activeWorldId))
+    .sort((a,b)=>Number(Boolean(b.isCover))-Number(Boolean(a.isCover))||
+      (a.sortOrder||0)-(b.sortOrder||0)).slice(0,4);
   for(const photo of placePhotos){
     const link=document.createElement('a');
     link.href='/api/worlds/photos/'+encodeURIComponent(photo.id)+
-      '?worldId='+encodeURIComponent(activeWorldId);
+      '?worldId='+encodeURIComponent(activeWorldId)+'&view=player';
     link.target='_blank';link.rel='noopener noreferrer';
     link.title=photo.caption||('View '+(currentLocation?.name||'universe')+' photo');
     const picture=document.createElement('img');

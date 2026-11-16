@@ -99,6 +99,11 @@ export function renderWorldTimelineEditor(host,s,api) {
         <div class="world-composer-assist" id="universe-edit-ai-slot" aria-label="AI assistance for the current universe"></div>
       </div>
       <div id="universe-photo-gallery"></div>
+      <div class="universe-complete-export">
+        <a id="universe-export-bundle" class="primary-button" download>Export universe + all media (.zip)</a>
+        <a id="universe-export-sqlite" class="subtle-button" download>SQLite database only</a>
+        <p class="help">The ZIP includes a consistent universe database, gallery images, portraits, local maps and generated assets, with a checksum manifest. The SQLite-only download excludes external files. Restoring ZIP archives through the interface is not yet available.</p>
+      </div>
       <details class="universe-blueprint-details" id="universe-edit-blueprint">
         <summary>Universe blueprint · edit structured canon foundations</summary>
         <p class="help">Keep physical rules, historical baselines, cultures and tensions separate from mutable narrative events.</p>
@@ -216,6 +221,10 @@ export function renderWorldTimelineEditor(host,s,api) {
   const identitySection=$('universe-identity-editor');
   identitySection.hidden=!currentUniverse;
   if(currentUniverse){
+    $('universe-export-bundle').href='/api/worlds/export/bundle?worldId='+encodeURIComponent(activeWorldId);
+    $('universe-export-bundle').download='ai-rp-universe-'+activeWorldId+'.zip';
+    $('universe-export-sqlite').href='/api/worlds/export?worldId='+encodeURIComponent(activeWorldId);
+    $('universe-export-sqlite').download='ai-rp-universe-'+activeWorldId+'.sqlite';
     mountEntryPhotoGallery($('universe-photo-gallery'),{
       worldId:activeWorldId,entryType:'universe',entryId:activeWorldId,
       entryName:currentUniverse.name,photos:worldLibrary.photos||[],
