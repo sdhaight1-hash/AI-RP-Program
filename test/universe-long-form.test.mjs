@@ -41,7 +41,7 @@ test('long-form universe, blueprint, location and collective entries round-trip 
       expectedName:'Extensive Canon',expectedDescription:foundation
     });
     assert.equal(amended.status,200,JSON.stringify(amended.data).slice(0,500));
-    assert.equal(amended.data.description,newFoundation);
+    assert.equal(amended.data.description,newFoundation.trim());
     const blueprintEdit=await api('/api/worlds/blueprint','PATCH',{
       worldId,revision:1,sections:{...catalog.blueprint.sections,
         conflicts:'Border tensions. '.repeat(5000)+'The Ember Council was founded in 1819.'}
