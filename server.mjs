@@ -183,6 +183,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             {error:error.message});
         }
       }
+      if (req.method === 'GET' && path === '/api/worlds/discovery/conflicts') {
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        const focus=requestUrl.searchParams.get('focus')||'groups';
+        if(!['locations','groups'].includes(focus))
+          return json(res,400,{error:'Invalid conflict review category'});
+        try{return json(res,200,store.worlds.claimConflicts({worldId,focus}));}
+        catch(error){return json(res,422,{error:error.message});}
+      }
       if (req.method === 'GET' && path === '/api/worlds/discovery/sources') {
         const worldId=requestUrl.searchParams.get('worldId');
         requireWorldScope(worldId);

@@ -28,6 +28,39 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
   const aiCandidates=el('div','','universe-mention-items');
   ai.append(intro,sourcesSelect,sourcePreview,analyze,cancelAnalysis,aiStatus,aiCandidates);
   section.append(ai);
+  const conflicts=el('details','','universe-claim-conflicts');
+  conflicts.append(el('summary','Review potentially contradictory canon claims'));
+  const conflictStatus=el('p','','help');conflictStatus.setAttribute('role','status');
+  const conflictRows=el('div','','universe-claim-conflict-items');
+  conflicts.append(el('p','Only explicit dated founding/birth and headquarters assertions are checked. Different eras, branches, and unreliable speakers may explain differences. Nothing is corrected automatically.','help'),
+    conflictStatus,conflictRows);
+  section.append(conflicts);
+  conflicts.ontoggle=async()=>{
+    if(!conflicts.open)return;
+    conflictStatus.textContent='Checking current indexed claims…';
+    try{
+      const response=await fetch('/api/worlds/discovery/conflicts?'+
+        new URLSearchParams({worldId,focus}));
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||'Could not inspect claim conflicts');
+      if(!section.isConnected||!conflicts.open)return;
+      conflictRows.replaceChildren();
+      conflictStatus.textContent=data.conflicts.length?
+        data.conflicts.length+' potential discrepancies. Review sources before changing canon.':
+        'No conflicting explicit claims detected in the indexed categories.';
+      for(const conflict of data.conflicts){
+        const card=el('article','','lore-card universe-claim-conflict');
+        const label={founded_year:'Founding year',birth_year:'Birth year',headquarters:'Headquarters'}[conflict.predicate]||conflict.predicate;
+        card.append(el('strong',conflict.name+' · '+label));
+        for(const value of conflict.values){
+          card.append(el('p','Reported value: '+value.value,'help'));
+          for(const proof of value.evidence)
+            card.append(el('p',proof.type+' / '+proof.field+' ('+proof.trust+'): “'+proof.quote+'”','help'));
+        }
+        conflictRows.append(card);
+      }
+    }catch(error){if(section.isConnected)conflictStatus.textContent=error.message;}
+  };
   host.append(section);
   let lastRequest=0,timer=null,busy=false;
   const review=async(input,row)=>{
