@@ -298,3 +298,33 @@ test('pre-existing galleries upgrade additively and preserve deliberate cover se
     assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   }finally{db.close();}
 });
+
+
+test('cover deletion rolls back if replacement selection fails',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-photo-delete-atomic-'));
+  const store=new WorldPartitionStore(dir);
+  try{
+    const worldId=store.activeWorldId;
+    const location=store.worlds.createLocation({worldId,name:'Gallery rollback',kind:'town'});
+    const first=store.worlds.addPhoto({worldId,entryType:'location',entryId:location.id,
+      caption:'Cover',mimeType:'image/png',bytes:png});
+    const second=store.worlds.addPhoto({worldId,entryType:'location',entryId:location.id,
+      caption:'Replacement',mimeType:'image/png',bytes:png});
+    store.db.exec(`CREATE TRIGGER reject_cover_reassignment
+      BEFORE UPDATE OF is_cover ON universe_entry_photos
+      WHEN NEW.is_cover=1
+      BEGIN SELECT RAISE(ABORT,'simulated cover reassignment failure'); END`);
+    assert.throws(()=>store.worlds.removePhoto({worldId,id:first.id}),
+      /simulated cover reassignment failure/);
+    const after=store.worlds.list().photos.filter(x=>x.entryId===location.id);
+    assert.equal(after.length,2,'failed cover reassignment must restore deleted bytes');
+    assert.equal(after.find(x=>x.id===first.id)?.isCover,1);
+    assert.equal(after.find(x=>x.id===second.id)?.isCover,0);
+    store.db.exec('DROP TRIGGER reject_cover_reassignment');
+    store.worlds.removePhoto({worldId,id:first.id});
+    const final=store.worlds.list().photos.filter(x=>x.entryId===location.id);
+    assert.equal(final.length,1);
+    assert.equal(final[0].id,second.id);
+    assert.equal(final[0].isCover,1);
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});
