@@ -50,8 +50,8 @@ export function renderWorldTimelineEditor(host,s,api) {
             <label class="field-label" for="world-new-name">Universe identity</label>
             <input id="world-new-name" maxlength="120" placeholder="Name your universe…" autocomplete="off"/>
             <label class="field-label" for="world-new-description">Setting foundation</label>
-            <textarea id="world-new-description" rows="9" maxlength="4000" placeholder="The time period, geography, cultures, ordinary life, tensions, atmosphere…"></textarea>
-            <p class="help">This establishes the world's starting premise—not its complete history. You can develop locations, people and relationships afterward.</p>
+            <textarea id="world-new-description" rows="9" maxlength="1000000" placeholder="The time period, geography, cultures, ordinary life, tensions, atmosphere…"></textarea>
+            <p class="help">Write as much detail as you need; long-form canon is saved in full. The AI works with shorter excerpts without shortening your saved text.</p>
             <div class="world-create-action">
               <span class="world-save-note">Separate continuity · No automatic canon changes</span>
               <button class="primary-button" id="world-create">Create & open universe</button>
@@ -88,8 +88,8 @@ export function renderWorldTimelineEditor(host,s,api) {
           <label class="field-label" for="universe-edit-name">Universe name</label>
           <input id="universe-edit-name" maxlength="120" autocomplete="off"/>
           <label class="field-label" for="universe-edit-description">Canonical foundation</label>
-          <textarea id="universe-edit-description" maxlength="4000" rows="9"></textarea>
-          <p class="help">Change universe-level descriptions here. Manage places, people, and events in their own workspaces.</p>
+          <textarea id="universe-edit-description" maxlength="1000000" rows="9"></textarea>
+          <p class="help">Write extended universe foundations here. Long-form text is preserved; AI generation uses bounded excerpts.</p>
           <div class="world-create-action">
             <span class="world-save-note" id="universe-edit-state" role="status">No unsaved changes</span>
             <button class="primary-button" id="universe-edit-save">Save universe changes</button>
