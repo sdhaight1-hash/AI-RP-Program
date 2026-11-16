@@ -1238,3 +1238,12 @@ body.detail-focus .detail-error{padding:14px clamp(20px,4vw,44px)}
 .universe-mention-link-target{display:block;width:100%;min-width:0;margin-top:10px;box-sizing:border-box}
 .universe-mention-item button{max-width:100%;white-space:normal;text-align:left}
 .universe-mention-item [role=status]{overflow-wrap:anywhere}
+
+/* Optional extraction is a subordinate evidence tool, not another mandatory wizard. */
+.universe-extract-panel{margin-top:15px;padding:13px;border:1px solid var(--ux-line);
+  border-radius:10px;background:var(--ux-bg)}
+.universe-extract-panel summary{cursor:pointer;font-weight:600}
+.universe-extract-panel>.help{margin:10px 0;line-height:1.5}
+.universe-extract-source{display:block;width:100%;min-width:0;box-sizing:border-box;margin:10px 0}
+.universe-extract-preview{max-height:120px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.universe-extract-panel .universe-mention-items{margin-top:12px}
