@@ -163,7 +163,8 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           return json(res,201,photo);
         }catch(error){return json(res,422,{error:error.message});}
       }
-      if(req.method==='GET'&&/^\\/api\\/worlds\\/photos\\/[a-f0-9-]{36}$/.test(path)){
+      if(req.method==='GET'&&path.startsWith('/api/worlds/photos/')&&
+        /^[a-f0-9-]{36}$/.test(path.slice('/api/worlds/photos/'.length))){
         const worldId=requestUrl.searchParams.get('worldId');
         requireWorldScope(worldId);
         try{
