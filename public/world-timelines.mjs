@@ -1,6 +1,7 @@
 import {makeWorldAuthoringRequest,makeUniverseRevisionRequest,makeBlueprintAuthoringRequest} from '../authoring/world-scene.mjs';
 import {UNIVERSE_BLUEPRINT_FIELDS,emptyUniverseBlueprint} from '../world/blueprint.mjs';
 import {mountWorldSceneAssistant} from './world-scene-assist.mjs';
+import {mountEntryPhotoGallery} from './world-entry-media.mjs';
 
 // The workspace is rebuilt after world-catalog refreshes. Keep the local,
 // uncommitted creation draft outside the disposable DOM, not in world canon.
@@ -97,6 +98,7 @@ export function renderWorldTimelineEditor(host,s,api) {
         </div>
         <div class="world-composer-assist" id="universe-edit-ai-slot" aria-label="AI assistance for the current universe"></div>
       </div>
+      <div id="universe-photo-gallery"></div>
       <details class="universe-blueprint-details" id="universe-edit-blueprint">
         <summary>Universe blueprint · edit structured canon foundations</summary>
         <p class="help">Keep physical rules, historical baselines, cultures and tensions separate from mutable narrative events.</p>
@@ -214,6 +216,11 @@ export function renderWorldTimelineEditor(host,s,api) {
   const identitySection=$('universe-identity-editor');
   identitySection.hidden=!currentUniverse;
   if(currentUniverse){
+    mountEntryPhotoGallery($('universe-photo-gallery'),{
+      worldId:activeWorldId,entryType:'universe',entryId:activeWorldId,
+      entryName:currentUniverse.name,photos:worldLibrary.photos||[],
+      fetchImpl:fetch,refreshWorldLibrary,showError
+    });
     if(!pendingUniverseRevision||pendingUniverseRevision.worldId!==activeWorldId){
       pendingUniverseRevision={
         worldId:activeWorldId,expectedName:currentUniverse.name,
