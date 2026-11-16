@@ -34,6 +34,7 @@ const ALLOWED = new Map([
   ['/studio-navigation.mjs', ['studio-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/encounter-studio.mjs', ['encounter-studio.mjs', 'text/javascript; charset=utf-8']],
   ['/world-editors.mjs', ['world-editors.mjs', 'text/javascript; charset=utf-8']],
+  ['/world-entry-media.mjs', ['world-entry-media.mjs', 'text/javascript; charset=utf-8']],
   ['/world-timelines.mjs', ['world-timelines.mjs', 'text/javascript; charset=utf-8']],
   ['/world-scene-assist.mjs', ['world-scene-assist.mjs', 'text/javascript; charset=utf-8']],
   ['/authoring/world-scene.mjs', ['../authoring/world-scene.mjs', 'text/javascript; charset=utf-8']],
