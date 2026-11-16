@@ -60,8 +60,10 @@ test('universe blueprint is created, versioned, isolated, and survives SQLite re
 test('blueprint validator guards field limits and only permits explicit sections',()=>{
   assert.deepEqual(normalizeUniverseBlueprint(),emptyUniverseBlueprint());
   assert.throws(()=>normalizeUniverseBlueprint({arbitrary:'unsafe'}),/Unknown universe blueprint/);
-  assert.throws(()=>normalizeUniverseBlueprint({rules:'x'.repeat(1601)}),/at most 1600/);
-  assert.throws(()=>normalizeUniverseBlueprint({rules:3}),/at most 1600/);
+  const extensiveRules='Detailed physical law. '.repeat(10000);
+  assert.equal(normalizeUniverseBlueprint({rules:extensiveRules}).rules,extensiveRules.trim());
+  assert.throws(()=>normalizeUniverseBlueprint({rules:'x'.repeat(1_000_001)}),/at most 1000000/);
+  assert.throws(()=>normalizeUniverseBlueprint({rules:3}),/at most 1000000/);
 });
 
 test('scene and AI blueprint generation use only the correct Connical Universe',()=>{

@@ -102,7 +102,7 @@ test('canon group entries are independently editable with scoped optimistic conf
     const second=store.worlds.createWorld({name:'Other universe'});
     assert.equal(store.forWorld(second.id).worlds.list().entities.length,0);
     const invalid=await post('/api/worlds/entities',{
-      worldId:world,name:'Overlong',kind:'culture',description:'x'.repeat(4001)
+      worldId:world,name:'Overlong',kind:'culture',description:'x'.repeat(1_000_001)
     });
     assert.equal(invalid.status,400);
     assert.equal(store.forWorld(world).db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');

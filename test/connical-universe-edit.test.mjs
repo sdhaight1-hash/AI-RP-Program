@@ -45,7 +45,7 @@ test('Connical Universe identity is editable without changing universe, timeline
     assert.equal(failed.status,422);
     const oversized=await patch({...update,expectedName:update.name,
       expectedDescription:update.description,name:'Valid',
-      description:'🌌'.repeat(2001)});
+      description:'🌌'.repeat(500_001)});
     assert.equal(oversized.status,422);
     assert.equal(store.worlds.list().worlds.find(w=>w.id===worldId).name,update.name);
   }finally{await new Promise(resolve=>app.close(resolve));}

@@ -5,6 +5,7 @@ import {syncUniverseSources,discoverIndexedUniverseMentions,createSourcedUnivers
 import {listPotentialClaimConflicts} from './claim-conflicts.mjs';
 import {resolveUniverseCandidates,linkUniverseAlias,dismissUniverseMention,listUniverseAliases} from './resolution.mjs';
 import { randomUUID } from 'node:crypto';
+import {MAX_AUTHORED_TEXT} from './geography.mjs';
 import { mkdirSync, existsSync, readdirSync, renameSync, copyFileSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { StudioStore } from '../storage.mjs';
@@ -344,8 +345,8 @@ export class WorldPartitionStore {
        previous.name!==expectedName||previous.description!==expectedDescription)
       throw Error('Universe details changed; reload and review before saving');
     const title=cleanTitle(name,'Universe name');
-    if(typeof description!=='string'||description.length>4000)
-      throw Error('Universe foundation must be 4,000 characters or fewer');
+    if(typeof description!=='string'||description.length>MAX_AUTHORED_TEXT)
+      throw Error('Universe foundation exceeds the supported authoring size');
     const foundation=description.trim();
     if(title===previous.name&&foundation===previous.description)return previous;
     // Two SQLite files cannot share a native transaction. Make the catalog

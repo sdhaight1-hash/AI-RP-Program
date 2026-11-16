@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {WorldPartitionStore} from '../world/partition-store.mjs';
 import {createApp} from '../server.mjs';
 
-test('world creation accepts its full 4,000-character Unicode setting and stays world-isolated',async()=>{
+test('world creation accepts long Unicode setting foundations and stays world-isolated',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'rp-unicode-world-create-'));
   const store=new WorldPartitionStore(dir);
   const original=store.activeWorldId;
@@ -29,11 +29,18 @@ test('world creation accepts its full 4,000-character Unicode setting and stays 
     assert.deepEqual(scoped.state.characters,[]);
     assert.deepEqual(scoped.state.sessions,[]);
     assert.equal(store.forWorld(original).load().worldId,original);
+    const extensiveUnicode='🌌'.repeat(10000);
+    const accepted=await fetch(base+'/api/worlds',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:'Long Unicode World',description:extensiveUnicode})
+    });
+    assert.equal(accepted.status,201,await accepted.clone().text());
+    assert.equal((await accepted.json()).description,extensiveUnicode);
     const rejected=await fetch(base+'/api/worlds',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:'Too Long',description:description+'!'})
+      body:JSON.stringify({name:'Too Long',description:'a'.repeat(1_000_001)})
     });
-    assert.equal(rejected.status,400,'model and form must use the same field limits');
+    assert.equal(rejected.status,400,'storage safety ceiling remains enforced');
     assert.equal(store.worlds.list().worlds.filter(w=>w.name==='Too Long').length,0);
   }finally{
     await new Promise(resolve=>app.close(resolve));
