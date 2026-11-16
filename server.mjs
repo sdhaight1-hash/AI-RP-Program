@@ -226,13 +226,13 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds') {
-        // UI allows 4,000 Unicode code units; UTF-8 JSON may exceed 5 KB.
-        const data=await readJson(req,64000);
+        // Rich creator-authored canon is independent of local-model context limits.
+        const data=await readJson(req,20_000_000);
         try { return json(res,201,store.worlds.createWorld(data)); }
         catch(err) { return json(res,400,{error:err.message}); }
       }
       if (req.method === 'PATCH' && path === '/api/worlds') {
-        const input=await readJson(req,20000);
+        const input=await readJson(req,4_000_000);
         requireWorldScope(input.worldId);
         try{return json(res,200,store.worlds.updateWorld(input));}
         catch(error){
@@ -241,7 +241,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         }
       }
       if (req.method === 'PATCH' && path === '/api/worlds/blueprint') {
-        const input=await readJson(req,36000);
+        const input=await readJson(req,20_000_000);
         requireWorldScope(input.worldId);
         try {return json(res,200,store.worlds.saveBlueprint(input));}
         catch(error){
@@ -261,7 +261,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds/locations') {
-        const data=await readJson(req,6000);
+        const data=await readJson(req,4_000_000);
         requireWorldScope(data.worldId);
         try {return json(res,201,data.sourceProof?store.worlds.createReviewedEntry({...data,entryType:'location'}):store.worlds.createLocation(data));}
         catch(err){return json(res,400,{error:err.message});}
@@ -273,13 +273,13 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'POST' && path === '/api/worlds/entities') {
-        const data=await readJson(req,3000);
+        const data=await readJson(req,4_000_000);
         requireWorldScope(data.worldId);
         try {return json(res,201,data.sourceProof?store.worlds.createReviewedEntry({...data,entryType:'entity'}):store.worlds.createEntity(data));}
         catch(err){return json(res,400,{error:err.message});}
       }
       if (req.method === 'PATCH' && path === '/api/worlds/entities') {
-        const data=await readJson(req,8000);
+        const data=await readJson(req,6_000_000);
         requireWorldScope(data.worldId);
         try{return json(res,200,store.worlds.updateEntity(data));}
         catch(error){return json(res,/changed; reload/.test(error.message)?409:422,{error:error.message});}
