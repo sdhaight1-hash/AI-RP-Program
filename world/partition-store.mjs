@@ -166,13 +166,17 @@ export class WorldPartitionStore {
       createLocation: input => {this.assertWorld(input.worldId);return this.current.worlds.createLocation(input);},
       createReviewedEntry: input => {
         this.assertWorld(input.worldId);
+        // Blueprint and universe identity edits bypass story saves; reconcile
+        // their source revisions before accepting an editorial approval.
+        this.refreshSourceIndex();
         return createSourcedUniverseEntry(this.current.db,this.current.worlds,input);
       },
       entryProvenance: () => listUniverseEntryProvenance(this.current.db,this.activeWorldId),
       reviewMention: input => {
         this.assertWorld(input.worldId);
-        // Review only a currently indexed source in this same world. A stale
-        // browser may not approve a quote removed by another editor.
+        // Review only evidence from the current authored world, including
+        // blueprint and identity edits that did not trigger a story save.
+        this.refreshSourceIndex();
         const action=input.action;
         if(action==='link')return linkUniverseAlias(this.current.db,input);
         if(action==='dismiss')return dismissUniverseMention(this.current.db,input);
