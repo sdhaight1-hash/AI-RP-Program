@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {WorldPartitionStore} from '../world/partition-store.mjs';
@@ -89,4 +90,95 @@ test('universe, place and collective galleries preserve bytes and captions; dele
     assert.equal(reopened.forWorld(first).worlds.list().photos.some(p=>p.id===groupId),false);
     assert.deepEqual(reopened.forWorld(second.id).worlds.list().photos,[]);
   }finally{reopened.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('cover selection, gallery ordering and spoiler visibility are saved without leaking into player view',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-photo-controls-'));
+  const store=new WorldPartitionStore(dir),worldId=store.activeWorldId;
+  const place=store.worlds.createLocation({worldId,name:'Saffron Market',kind:'town'});
+  const photos=['First photo','Second photo','Third photo'].map(caption=>
+    store.worlds.addPhoto({worldId,entryType:'location',entryId:place.id,
+      caption,mimeType:'image/png',bytes:png}));
+  const server=createApp({store,fetchImpl:async()=>{throw Error('No model')}});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  const patch=async(id,body)=>{
+    const response=await fetch(base+'/api/worlds/photos',{method:'PATCH',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({worldId,id,...body})});
+    return {status:response.status,data:await response.json()};
+  };
+  try{
+    assert.equal((await patch(photos[2].id,{cover:true})).status,200);
+    assert.equal((await patch(photos[0].id,{visibility:'spoiler'})).status,200);
+    assert.equal((await patch(photos[1].id,{visibility:'private'})).status,200);
+    const catalog=store.worlds.list();
+    assert.equal(catalog.photos.filter(x=>x.isCover).length,1);
+    assert.equal(catalog.photos.find(x=>x.isCover).id,photos[2].id);
+    for(const [i,expected] of ['spoiler','private','public'].entries())
+      assert.equal(catalog.photos.find(x=>x.id===photos[i].id).visibility,expected);
+    for(const p of photos){
+      const response=await fetch(base+'/api/worlds/photos/'+p.id+'?worldId='+worldId+'&view=player');
+      assert.equal(response.status,p.id===photos[2].id?200:404,
+        'player endpoints do not stream restricted photos');
+      const editor=await fetch(base+'/api/worlds/photos/'+p.id+'?worldId='+worldId);
+      assert.equal(editor.status,200,'creator retains restricted references');
+    }
+    assert.equal((await patch(photos[2].id,{move:'up'})).status,200);
+    const ordered=store.worlds.list().photos.filter(x=>x.entryId===place.id);
+    assert.deepEqual(ordered.map(x=>x.caption),['First photo','Third photo','Second photo']);
+    const invalid=await patch(photos[0].id,{visibility:'guess'});
+    assert.equal(invalid.status,422);
+    assert.equal(store.worlds.list().photos.find(x=>x.id===photos[0].id).visibility,'spoiler');
+    const foreign=store.worlds.createWorld({name:'Separate world'});
+    const wrong=await fetch(base+'/api/worlds/photos',{method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({worldId:foreign.id,id:photos[2].id,cover:true})});
+    assert.notEqual(wrong.status,200);
+    assert.equal(store.forWorld(foreign.id).worlds.list().photos.length,0);
+    store.worlds.removePhoto({worldId,id:photos[2].id});
+    assert.equal(store.worlds.list().photos.filter(x=>x.isCover).length,1,
+      'deleting cover automatically selects remaining image');
+  }finally{
+    await new Promise(resolve=>server.close(resolve));
+    store.close();rmSync(dir,{recursive:true,force:true});
+  }
+});
+
+test('universe SQLite export includes canon, story and gallery BLOBs in a readable consistent backup',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-photo-export-'));
+  const store=new WorldPartitionStore(dir),worldId=store.activeWorldId;
+  const location=store.worlds.createLocation({worldId,name:'Harbor Point',kind:'town',
+    description:'The iconic coastal district'});
+  const image=store.worlds.addPhoto({worldId,entryType:'location',entryId:location.id,
+    caption:'Local architecture',mimeType:'image/png',bytes:png});
+  const server=createApp({store,fetchImpl:async()=>{throw Error('Unused')}});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch('http://127.0.0.1:'+server.address().port+
+      '/api/worlds/export?worldId='+worldId);
+    assert.equal(response.status,200,await response.clone().text().catch(()=>''));
+    assert.match(response.headers.get('content-disposition'),/\.sqlite/);
+    const bytes=Buffer.from(await response.arrayBuffer());
+    assert.equal(bytes.toString('ascii',0,16),'SQLite format 3\0');
+    const snapshot=join(dir,'export.sqlite');writeFileSync(snapshot,bytes);
+    const exported=new DatabaseSync(snapshot);
+    try{
+      const linked=exported.prepare('SELECT * FROM universe_entry_photos WHERE id=?').get(image.id);
+      assert.ok(linked,'snapshot includes photo metadata');
+      assert.deepEqual(Buffer.from(linked.content),png,'snapshot includes full photo bytes');
+      assert.equal(exported.prepare('SELECT description FROM world_locations WHERE id=?').get(location.id).description,
+        'The iconic coastal district');
+      assert.equal(exported.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+      assert.ok(exported.prepare('SELECT document FROM studio_state').get());
+    }finally{exported.close();}
+    const foreign=store.worlds.createWorld({name:'Other'});
+    const denied=await fetch('http://127.0.0.1:'+server.address().port+
+      '/api/worlds/export?worldId='+foreign.id);
+    assert.equal(denied.status,200);
+    const foreignPath=join(dir,'other.sqlite');
+    writeFileSync(foreignPath,Buffer.from(await denied.arrayBuffer()));
+    const other=new DatabaseSync(foreignPath);
+    try{assert.equal(other.prepare('SELECT count(*) AS n FROM universe_entry_photos').get().n,0);}
+    finally{other.close();}
+  }finally{await new Promise(resolve=>server.close(resolve));store.close();rmSync(dir,{recursive:true,force:true});}
 });
