@@ -1,4 +1,7 @@
 // Data validation for the authored world atlas and timeline clock.
+// This is a storage/transport safety ceiling, NOT a local-model context limit.
+// Rich authored fields may contain book-length material; AI reads bounded excerpts.
+export const MAX_AUTHORED_TEXT=1_000_000;
 export const LOCATION_KINDS=Object.freeze(['region','town','neighborhood','building','room','outdoor','other']);
 export const ENTITY_KINDS=Object.freeze(['character','organization','faction','family','community','culture','group','object','concept']);
 
