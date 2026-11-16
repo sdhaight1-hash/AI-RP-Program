@@ -81,6 +81,14 @@ Remaining work is distinct from these verified capabilities: source aliases/core
 - The extracted source is selected in Atlas or Relationship Codex; no data from a different universe is returned by the scoped source endpoint.
 - Results are intentionally limited to explicit names in selected passages. This is **not** arbitrary LLM-powered timeline reconciliation, an authoritative truth detector, or fully solved coreference.
 
+## Potential claim conflict alerts (PR #69)
+
+- A small auditable extractor records **explicitly worded** founding-year, birth-year and headquarters statements from indexed source text, keyed by source fingerprint. Changes/deletions and initial migration backfill are handled within the existing per-world SQLite transaction.
+- Current identity resolution uses exact canon names and human-approved aliases. Without an approved link, similarly named entities remain distinct.
+- When independent values disagree for the same entity and predicate, Atlas or Relationship Codex can show *potential conflict* cards with each reported value, an exact source quote, source type/field and trust label.
+- Warnings are author-facing. Different historical periods, branch timelines, unreliable characters, or genuine contradictions can all explain conflicting strings; no automated arbitration, revision, deletion, event assertion or NPC memory write occurs.
+- This intentionally **does not** claim arbitrary natural-language contradiction understanding, date range interpretation, or a fully modeled system of temporal claims. Future work should add provenance-aware claim acceptance and explicit valid-time/timeline scopes before assisting revisions.
+
 ## Implementation phases
 
 ### Phase 0 — completed initial checkpoint
