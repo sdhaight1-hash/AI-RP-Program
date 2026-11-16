@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {WorldPartitionStore} from '../world/partition-store.mjs';
 import {createApp} from '../server.mjs';
-import {verifyEntryImage} from '../world/media.mjs';
+import {verifyEntryImage,initializeEntryPhotos} from '../world/media.mjs';
 import {crc32,makeUniverseZip} from '../world/export-bundle.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO/+vXkAAAAASUVORK5CYII=','base64');
@@ -265,4 +265,36 @@ test('ZIP builder rejects symlinked assets rather than exporting files outside t
 });
 test('CRC-32 implementation follows the ZIP standard known-answer test',()=>{
   assert.equal(crc32(Buffer.from('123456789')),0xcbf43926);
+});
+
+test('pre-existing galleries upgrade additively and preserve deliberate cover selection on restart',()=>{
+  const db=new DatabaseSync(':memory:');
+  try{
+    db.exec(`CREATE TABLE worlds(id TEXT PRIMARY KEY);
+      CREATE TABLE world_locations(id TEXT PRIMARY KEY,world_id TEXT);
+      CREATE TABLE world_entities(id TEXT PRIMARY KEY,world_id TEXT);
+      CREATE TABLE universe_entry_photos(
+        id TEXT PRIMARY KEY,world_id TEXT NOT NULL,entry_type TEXT NOT NULL,
+        entry_id TEXT NOT NULL,mime_type TEXT NOT NULL,
+        caption TEXT NOT NULL DEFAULT '',content BLOB NOT NULL,created_at INTEGER NOT NULL
+      );`);
+    db.prepare('INSERT INTO worlds(id) VALUES(?)').run('legacy');
+    db.prepare('INSERT INTO world_locations(id,world_id) VALUES(?,?)').run('district','legacy');
+    const put=db.prepare(`INSERT INTO universe_entry_photos
+      (id,world_id,entry_type,entry_id,mime_type,caption,content,created_at)
+      VALUES(?,?,?,?,?,?,?,?)`);
+    put.run('old-1','legacy','location','district','image/png','first',png,10);
+    put.run('old-2','legacy','location','district','image/png','second',png,20);
+    initializeEntryPhotos(db);
+    const check=()=>db.prepare(`SELECT id,sort_order AS sortOrder,is_cover AS isCover,
+      visibility FROM universe_entry_photos ORDER BY created_at`).all();
+    assert.deepEqual(check().map(x=>x.isCover),[1,0]);
+    assert.ok(check().every(x=>x.visibility==='public'));
+    db.prepare('UPDATE universe_entry_photos SET is_cover=0').run();
+    db.prepare('UPDATE universe_entry_photos SET is_cover=1 WHERE id=?').run('old-2');
+    initializeEntryPhotos(db);
+    assert.deepEqual(check().map(x=>x.isCover),[0,1],
+      'a second initialization must not replace a user-selected cover');
+    assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{db.close();}
 });
