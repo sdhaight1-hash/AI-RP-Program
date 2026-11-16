@@ -146,6 +146,43 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             return json(res, 403, { error: 'Cross-origin requests are blocked' });
         } catch { return json(res, 403, { error: 'Invalid origin' }); }
       }
+      if (req.method === 'POST' && path === '/api/worlds/photos') {
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        const entryType=requestUrl.searchParams.get('entryType');
+        const entryId=requestUrl.searchParams.get('entryId');
+        const caption=requestUrl.searchParams.get('caption')||'';
+        const mimeType=(req.headers['content-type']||'').split(';')[0].toLowerCase();
+        if(!['image/png','image/webp','image/jpeg'].includes(mimeType))
+          return json(res,415,{error:'Supported photo formats: PNG, JPEG and WebP'});
+        if(caption.length>2000)return json(res,400,{error:'Caption too long'});
+        const bytes=await readBinary(req,12_000_000);
+        try{
+          const photo=store.worlds.addPhoto({worldId,entryType,entryId,mimeType,caption,bytes});
+          return json(res,201,photo);
+        }catch(error){return json(res,422,{error:error.message});}
+      }
+      if(req.method==='GET'&&/^\\/api\\/worlds\\/photos\\/[a-f0-9-]{36}$/.test(path)){
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        try{
+          const photo=store.worlds.getPhoto({worldId,id:path.split('/').at(-1)});
+          if(!photo)return json(res,404,{error:'Photo not found in this universe'});
+          res.writeHead(200,{'Content-Type':photo.mimeType,'Content-Length':photo.bytes.length,
+            'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});
+          return res.end(photo.bytes);
+        }catch(error){return json(res,404,{error:error.message});}
+      }
+      if(req.method==='DELETE'&&path==='/api/worlds/photos'){
+        const input=await readJson(req,1500);requireWorldScope(input.worldId);
+        try{return json(res,200,store.worlds.removePhoto(input));}
+        catch(error){return json(res,404,{error:error.message});}
+      }
+      if(req.method==='PATCH'&&path==='/api/worlds/photos'){
+        const input=await readJson(req,3500);requireWorldScope(input.worldId);
+        try{return json(res,200,store.worlds.updatePhotoCaption(input));}
+        catch(error){return json(res,422,{error:error.message});}
+      }
       if (req.method === 'POST' && path === '/api/portraits') {
         requireWorldScope(requestUrl.searchParams.get('worldId'));
         const type = (req.headers['content-type'] || '').toLowerCase();
