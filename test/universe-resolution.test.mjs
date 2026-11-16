@@ -100,13 +100,16 @@ test('existing canon aliases link only on explicit source-backed review and surv
     const changed=store.forWorld(worldId).load().state;
     changed.characters[0].familyHistory='She lived in Harbor Annex and never joined the guild.';
     store.forWorld(worldId).save(changed,saved.revision,{worldId});
-    const status=store.forWorld(worldId).worlds.list().aliases.find(x=>x.alias==='Silver Guild');
-    assert.ok(status);
+    const aliasesAfterRevision=store.forWorld(worldId).worlds.list().aliases;
+    assert.equal(aliasesAfterRevision.some(x=>x.alias==='Silver Guild'),false,
+      'an alias promoted to the primary name must not survive as duplicate metadata');
+    assert.ok(aliasesAfterRevision.some(x=>x.alias==='Harbor Annex'));
     const stale=await post('/api/worlds/discovery/review',{
-      worldId,focus:'groups',action:'link',name:'Silver Guild',
-      targetId:guild.data.id,sourceProof:silver.evidence[0]
+      worldId,focus:'locations',action:'link',name:'Birch Square',
+      targetId:place.data.id,
+      sourceProof:places.suggestions.find(x=>x.name==='Birch Square').evidence[0]
     });
-    assert.notEqual(stale.response.status,200);
+    assert.notEqual(stale.response.status,200,'edited source evidence may not establish a new alias');
     store.forWorld(worldId).worlds.deleteEntry({worldId,kind:'location',id:place.data.id});
     store.forWorld(worldId).worlds.deleteEntry({worldId,kind:'entity',id:guild.data.id});
     assert.deepEqual(store.forWorld(worldId).worlds.list().aliases,[]);
