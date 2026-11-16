@@ -391,10 +391,12 @@ async function main(){
       return !!document.querySelector('#universe-photo-gallery .entry-photo-gallery input[type=file]');
     `),true,'existing universe identity supports visual references without creating another universe');
     assert.equal(await script(`
-      const link=document.querySelector('#universe-export-sqlite');
-      return !!link&&link.href.includes('/api/worlds/export?worldId=')
-        &&link.textContent.includes('with photos');
-    `),true,'full universe export is discoverable beside its photo gallery');
+      const zip=document.querySelector('#universe-export-bundle');
+      const sqlite=document.querySelector('#universe-export-sqlite');
+      return !!zip&&zip.href.includes('/api/worlds/export/bundle?worldId=')
+        &&zip.textContent.includes('all media')
+        &&!!sqlite&&sqlite.href.includes('/api/worlds/export?worldId=');
+    `),true,'ZIP archive with external assets and SQLite-only export are both discoverable');
     await screenshot('03-world-timelines-editor');
     const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
       encodeURIComponent(store.activeWorldId))).json()).revision;
