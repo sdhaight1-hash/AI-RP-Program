@@ -117,14 +117,23 @@ export function readEntryPhoto(db,{worldId,id,publicOnly=false}){
     FROM universe_entry_photos WHERE world_id=? AND id=?${publicOnly?" AND visibility='public'":''}`).get(worldId,id)||null;
 }
 export function deleteEntryPhoto(db,{worldId,id}){
-  const before=db.prepare('SELECT entry_type AS entryType,entry_id AS entryId,is_cover AS isCover FROM universe_entry_photos WHERE world_id=? AND id=?').get(worldId,id);
-  const result=db.prepare('DELETE FROM universe_entry_photos WHERE world_id=? AND id=?')
-    .run(worldId,id);
-  if(!result.changes)throw Error('Photo not found in this universe');
-  if(before?.isCover)db.prepare(`UPDATE universe_entry_photos SET is_cover=1 WHERE id=(
-    SELECT id FROM universe_entry_photos WHERE world_id=? AND entry_type=? AND entry_id=?
-    ORDER BY sort_order,created_at,id LIMIT 1)`).run(worldId,before.entryType,before.entryId);
-  return {deleted:true,worldId,id};
+  // The cover must not disappear if selecting its replacement fails.
+  db.exec('SAVEPOINT entry_photo_delete');
+  try{
+    const before=db.prepare('SELECT entry_type AS entryType,entry_id AS entryId,is_cover AS isCover FROM universe_entry_photos WHERE world_id=? AND id=?').get(worldId,id);
+    const result=db.prepare('DELETE FROM universe_entry_photos WHERE world_id=? AND id=?')
+      .run(worldId,id);
+    if(!result.changes)throw Error('Photo not found in this universe');
+    if(before?.isCover)db.prepare(`UPDATE universe_entry_photos SET is_cover=1 WHERE id=(
+      SELECT id FROM universe_entry_photos WHERE world_id=? AND entry_type=? AND entry_id=?
+      ORDER BY sort_order,created_at,id LIMIT 1)`).run(worldId,before.entryType,before.entryId);
+    db.exec('RELEASE SAVEPOINT entry_photo_delete');
+    return {deleted:true,worldId,id};
+  }catch(error){
+    db.exec('ROLLBACK TO SAVEPOINT entry_photo_delete');
+    db.exec('RELEASE SAVEPOINT entry_photo_delete');
+    throw error;
+  }
 }
 export function updateEntryPhotoCaption(db,{worldId,id,caption}){
   if(typeof caption!=='string'||caption.length>2000)
