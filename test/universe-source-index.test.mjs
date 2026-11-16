@@ -236,3 +236,20 @@ test('reviewed canon cannot approve stale blueprint evidence after an independen
     assert.equal(scope.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('deleting canonical entries removes indexed descriptions in the same transaction',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-deletion-source-index-'));
+  const store=new WorldPartitionStore(dir);
+  try{
+    const worldId=store.activeWorldId,scope=store.forWorld(worldId);
+    const entity=scope.worlds.createEntity({worldId,name:'Harbor Council',
+      kind:'organization',description:'The Silver Guild meets at Birch Square.'});
+    scope.worlds.discoverSources({worldId,focus:'groups'});
+    assert.ok(findUniverseSources(scope.db,{query:'Silver Guild'}).length>0);
+    scope.worlds.deleteEntry({worldId,kind:'entity',id:entity.id});
+    assert.equal(findUniverseSources(scope.db,{query:'Silver Guild'}).length,0,
+      'permanent deletion immediately purges derived source documents');
+    assert.equal(scope.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});
