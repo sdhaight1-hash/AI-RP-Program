@@ -493,7 +493,7 @@ async function main(){
     // A real Character Studio input must persist in its own world database,
     // survive browser reload, and not appear in the other open world's story.
     const editableWorld=store.activeWorldId;
-    const familyText='Her aunt Nessa ran the Lantern House near Seabrook.';
+    const familyText='Her aunt Nessa ran the Lantern House near Seabrook. She visited Seabrook Pier. The Seabrook Guild organizes fairs.';
     const edited=await script(`
       document.querySelector('#new-character').click();
       document.querySelector('[data-builder-tab="history"]').click();
@@ -548,6 +548,52 @@ async function main(){
         p.entryType==='location'&&p.entryId===place.id&&p.quote.includes('Seabrook'));
     },'reviewed Atlas candidate and its source proof persisted in SQLite');
     await screenshot('06d1-reviewed-family-source-atlas-entry');
+
+    // An alias is a link to an existing canonical place, not a duplicate place.
+    await until(async()=>script(`
+      return [...document.querySelectorAll('.universe-mention-item strong')]
+        .some(x=>x.textContent==='Seabrook Pier');
+    `),'second sourced place recommendation available for resolution');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.universe-mention-item')]
+        .find(x=>x.querySelector('strong')?.textContent==='Seabrook Pier');
+      const picker=row?.querySelector('.universe-mention-link-target');
+      if(!picker)return false;
+      const target=[...picker.options].find(x=>x.textContent.startsWith('Seabrook ('));
+      if(!target)return false;
+      picker.value=target.value;
+      [...row.querySelectorAll('button')].find(x=>x.textContent==='Link alias')?.click();
+      return true;
+    `),true,'Atlas offers explicit alias linking to existing canon');
+    await until(async()=>{
+      const catalog=await(await fetch(base+'/api/worlds?worldId='+encodeURIComponent(editableWorld))).json();
+      const target=catalog.locations.find(x=>x.name==='Seabrook');
+      return catalog.aliases?.some(a=>a.entryType==='location'&&
+        a.alias==='Seabrook Pier'&&a.entryId===target?.id);
+    },'verified place alias linked without allocating another location');
+    await screenshot('06d2-alias-linked-in-atlas');
+
+    // A group mention can be dismissed without creating canon, and should
+    // disappear from this universe's discovery recommendations.
+    await script("document.querySelector('[data-tab=relations]').click();return true");
+    await until(async()=>script(`
+      return [...document.querySelectorAll('.universe-mention-item strong')]
+        .some(x=>x.textContent==='Seabrook Guild');
+    `),'Character Studio social mentions available to Relationship Codex');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.universe-mention-item')]
+        .find(x=>x.querySelector('strong')?.textContent==='Seabrook Guild');
+      const dismiss=[...row?.querySelectorAll('button')||[]]
+        .find(x=>x.textContent==='Dismiss mention');
+      dismiss?.click();
+      return !!dismiss;
+    `),true,'social codex offers explicit source-backed dismissal');
+    await until(async()=>{
+      const url=base+'/api/worlds/discovery?worldId='+encodeURIComponent(editableWorld)+'&focus=groups';
+      const found=await(await fetch(url)).json();
+      return !found.suggestions?.some(x=>x.name==='Seabrook Guild');
+    },'dismissed group mention removed from recommendations');
+    await screenshot('06d3-dismissed-social-mention');
 
     // The relationship codex must delete a real SQLite entry, not just hide a
     // client card or leave an orphaned world entity after refresh.

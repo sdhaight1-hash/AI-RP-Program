@@ -173,6 +173,15 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         if(requestUrl.searchParams.has('worldId')) requireWorldScope(requestUrl.searchParams.get('worldId'));
         return json(res,200,store.worlds.list());
       }
+      if (req.method === 'POST' && path === '/api/worlds/discovery/review') {
+        const input=await readJson(req,8000);
+        requireWorldScope(input.worldId);
+        try{return json(res,200,store.worlds.reviewMention(input));}
+        catch(error){
+          return json(res,/changed; rescan|already belongs|already has this name/.test(error.message)?409:422,
+            {error:error.message});
+        }
+      }
       if (req.method === 'GET' && path === '/api/worlds/discovery') {
         const worldId=requestUrl.searchParams.get('worldId');
         requireWorldScope(worldId);

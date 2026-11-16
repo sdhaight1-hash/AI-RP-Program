@@ -27,6 +27,28 @@ export function initializeUniverseSourceIndex(db){
     recorded_at INTEGER NOT NULL,
     PRIMARY KEY(world_id,entry_type,entry_id)
   );
+  CREATE TABLE IF NOT EXISTS universe_entry_aliases (
+    world_id TEXT NOT NULL,
+    entry_type TEXT NOT NULL CHECK(entry_type IN ('location','entity')),
+    entry_id TEXT NOT NULL,
+    alias TEXT NOT NULL,
+    alias_key TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    source_quote TEXT NOT NULL,
+    recorded_at INTEGER NOT NULL,
+    PRIMARY KEY(world_id,entry_type,alias_key)
+  );
+  CREATE INDEX IF NOT EXISTS universe_alias_target ON universe_entry_aliases(world_id,entry_type,entry_id);
+  CREATE TABLE IF NOT EXISTS universe_candidate_dismissals (
+    world_id TEXT NOT NULL,
+    focus TEXT NOT NULL CHECK(focus IN ('locations','groups')),
+    name_key TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    recorded_at INTEGER NOT NULL,
+    PRIMARY KEY(world_id,focus,name_key,source_key)
+  );
   CREATE VIRTUAL TABLE IF NOT EXISTS universe_source_fts USING fts5(
     content,content='universe_source_documents',content_rowid='id',tokenize='unicode61'
   );
@@ -66,6 +88,10 @@ export function syncUniverseSources(db,{worldId,state,library}){
     }
     const deletion=db.prepare('DELETE FROM universe_source_documents WHERE source_key=?');
     for(const key of previous.keys())if(!existing.has(key)){deletion.run(key);removed++;}
+    // Dismissed sources that no longer exist cannot suppress future mentions.
+    // Prune only on the authoritative source-update transaction, not on reads.
+    if(removed)db.prepare(`DELETE FROM universe_candidate_dismissals
+      WHERE source_key NOT IN (SELECT source_key FROM universe_source_documents)`).run();
   };
   // A SAVEPOINT is safe both during the canonical story transaction and on
   // explicit refreshes after separate universe metadata updates.
@@ -101,22 +127,31 @@ export function discoverIndexedUniverseMentions(db,{worldId,library,focus='locat
   return discoverUniverseMentions({worldId,library,focus,limit,sourcesOverride});
 }
 
-export function createSourcedUniverseEntry(db,repository,{worldId,entryType,sourceProof,...entry}){
-  if(!['location','entity'].includes(entryType)||!sourceProof||
-     typeof sourceProof!=='object'||Array.isArray(sourceProof))
-    throw Error('Invalid sourced canon entry');
+export function verifyUniverseSourceProof(db,sourceProof,name){
+  if(!sourceProof||typeof sourceProof!=='object'||Array.isArray(sourceProof))
+    throw Error('Invalid source evidence');
   const {type,id,field,quote,fingerprint}=sourceProof;
   if(![type,id,field,quote,fingerprint].every(v=>typeof v==='string'&&v.length>0))
     throw Error('Incomplete source evidence');
-  if([type,id,field].some(v=>v.length>160)||quote.length>500||fingerprint.length!==64)
+  if([type,id,field].some(v=>v.length>160)||quote.length>500||!/^[a-f0-9]{64}$/i.test(fingerprint))
     throw Error('Invalid source evidence length');
   const row=db.prepare(`SELECT content,trust,fingerprint
     FROM universe_source_documents WHERE source_key=?`).get(sourceKey({type,id,field}));
   if(!row||row.fingerprint!==fingerprint)
     throw Error('Source changed; rescan and review the current evidence before saving canon');
   if(!row.content.includes(quote)||!quote.toLocaleLowerCase().includes(
-    String(entry.name||'').trim().toLocaleLowerCase()))
+    String(name||'').trim().toLocaleLowerCase()))
     throw Error('Selected source does not substantiate this name');
+  return {sourceKey:sourceKey({type,id,field}),trust:row.trust,quote,fingerprint,type,id,field};
+}
+
+export function createSourcedUniverseEntry(db,repository,{worldId,entryType,sourceProof,...entry}){
+  if(!['location','entity'].includes(entryType)||!sourceProof||
+     typeof sourceProof!=='object'||Array.isArray(sourceProof))
+    throw Error('Invalid sourced canon entry');
+  const verified=verifyUniverseSourceProof(db,sourceProof,entry.name);
+  const {type,id,field,quote,fingerprint}=verified;
+  const row={trust:verified.trust};
   db.exec('SAVEPOINT universe_canon_approval');
   try{
     const created=entryType==='location'

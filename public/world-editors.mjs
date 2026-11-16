@@ -1,10 +1,10 @@
 import {makeLocationAuthoringRequest,makeEntityAuthoringRequest} from '../authoring/world-scene.mjs';
 
-function mountMentionRecommendations(host,{el,worldId,focus,onChoose,fetch}){
+function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,fetch,onReviewComplete}){
   const section=el('section','','universe-mention-panel group');
   section.setAttribute('aria-label',focus==='locations'?'Suggested places from prior mentions':'Suggested social and cultural entries');
   section.append(el('h3',focus==='locations'?'Discovered place mentions':'Discovered groups & cultures','builder-subtitle'),
-    el('p','Search established source text. A mention is evidence, not canon; dialogue, rumors and private notes may be unreliable. Review the quotation before saving.','help'));
+    el('p','Review the original source before creating, linking, or dismissing a suggestion. Dialogue and rumors are not automatically canon.','help'));
   const search=el('input','','universe-mention-search');
   search.type='search';search.maxLength=120;
   search.placeholder='Filter source passages by keywords…';
@@ -14,25 +14,72 @@ function mountMentionRecommendations(host,{el,worldId,focus,onChoose,fetch}){
   const candidates=el('div','','universe-mention-items');
   section.append(search,summary,candidates);
   host.append(section);
-  let lastRequest=0,timer=null;
+  let lastRequest=0,timer=null,busy=false;
+  const review=async(input,row)=>{
+    if(busy)return;
+    busy=true;
+    const controls=row.querySelectorAll('button, select');
+    controls.forEach(x=>x.disabled=true);
+    const status=el('p','Saving review decision…','help');status.setAttribute('role','status');
+    row.append(status);
+    try{
+      const response=await fetch('/api/worlds/discovery/review',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({worldId,focus,...input})
+      });
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||'Could not record review decision');
+      if(onReviewComplete)await onReviewComplete();
+      if(section.isConnected)await reload();
+    }catch(error){status.textContent=error.message;}
+    finally{
+      busy=false;
+      if(row.isConnected)controls.forEach(x=>x.disabled=false);
+    }
+  };
   const render=result=>{
     candidates.replaceChildren();
-    summary.textContent=`Indexed ${result.scannedSources} source passages · ${result.suggestions.length} unregistered suggestions`;
-    if(!result.suggestions.length)candidates.append(el('p','No matching unregistered names. Try another keyword or add a new entry manually.','help'));
+    summary.textContent=`Indexed ${result.scannedSources} passages · ${result.suggestions.length} unregistered suggestions`;
+    if(!result.suggestions.length)candidates.append(el('p','No unregistered matches in these sources. Try another keyword, or add an entry manually.','help'));
     for(const candidate of result.suggestions){
       const row=el('div','','lore-card universe-mention-item');
-      row.append(el('strong',candidate.name),el('small',candidate.kind+' · mentioned, not canon','help'));
+      row.append(el('strong',candidate.name),el('small',candidate.kind+' · unverified mention','help'));
       for(const source of candidate.evidence.slice(0,3))
         row.append(el('p',`${source.type} / ${source.field} (${source.trust}): “${source.quote}”`,'help'));
-      const use=el('button','Review as new entry','subtle-button');use.type='button';
-      use.onclick=()=>onChoose(candidate);
-      row.append(use);candidates.append(row);
+      if(candidate.possibleMatches?.length)
+        row.append(el('p','Possible existing match: '+
+          candidate.possibleMatches.map(x=>x.name).join(', ')+' — verify before linking','help'));
+      const create=el('button','Review as new entry','subtle-button');create.type='button';
+      create.onclick=()=>onChoose(candidate);
+      row.append(create);
+      const proof=candidate.evidence.find(x=>x.fingerprint);
+      if(proof&&entries.length){
+        const picker=el('select','','universe-mention-link-target');
+        picker.setAttribute('aria-label','Existing canon entry to link to '+candidate.name);
+        picker.add(new Option('Link to existing…',''));
+        for(const entry of entries)picker.add(new Option(entry.name+' ('+entry.kind+')',entry.id));
+        const link=el('button','Link alias','subtle-button');
+        link.type='button';link.onclick=()=>{
+          if(!picker.value)return;
+          void review({action:'link',name:candidate.name,targetId:picker.value,sourceProof:proof},row);
+        };
+        row.append(picker,link);
+      }
+      if(proof){
+        const dismiss=el('button','Dismiss mention','subtle-button');
+        dismiss.type='button';
+        dismiss.onclick=()=>void review({action:'dismiss',name:candidate.name,
+          evidence:candidate.evidence.filter(x=>x.fingerprint)},row);
+        row.append(dismiss);
+      }
+      candidates.append(row);
     }
+    section.querySelector('.universe-mention-existing')?.remove();
     if(result.existingLinks?.length){
       const existing=el('details','','universe-mention-existing');
-      existing.append(el('summary',`${result.existingLinks.length} existing entries mentioned`));
+      existing.append(el('summary',`${result.existingLinks.length} already linked or established`));
       for(const match of result.existingLinks)
-        existing.append(el('p',`${match.name} · existing canon; do not create a duplicate`,'help'));
+        existing.append(el('p',`${match.name} · ${match.status==='alias'?'alias of '+match.canonicalName:'existing canon'}`,'help'));
       section.append(existing);
     }
   };
@@ -45,7 +92,6 @@ function mountMentionRecommendations(host,{el,worldId,focus,onChoose,fetch}){
       const data=await response.json();
       if(!response.ok)throw Error(data.error||'Could not load evidence index');
       if(!section.isConnected||version!==lastRequest)return;
-      section.querySelector('.universe-mention-existing')?.remove();
       render(data);
     }catch(error){
       if(!section.isConnected||version!==lastRequest)return;
@@ -100,7 +146,7 @@ export function renderAtlasPanel(host,session,api) {
   }
   let selectedPlaceProof=null;
   const placeMentions=mountMentionRecommendations(host,{
-    el,fetch,worldId:world.id,focus:'locations',
+    el,fetch,worldId:world.id,focus:'locations',entries:locations,onReviewComplete:refreshWorldLibrary,
     onChoose:candidate=>{
       $('atlas-name').value=candidate.name;
       selectedPlaceProof=candidate.evidence.find(x=>x.fingerprint)||null;
@@ -232,7 +278,7 @@ export function renderRelationsPanel(host,api) {
   for(const entity of entities){$('relations-from').add(new Option(entity.name,entity.id));$('relations-to').add(new Option(entity.name,entity.id));}
   let selectedGroupProof=null;
   const groupMentions=mountMentionRecommendations(host,{
-    el,fetch,worldId:world.id,focus:'groups',
+    el,fetch,worldId:world.id,focus:'groups',entries:entities,onReviewComplete:refreshWorldLibrary,
     onChoose:candidate=>{
       $('relations-entity-name').value=candidate.name;
       selectedGroupProof=candidate.evidence.find(x=>x.fingerprint)||null;

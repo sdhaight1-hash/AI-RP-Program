@@ -59,6 +59,18 @@ The lexically reviewed first stage now has a durable, per-universe SQLite source
 
 Remaining work is distinct from these verified capabilities: source aliases/coreference, a reindex/recovery command, source navigation and dismissal, robust contradiction classification, claim provenance for timeline events, and actual language-model-assisted extraction for implicit references. No source-index claim should imply automatic truth, actor omniscience or complete semantic recall.
 
+## Review and reconciliation layer — PR #67
+
+- Reviewed candidate aliases are stored in the owning universe SQLite database, keyed by entry type and normalized alias; they point to existing stable canon IDs and can never create a second location or organization.
+- Alias approval requires a still-current source quote and fingerprint. Attempts to link a source from another universe, overwrite an existing alias, or collide with another canonical name are rejected.
+- Atlas and the social codex expose explicit **Create new**, **Link alias**, and **Dismiss mention** actions. Approximate name matches are informational and cannot automatically merge identities.
+- Dismissals are attached to reviewed source revisions, not permanent name bans: new evidence or a source edit can trigger another review. Source deletes prune obsolete dismissal records.
+- Character and scene authoring receive reviewed aliases as reference mappings. Live NPC prompts do not acquire hidden alternate-name knowledge solely because the author linked an alias.
+- Canon deletion removes aliases in the same transaction, and promoting an approved entity alias to its canonical name removes redundant metadata.
+- Tests cover HTTP scoping, SQLite restart persistence, cross-universe rejection, name collisions, changed source fingerprints, safe deletion, and Chrome interaction.
+
+**Still pending:** full NLP/coreference extraction beyond explicit naming patterns; claim-level contradiction and temporal resolution; author-selected source navigation and explanatory confidence; optional small-local-model candidate extraction. Never represent heuristic similarity as proof of identity, and never treat conflicting dialogue as fact.
+
 ## Implementation phases
 
 ### Phase 0 — completed initial checkpoint

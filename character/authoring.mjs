@@ -26,7 +26,7 @@ export const characterDraftVersion = character => fingerprint({
   frequentPlaces:character?.frequentPlaces||[],
 });
 export const worldDraftVersion = library => fingerprint({id:library?.activeWorldId,
-  worlds:library?.worlds,blueprint:library?.blueprint,locations:library?.locations,entities:library?.entities,relationships:library?.relationships});
+  worlds:library?.worlds,blueprint:library?.blueprint,locations:library?.locations,entities:library?.entities,relationships:library?.relationships,aliases:library?.aliases});
 
 export function gatherCharacterWorldContext({worldLibrary,worldId,character,lore=[]}) {
   if(!worldLibrary || worldId!==worldLibrary.activeWorldId)throw new Error('Open the character\'s world before requesting AI assistance');
@@ -61,6 +61,15 @@ export function gatherCharacterWorldContext({worldLibrary,worldId,character,lore
     otherPlaces.slice(0,14).map(x=>`[place:${x.id}] ${x.name} (${x.kind}) — ${String(x.description||'').slice(0,110)}`).join('\n'));
   if(entities.length)lines.push('People, groups and institutions already in this world:\n'+
     entities.slice(0,16).map(e=>`[entity:${e.id}] ${e.name} (${e.kind})${e.description?' — '+String(e.description).slice(0,140):''}`).join('\n'));
+  const aliases=(worldLibrary.aliases||[]).filter(x=>x.worldId===worldId||!x.worldId)
+    .flatMap(alias=>{
+      const target=(alias.entryType==='location'?locations:entities)
+        .find(x=>x.id===alias.entryId);
+      return target?[{...alias,canonicalName:target.name}]:[];
+    });
+  if(aliases.length)lines.push('Reviewed alternate names (not additional entities or established NPC memories):\n'+
+    aliases.slice(0,16).map(x=>x.alias+' → '+x.canonicalName+
+      ' ['+x.entryType+':'+x.entryId+']').join('\n'));
   const relevantLore=lore.filter(e=>e && typeof e.content==='string' && !e.disabled && (!e.sessionIds || !e.sessionIds.length));
   if(relevantLore.length)lines.push('Approved world lore (creator-visible; never automatically NPC knowledge):\n'+
     relevantLore.slice(0,7).map(x=>`[lore:${x.id}] ${String(x.title||'').slice(0,100)}: ${x.content.slice(0,300)}`).join('\n'));

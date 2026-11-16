@@ -2,6 +2,7 @@
 // world labels and selection state: no lore, character data or story history.
 import { DatabaseSync } from 'node:sqlite';
 import {syncUniverseSources,discoverIndexedUniverseMentions,createSourcedUniverseEntry,listUniverseEntryProvenance} from './source-index.mjs';
+import {resolveUniverseCandidates,linkUniverseAlias,dismissUniverseMention,listUniverseAliases} from './resolution.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, existsSync, readdirSync, renameSync, copyFileSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
@@ -119,7 +120,8 @@ export class WorldPartitionStore {
       list: () => ({...this.current.worlds.list(),worlds:catalogRows(this.registry),
         activeWorldId:this.activeWorldId,
         blueprint:this.current.worlds.getBlueprint(this.activeWorldId),
-        entryProvenance:listUniverseEntryProvenance(this.current.db,this.activeWorldId)}),
+        entryProvenance:listUniverseEntryProvenance(this.current.db,this.activeWorldId),
+        aliases:listUniverseAliases(this.current.db,this.activeWorldId)}),
       createWorld: input => this.createWorld(input),
       updateWorld: input => this.updateWorld(input),
       saveBlueprint: input => {this.assertWorld(input.worldId);return this.current.worlds.saveBlueprint(input);},
@@ -131,7 +133,10 @@ export class WorldPartitionStore {
         const library=this.worlds.list();
         const state=this.current.load().state;
         syncUniverseSources(this.current.db,{worldId:this.activeWorldId,state,library});
-        return discoverIndexedUniverseMentions(this.current.db,{...input,library});
+        const result=discoverIndexedUniverseMentions(this.current.db,{...input,library,limit:80});
+        return resolveUniverseCandidates(this.current.db,{
+          worldId:this.activeWorldId,focus:input.focus||'locations',library,result
+        });
       },
       createTimeline: input => {this.assertWorld(input.worldId);return this.current.worlds.createTimeline(input);},
       forkTimeline: input => this.current.worlds.forkTimeline(input),
@@ -141,6 +146,15 @@ export class WorldPartitionStore {
         return createSourcedUniverseEntry(this.current.db,this.current.worlds,input);
       },
       entryProvenance: () => listUniverseEntryProvenance(this.current.db,this.activeWorldId),
+      reviewMention: input => {
+        this.assertWorld(input.worldId);
+        // Review only a currently indexed source in this same world. A stale
+        // browser may not approve a quote removed by another editor.
+        const action=input.action;
+        if(action==='link')return linkUniverseAlias(this.current.db,input);
+        if(action==='dismiss')return dismissUniverseMention(this.current.db,input);
+        throw Error('Unknown mention review action');
+      },
       connectLocations: input => {this.assertWorld(input.worldId);return this.current.worlds.connectLocations(input);},
       createEntity: input => {
         this.assertWorld(input.worldId);

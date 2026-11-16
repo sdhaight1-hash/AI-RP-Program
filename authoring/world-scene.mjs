@@ -236,6 +236,10 @@ export function makeSceneAuthoringRequest({worldId,library,characters,characterI
     universeBlueprint:library.blueprint?.worldId===worldId
       ?normalizeUniverseBlueprint(library.blueprint.sections):undefined,
     locations:(library.locations||[]).filter(x=>x.worldId===worldId).slice(0,24).map(x=>({name:x.name,kind:x.kind,description:clean(x.description).slice(0,180)})),
+    establishedGroups:(library.entities||[]).filter(x=>x.worldId===worldId&&x.kind!=='character')
+      .slice(0,24).map(x=>({name:x.name,kind:x.kind,description:clean(x.description).slice(0,120)})),
+    approvedAliases:(library.aliases||[]).filter(x=>!x.worldId||x.worldId===worldId).slice(0,20)
+      .map(x=>({alias:x.alias,entryType:x.entryType,entryId:x.entryId})),
     participants:participants.map(c=>({name:c.name,description:clean(c.description).slice(0,400),
       personality:clean(c.personality).slice(0,400),background:clean(c.backstory).slice(0,300),
       boundaries:clean(c.boundaries).slice(0,200),speechStyle:clean(c.speechStyle).slice(0,200)})),

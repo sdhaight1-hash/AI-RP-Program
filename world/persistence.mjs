@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {emptyUniverseBlueprint,normalizeUniverseBlueprint} from './blueprint.mjs';
+import {canonNameKey} from './resolution.mjs';
 import { snapshotMemoriesForFork } from '../memory/store.mjs';
 import { snapshotFactsForFork } from '../memory/facts.mjs';
 import {
@@ -9,6 +10,14 @@ import {
 import { bounded, worldZone, worldInstant, LOCATION_KINDS, ENTITY_KINDS } from './geography.mjs';
 
 const now = () => Date.now();
+function assertNoAliasNameCollision(db,worldId,entryType,name,targetId=null){
+  const alias=db.prepare(`SELECT entry_id AS entryId FROM universe_entry_aliases
+    WHERE world_id=? AND entry_type=? AND alias_key=?`)
+    .get(worldId,entryType,canonNameKey(name));
+  if(alias&&alias.entryId!==targetId)
+    throw Error('This name is already a reviewed alias of another canon entry');
+}
+
 const actorLookup = (db, timelineId, actorId) =>
   db.prepare('SELECT timeline_id AS timelineId, actor_id AS actorId, controller, character_id AS characterId FROM timeline_actors WHERE timeline_id = ? AND actor_id = ?').get(timelineId, actorId);
 
@@ -287,6 +296,10 @@ export class WorldRepository {
       const parent=this.db.prepare('SELECT world_id AS worldId FROM world_locations WHERE id=?').get(parentId);
       if(!parent||parent.worldId!==worldId)throw new Error('Location parent belongs to another world');
     }
+    const sameName=this.db.prepare('SELECT id FROM world_locations WHERE world_id=? AND name=? COLLATE NOCASE')
+      .get(worldId,title);
+    if(sameName)throw Error('A location with this name already exists. Open or link the existing place.');
+    assertNoAliasNameCollision(this.db,worldId,'location',title);
     const value={id:randomUUID(),worldId,parentId,kind,name:title,description:detail};
     this.db.prepare('INSERT INTO world_locations(id,world_id,parent_id,name,kind,description,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(value.id,worldId,parentId,title,kind,detail,now());
@@ -319,6 +332,7 @@ export class WorldRepository {
       .get(worldId,value.name);
     if(exists&&!sourceCharacterId)
       throw Error('A canon entity with this name already exists. Link the existing entry instead.');
+    if(!sourceCharacterId)assertNoAliasNameCollision(this.db,worldId,'entity',value.name);
     // Character-to-world approvals and world-repair already hold a transaction.
     // A SAVEPOINT works both inside and outside those callers.
     this.db.exec('SAVEPOINT create_canon_entity');
@@ -349,10 +363,16 @@ export class WorldRepository {
     const duplicate=this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND name=? COLLATE NOCASE AND id<>? LIMIT 1')
       .get(worldId,title,id);
     if(duplicate)throw Error('Another canon entity already has that name');
+    assertNoAliasNameCollision(this.db,worldId,'entity',title,id);
     this.db.exec('BEGIN IMMEDIATE');
     try{
       this.db.prepare('UPDATE world_entities SET name=?,kind=? WHERE id=? AND world_id=?')
         .run(title,kind,id,worldId);
+      // Promoting an entry's own approved alias to its primary name should
+      // leave one canonical identity, not a redundant alias record.
+      this.db.prepare(`DELETE FROM universe_entry_aliases
+        WHERE world_id=? AND entry_type='entity' AND entry_id=? AND alias_key=?`)
+        .run(worldId,id,canonNameKey(title));
       this.db.prepare(`INSERT INTO world_entity_details(entity_id,world_id,description)
         VALUES(?,?,?) ON CONFLICT(entity_id) DO UPDATE SET description=excluded.description`)
         .run(id,worldId,detail);
