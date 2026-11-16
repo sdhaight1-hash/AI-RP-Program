@@ -320,7 +320,7 @@ export function renderRelationsPanel(host,api) {
     <label class="field-label" for="relations-edit-description">Established details</label>
     <textarea id="relations-edit-description" rows="9" maxlength="1000000"></textarea>
     <div class="inline-actions"><button id="relations-save-entity" class="primary-button">Save entry</button><button id="relations-edit-cancel" class="subtle-button">Cancel</button></div>
-  </div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="3" maxlength="2000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
+  </div><div class="group"><label class="field-label" for="relations-from">From → To (direction matters)</label><select id="relations-from"></select><select id="relations-to"></select><input id="relations-type" maxlength="70" placeholder="e.g. childhood friend, older sister, colleague"/><textarea id="relations-notes" rows="9" maxlength="1000000" placeholder="History, current dynamic, boundaries..."></textarea><button id="relations-add" class="primary-button">Create relationship</button></div>`;
   if(!worldLibrary){if(!loadingWorlds)refreshWorldLibrary();return;}
   addWorldChooser('relations-world');
   const world=selectedWorld();if(!world){$('relations-add-entity').disabled=true;$('relations-add').disabled=true;return;}
