@@ -554,43 +554,7 @@ async function main(){
     },'reviewed Atlas candidate and its source proof persisted in SQLite');
     await screenshot('06d1-reviewed-family-source-atlas-entry');
 
-    // A name missed by the lexical place scanner can be extracted by an
-    // opt-in local-model review of a selected, already-indexed family history.
-    assert.equal(await script(`
-      const panel=document.querySelector('.universe-mention-panel');
-      const query=panel?.querySelector('.universe-mention-search');
-      const details=panel?.querySelector('.universe-extract-panel');
-      if(!query||!details)return false;
-      query.value='Lantern House';query.dispatchEvent(new Event('input',{bubbles:true}));
-      details.open=true;
-      return true;
-    `),true,'Atlas exposes optional local-model passage analysis');
-    await until(async()=>script(`
-      const select=document.querySelector('.universe-extract-source');
-      return [...select?.options||[]].some(x=>x.textContent.includes('familyHistory'));
-    `),'Character Studio family-history source found for opt-in extraction');
-    assert.equal(await script(`
-      const select=document.querySelector('.universe-extract-source');
-      select.value=[...select.options].find(x=>x.textContent.includes('familyHistory')).value;
-      select.dispatchEvent(new Event('change',{bubbles:true}));
-      document.querySelector('.universe-extract-panel button')?.click();
-      return true;
-    `),true);
-    await until(async()=>script(`
-      return [...document.querySelectorAll('.universe-extract-panel .universe-mention-item strong')]
-        .some(x=>x.textContent==='Lantern House');
-    `),'source-quoted implicit location extracted with local model');
-    assert.equal(await script(`
-      const row=[...document.querySelectorAll('.universe-extract-panel .universe-mention-item')]
-        .find(x=>x.querySelector('strong')?.textContent==='Lantern House');
-      row?.querySelector('button')?.click();
-      const set=document.querySelector('#atlas-name')?.value==='Lantern House';
-      document.querySelector('#atlas-name').value='';
-      return set;
-    `),true,'local model extraction only fills reviewed editor and does not create canon');
-    assert.equal(store.worlds.list().locations.some(x=>x.name==='Lantern House'),false,
-      'unapproved local model names cannot write canon');
-    await screenshot('06d1a-opt-in-model-source-extraction');
+
 
     // An alias is a link to an existing canonical place, not a duplicate place.
     await until(async()=>script(`
@@ -860,6 +824,52 @@ async function main(){
       const state=(await(await fetch(base+'/api/state?worldId='+encodeURIComponent(editableWorld))).json()).state;
       return state.settings.model==='browser-leased-model';
     },'model choice persisted before actor generation');
+
+    // Exercise implicit source extraction only after the mock local model is
+    // selected. Earlier world/deletion tests intentionally run offline.
+    await script(`
+      document.querySelector('#close-inspector')?.click();
+      document.querySelector('button[data-workspace="world"]').click();
+      document.querySelector('[data-tab="atlas"]').click();
+      return true;
+    `);
+    // A name missed by the lexical place scanner can be extracted by an
+    // opt-in local-model review of a selected, already-indexed family history.
+    assert.equal(await script(`
+      const panel=document.querySelector('.universe-mention-panel');
+      const query=panel?.querySelector('.universe-mention-search');
+      const details=panel?.querySelector('.universe-extract-panel');
+      if(!query||!details)return false;
+      query.value='Lantern House';query.dispatchEvent(new Event('input',{bubbles:true}));
+      details.open=true;
+      return true;
+    `),true,'Atlas exposes optional local-model passage analysis');
+    await until(async()=>script(`
+      const select=document.querySelector('.universe-extract-source');
+      return [...select?.options||[]].some(x=>x.textContent.includes('familyHistory'));
+    `),'Character Studio family-history source found for opt-in extraction');
+    assert.equal(await script(`
+      const select=document.querySelector('.universe-extract-source');
+      select.value=[...select.options].find(x=>x.textContent.includes('familyHistory')).value;
+      select.dispatchEvent(new Event('change',{bubbles:true}));
+      document.querySelector('.universe-extract-panel button')?.click();
+      return true;
+    `),true);
+    await until(async()=>script(`
+      return [...document.querySelectorAll('.universe-extract-panel .universe-mention-item strong')]
+        .some(x=>x.textContent==='Lantern House');
+    `),'source-quoted implicit location extracted with local model');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('.universe-extract-panel .universe-mention-item')]
+        .find(x=>x.querySelector('strong')?.textContent==='Lantern House');
+      row?.querySelector('button')?.click();
+      const set=document.querySelector('#atlas-name')?.value==='Lantern House';
+      document.querySelector('#atlas-name').value='';
+      return set;
+    `),true,'local model extraction only fills reviewed editor and does not create canon');
+    assert.equal(store.worlds.list().locations.some(x=>x.name==='Lantern House'),false,
+      'unapproved local model names cannot write canon');
+    await screenshot('07a-opt-in-model-source-extraction');
 
     // New-world generation is editable, reviewed, and cannot silently create canon.
     const countBeforeWorldDraft=store.worlds.list().worlds.length;
