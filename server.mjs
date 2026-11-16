@@ -326,7 +326,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         return json(res,200,{sources:listCharacterWorldSources(store,{worldId,characterId})});
       }
       if (req.method === 'POST' && path === '/api/worlds/relationships') {
-        const data=await readJson(req,5000);
+        const data=await readJson(req,4_000_000);
         requireWorldScope(data.worldId);
         try {return json(res,201,store.worlds.createRelationship(data));}
         catch(err){return json(res,400,{error:err.message});}
