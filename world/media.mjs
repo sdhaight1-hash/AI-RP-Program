@@ -101,11 +101,11 @@ export function addEntryPhoto(db,{worldId,entryType,entryId,mimeType,caption='',
       record.caption,bytes,record.createdAt,order,record.isCover,record.visibility);
   return record;
 }
-export function readEntryPhoto(db,{worldId,id}){
+export function readEntryPhoto(db,{worldId,id,publicOnly=false}){
   if(typeof id!=='string'||!/^[a-f0-9-]{36}$/i.test(id))
     throw Error('Invalid photo ID');
   return db.prepare(`SELECT mime_type AS mimeType,content AS bytes
-    FROM universe_entry_photos WHERE world_id=? AND id=?`).get(worldId,id)||null;
+    FROM universe_entry_photos WHERE world_id=? AND id=?${publicOnly?" AND visibility='public'":''}`).get(worldId,id)||null;
 }
 export function deleteEntryPhoto(db,{worldId,id}){
   const before=db.prepare('SELECT entry_type AS entryType,entry_id AS entryId,is_cover AS isCover FROM universe_entry_photos WHERE world_id=? AND id=?').get(worldId,id);
