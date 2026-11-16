@@ -13,16 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - run: node --check public/app.js
-      - run: node --check server.mjs
-      - run: node --check context/assemble.mjs
-      - run: node --check context/backend.mjs
-      - run: node --check memory/store.mjs
-      - run: node --check memory/semantic.mjs
-      - run: node --check character/world-bridge.mjs
-      - run: node --check character/relationship-bridge.mjs
-      - run: node --check eval/local-model.mjs
-      - run: node --check eval/local-semantic.mjs
+      - name: Syntax-check every tracked JavaScript module
+        run: git ls-files -z '*.js' '*.mjs' | xargs -0 -n1 node --check
       - run: npm test
       - run: npm run eval:memory
       - run: npm run eval:semantic
