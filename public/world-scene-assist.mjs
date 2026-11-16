@@ -22,13 +22,15 @@ export async function readLocalModelText(response,{maxChars=16000}={}){
       if(line==='[DONE]'){finished=true;break;}
       const item=JSON.parse(line);
       if(item.error)throw Error(String(item.error));
-      result+=item.choices?.[0]?.delta?.content||'';\n      if(result.length>maxChars)throw Error('Model response exceeds the review limit');
+      result+=item.choices?.[0]?.delta?.content||'';
+      if(result.length>maxChars)throw Error('Model response exceeds the review limit');
     }
   }
   const tail=consumeFrames(buffer+decoder.decode()+'\n\n');
   for(const line of tail.frames)if(line!=='[DONE]'){
     const item=JSON.parse(line);if(item.error)throw Error(String(item.error));
-    result+=item.choices?.[0]?.delta?.content||'';\n      if(result.length>maxChars)throw Error('Model response exceeds the review limit');
+    result+=item.choices?.[0]?.delta?.content||'';
+      if(result.length>maxChars)throw Error('Model response exceeds the review limit');
   }
   return result;
 }
