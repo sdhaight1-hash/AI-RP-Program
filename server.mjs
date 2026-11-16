@@ -39,6 +39,7 @@ const ALLOWED = new Map([
   ['/authoring/world-scene.mjs', ['../authoring/world-scene.mjs', 'text/javascript; charset=utf-8']],
   ['/world/blueprint.mjs', ['../world/blueprint.mjs', 'text/javascript; charset=utf-8']],
   ['/world/discovery.mjs', ['../world/discovery.mjs', 'text/javascript; charset=utf-8']],
+  ['/world/assisted-extraction.mjs', ['../world/assisted-extraction.mjs', 'text/javascript; charset=utf-8']],
   ['/encounters/library.mjs', ['../encounters/library.mjs', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
   ['/studio-shell.css', ['studio-shell.css', 'text/css; charset=utf-8']],
@@ -181,6 +182,14 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
           return json(res,/changed; rescan|already belongs|already has this name/.test(error.message)?409:422,
             {error:error.message});
         }
+      }
+      if (req.method === 'GET' && path === '/api/worlds/discovery/sources') {
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        const query=requestUrl.searchParams.get('query')||'';
+        if(query.length>120)return json(res,400,{error:'Search is limited to 120 characters'});
+        try{return json(res,200,store.worlds.sourceExcerpts({worldId,query,limit:12}));}
+        catch(error){return json(res,422,{error:error.message});}
       }
       if (req.method === 'GET' && path === '/api/worlds/discovery') {
         const worldId=requestUrl.searchParams.get('worldId');
