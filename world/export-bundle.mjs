@@ -63,6 +63,7 @@ export async function makeUniverseZip({worldId,snapshotPath,worldFolder,outputPa
     header.writeUInt32LE(0x04034b50,0); // local header
     header.writeUInt16LE(20,4);
     header.writeUInt16LE(0x0808,6); // streaming descriptor + UTF-8
+    header.writeUInt16LE(0x21,12); // valid DOS date: 1980-01-01
     header.writeUInt16LE(label.length,26);
     await write(header);await write(label);
     let hash=createHash('sha256'),crc=0xffffffff,size=0;
@@ -100,6 +101,7 @@ export async function makeUniverseZip({worldId,snapshotPath,worldFolder,outputPa
       header.writeUInt32LE(0x02014b50,0);
       header.writeUInt16LE(20,4);header.writeUInt16LE(20,6);
       header.writeUInt16LE(0x0808,8);
+      header.writeUInt16LE(0x21,14); // valid DOS date: 1980-01-01
       header.writeUInt32LE(record.crc,16);
       header.writeUInt32LE(record.size,20);
       header.writeUInt32LE(record.size,24);
