@@ -2,6 +2,7 @@
 // FTS is derived and never confers canon authority.
 import {createHash} from 'node:crypto';
 import {sourcesFor,discoverUniverseMentions} from './discovery.mjs';
+import {replaceSourceClaims} from './claim-conflicts.mjs';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const sourceKey=s=>JSON.stringify([s.type,s.id,s.field]);
 const MAX_QUERY=120;
@@ -49,6 +50,26 @@ export function initializeUniverseSourceIndex(db){
     recorded_at INTEGER NOT NULL,
     PRIMARY KEY(world_id,focus,name_key,source_key)
   );
+  CREATE TABLE IF NOT EXISTS universe_source_claims (
+    id INTEGER PRIMARY KEY,
+    source_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    value TEXT NOT NULL,
+    value_key TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    trust TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS universe_claim_subject
+    ON universe_source_claims(subject_key,predicate);
+  CREATE INDEX IF NOT EXISTS universe_claim_source
+    ON universe_source_claims(source_key);
+  CREATE TABLE IF NOT EXISTS universe_claim_source_versions (
+    source_key TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL
+  );
   CREATE VIRTUAL TABLE IF NOT EXISTS universe_source_fts USING fts5(
     content,content='universe_source_documents',content_rowid='id',tokenize='unicode61'
   );
@@ -70,6 +91,8 @@ export function syncUniverseSources(db,{worldId,state,library}){
   const sources=sourcesFor({worldId,state,library});
   const previous=new Map(db.prepare('SELECT source_key,fingerprint FROM universe_source_documents').all()
     .map(x=>[x.source_key,x.fingerprint]));
+  const claimVersions=new Map(db.prepare('SELECT source_key,fingerprint FROM universe_claim_source_versions').all()
+    .map(x=>[x.source_key,x.fingerprint]));
   const existing=new Set();
   const upsert=db.prepare(`INSERT INTO universe_source_documents
     (source_key,source_type,source_id,field,trust,content,fingerprint)
@@ -82,12 +105,26 @@ export function syncUniverseSources(db,{worldId,state,library}){
       if(!source.id||!source.field)continue;
       const key=sourceKey(source),fingerprint=hash(source.trust+'\0'+source.text);
       existing.add(key);
-      if(previous.get(key)===fingerprint)continue;
-      upsert.run(key,source.type,source.id,source.field,source.trust,source.text,fingerprint);
-      changed++;
+      if(previous.get(key)!==fingerprint){
+        upsert.run(key,source.type,source.id,source.field,source.trust,source.text,fingerprint);
+        changed++;
+      }
+      // An old universe can acquire the claims tables on upgrade without
+      // requiring its source text to change. Track even zero-claim sources.
+      if(claimVersions.get(key)!==fingerprint){
+        replaceSourceClaims(db,source,fingerprint);
+        db.prepare(`INSERT INTO universe_claim_source_versions(source_key,fingerprint)
+          VALUES(?,?) ON CONFLICT(source_key) DO UPDATE SET fingerprint=excluded.fingerprint`)
+          .run(key,fingerprint);
+      }
     }
     const deletion=db.prepare('DELETE FROM universe_source_documents WHERE source_key=?');
-    for(const key of previous.keys())if(!existing.has(key)){deletion.run(key);removed++;}
+    for(const key of previous.keys())if(!existing.has(key)){
+      deletion.run(key);
+      db.prepare('DELETE FROM universe_source_claims WHERE source_key=?').run(key);
+      db.prepare('DELETE FROM universe_claim_source_versions WHERE source_key=?').run(key);
+      removed++;
+    }
     // Dismissed sources that no longer exist cannot suppress future mentions.
     // Prune only on the authoritative source-update transaction, not on reads.
     if(removed)db.prepare(`DELETE FROM universe_candidate_dismissals
