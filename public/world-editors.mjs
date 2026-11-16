@@ -22,9 +22,11 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
   const sourcePreview=el('p','','help universe-extract-preview');
   const analyze=el('button','Analyze selected passage','subtle-button');
   analyze.type='button';
+  const cancelAnalysis=el('button','Cancel extraction','subtle-button');
+  cancelAnalysis.type='button';cancelAnalysis.hidden=true;
   const aiStatus=el('p','','help');aiStatus.setAttribute('role','status');
   const aiCandidates=el('div','','universe-mention-items');
-  ai.append(intro,sourcesSelect,sourcePreview,analyze,aiStatus,aiCandidates);
+  ai.append(intro,sourcesSelect,sourcePreview,analyze,cancelAnalysis,aiStatus,aiCandidates);
   section.append(ai);
   host.append(section);
   let lastRequest=0,timer=null,busy=false;
@@ -113,7 +115,8 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
       candidates.replaceChildren();
     }
   };
-  let sourceList=[],sourceRequest=0,extracting=false;
+  let sourceList=[],sourceRequest=0,extracting=false,analysisController=null;
+  cancelAnalysis.onclick=()=>analysisController?.abort();
   const updateSourcePreview=()=>{
     const item=sourceList[Number(sourcesSelect.value)];
     sourcePreview.textContent=item?item.text.slice(0,450):'No indexed source selected.';
@@ -150,7 +153,11 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
     if(!source)return;
     const model=getModel?.();
     if(!model){aiStatus.textContent='Select a local model in Settings & tools first.';return;}
-    extracting=true;updateSourcePreview();aiCandidates.replaceChildren();
+    const controller=new AbortController();
+    analysisController=controller;
+    extracting=true;cancelAnalysis.hidden=false;
+    sourcesSelect.disabled=true;
+    updateSourcePreview();aiCandidates.replaceChildren();
     aiStatus.textContent='Analyzing this passage with the local model…';
     const chosen=source;
     try{
@@ -158,7 +165,7 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
         worldId,focus,source:chosen,existingNames:entries.map(x=>x.name)
       });
       const response=await fetch('/api/chat',{
-        method:'POST',headers:{'Content-Type':'application/json'},
+        method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},
         body:JSON.stringify({worldId,model,temperature:0.2,max_tokens:1100,messages:request.messages})
       });
       if(!response.ok){
@@ -166,14 +173,24 @@ function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,
         throw Error(message.error||'Local model unavailable');
       }
       const raw=await readLocalModelText(response,{maxChars:6500});
-      if(!section.isConnected)return;
+      if(!section.isConnected||controller.signal.aborted||analysisController!==controller)return;
+      const selectedNow=sourceList[Number(sourcesSelect.value)];
+      if(!selectedNow||selectedNow.id!==chosen.id||selectedNow.field!==chosen.field||
+         selectedNow.fingerprint!==chosen.fingerprint)
+        throw Error('Selected source changed during extraction; regenerate the review.');
       const found=parseSourceMentionSuggestions(raw,request);
       aiStatus.textContent=found.length?
         found.length+' source-quoted suggestions. Review each before committing canon.':
         'No additional grounded names found in this passage.';
       for(const candidate of found)renderCandidate(candidate,aiCandidates);
-    }catch(error){if(section.isConnected)aiStatus.textContent=error.message;}
-    finally{extracting=false;if(section.isConnected)updateSourcePreview();}
+    }catch(error){
+      if(section.isConnected)aiStatus.textContent=controller.signal.aborted?
+        'Extraction canceled. No canon changed.':error.message;
+    }finally{
+      if(analysisController===controller)analysisController=null;
+      extracting=false;cancelAnalysis.hidden=true;sourcesSelect.disabled=false;
+      if(section.isConnected)updateSourcePreview();
+    }
   };
   search.oninput=()=>{
     clearTimeout(timer);
