@@ -99,6 +99,10 @@ export function renderWorldTimelineEditor(host,s,api) {
         <div class="world-composer-assist" id="universe-edit-ai-slot" aria-label="AI assistance for the current universe"></div>
       </div>
       <div id="universe-photo-gallery"></div>
+      <div class="universe-complete-export">
+        <a id="universe-export-sqlite" class="subtle-button" download>Export universe with photos (.sqlite)</a>
+        <p class="help">Consistent local universe snapshot: written canon, characters, memories, and gallery photos. External portrait and generated-image files are not part of this SQLite export.</p>
+      </div>
       <details class="universe-blueprint-details" id="universe-edit-blueprint">
         <summary>Universe blueprint · edit structured canon foundations</summary>
         <p class="help">Keep physical rules, historical baselines, cultures and tensions separate from mutable narrative events.</p>
@@ -216,6 +220,8 @@ export function renderWorldTimelineEditor(host,s,api) {
   const identitySection=$('universe-identity-editor');
   identitySection.hidden=!currentUniverse;
   if(currentUniverse){
+    $('universe-export-sqlite').href='/api/worlds/export?worldId='+encodeURIComponent(activeWorldId);
+    $('universe-export-sqlite').download='ai-rp-universe-'+activeWorldId+'.sqlite';
     mountEntryPhotoGallery($('universe-photo-gallery'),{
       worldId:activeWorldId,entryType:'universe',entryId:activeWorldId,
       entryName:currentUniverse.name,photos:worldLibrary.photos||[],
