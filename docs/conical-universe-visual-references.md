@@ -15,7 +15,7 @@ Photos are distinct from written canon descriptions and source excerpts. The mod
 
 Photo bytes and metadata are held in the **owning universe's SQLite database**, in `universe_entry_photos`. Each photo has a random ID, the original entry type and stable ID, a MIME type, a caption, and a timestamp. The catalog endpoint returns only metadata; the image stream is fetched separately and scoped by world ID.
 
-The same per-universe SQLite snapshot or consistent SQLite backup preserves images and their links. **The story-only JSON export does not currently export photo bytes.** Use a complete application/world SQLite backup when preserving visual references. Future archive/export workflows should explicitly include media and verify completeness.
+The per-universe SQLite snapshot preserves attached images and their links. **The story-only JSON export still does not include photo bytes.** Use **Export universe + all media (.zip)** from the universe editor to download a ZIP containing a consistent `world.sqlite` snapshot, the owning world's `portraits`, `locations`, `maps`, and `generated-images` directories (when present), and a SHA-256 checksum manifest. The separate SQLite download contains canon, scenes, memories, and gallery photos but not externally stored media files. Importing ZIP archives through the app is not yet supported; preserve the archive for manual recovery or a future import workflow.
 
 Deleting a photo removes its BLOB immediately. Permanent deletion of a location, group or universe also deletes its linked photo records through SQLite triggers, in the same transaction. Photo retrieval for another universe cannot read the owning SQLite database.
 
@@ -23,16 +23,17 @@ Deleting a photo removes its BLOB immediately. Permanent deletion of a location,
 
 PNG, JPEG and WebP are supported. Each photo is limited to 12 MB to avoid unbounded binary requests and SQLite memory spikes; this is a **photo-file size safety limit**, not the long-form prose restriction. Invalid MIME/signature combinations are rejected; SVG and remote web addresses are not accepted as uploads.
 
-Images may contain personally identifying information or copyrighted content, so the creator should select files intentionally. Avoid uploading images containing sensitive details or information players should not see. The first implementation has one shared visible gallery per entry; private/spoiler visibility controls are a separate future feature.
+Images may contain personally identifying information or copyrighted content, so the creator should select files intentionally. Avoid uploading images containing sensitive details or information players should not see. Each gallery now supports a cover photo, explicit order changes, and `public`, `spoiler`, or `private` visibility settings. Story Room displays only public images, with the cover image first; the player-view image endpoint also blocks restricted images. **This is a single-user, local editor, not a multi-user authorization system.** Anyone with direct access to its local HTTP server may still request creator-view assets; do not expose the server to untrusted users or mistake these labels for server-side player accounts.
 
 ## Integration and verification
 
 - The full byte array is retrieved over a separate scoped endpoint; authors and players can enlarge images without loading all bytes in world metadata
 - Image previews are lazy-loaded in gallery cards
-- Photo captions are user-editable; deletion asks for explicit confirmation
+- Photo captions are user-editable; deletion asks for explicit confirmation; photos can be dropped onto the gallery or added through the file chooser
+- Cover selection and move-earlier/move-later controls persist in the owning SQLite database, without renaming or duplicating assets
 - Node tests exercise supported/forged formats, upload/retrieve/delete, revisions, permanent canon deletion, cross-universe isolation, and persistence after restart
 - Chrome browser tests exercise upload and the refreshed Atlas gallery, plus the presence of galleries for the universe and social entries
 
 ## Next refinements
 
-Per-image sorting, cover-photo choice, responsive lightbox, alternative image descriptions, drag-and-drop uploads, spoiler/private visibility, scene-specific image selection, visual asset extraction from ComfyUI, and complete media-aware JSON/zip export are worthwhile future developments. They must reuse the existing world IDs and scope boundaries, not create another conflicting storage system.
+A dedicated responsive lightbox, alternative text distinct from captions, real authenticated player permissions, scene-specific image selection, ComfyUI image selection, and one-click archive **import** remain future tasks. Existing per-world media, stable IDs, and source/provenance boundaries must be reused rather than replaced.
