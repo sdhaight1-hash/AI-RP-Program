@@ -1,5 +1,6 @@
 // World identity and player/NPC authority are independent of model responses.
 import { createHash, randomUUID } from 'node:crypto';
+import {MAX_AUTHORED_TEXT} from './geography.mjs';
 
 export const LEGACY_WORLD_ID = 'imported-local-world';
 export const LEGACY_CANON_ID = 'imported-local-world:canon:1';
@@ -25,7 +26,7 @@ export function playerActorId(timelineId) {
 }
 
 export function newWorldRecord({ name, description = '' }) {
-  if (typeof description !== 'string' || description.length > 4000) throw new TypeError('Invalid world description');
+  if (typeof description !== 'string' || description.length > MAX_AUTHORED_TEXT) throw new TypeError('Invalid world description');
   const id = randomUUID();
   return {
     id, name: cleanTitle(name, 'World name'), description: description.trim(),
