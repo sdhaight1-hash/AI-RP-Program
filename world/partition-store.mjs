@@ -2,6 +2,7 @@
 // world labels and selection state: no lore, character data or story history.
 import { DatabaseSync } from 'node:sqlite';
 import {syncUniverseSources,discoverIndexedUniverseMentions,createSourcedUniverseEntry,listUniverseEntryProvenance,listSourceExcerpts} from './source-index.mjs';
+import {listPotentialClaimConflicts} from './claim-conflicts.mjs';
 import {resolveUniverseCandidates,linkUniverseAlias,dismissUniverseMention,listUniverseAliases} from './resolution.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, existsSync, readdirSync, renameSync, copyFileSync, rmSync } from 'node:fs';
@@ -115,6 +116,12 @@ export class WorldPartitionStore {
     this.worlds = this.makeWorldApi();
   }
 
+  refreshSourceIndex(){
+    const library=this.worlds.list(),state=this.current.load().state;
+    syncUniverseSources(this.current.db,{worldId:this.activeWorldId,state,library});
+    return library;
+  }
+
   makeWorldApi() {
     return {
       list: () => ({...this.current.worlds.list(),worlds:catalogRows(this.registry),
@@ -127,8 +134,7 @@ export class WorldPartitionStore {
       saveBlueprint: input => {this.assertWorld(input.worldId);return this.current.worlds.saveBlueprint(input);},
       sourceExcerpts: input => {
         this.assertWorld(input.worldId);
-        const library=this.worlds.list(),state=this.current.load().state;
-        syncUniverseSources(this.current.db,{worldId:this.activeWorldId,state,library});
+        this.refreshSourceIndex();
         return {worldId:this.activeWorldId,sources:listSourceExcerpts(this.current.db,input)};
       },
       discoverSources: input => {
@@ -136,13 +142,16 @@ export class WorldPartitionStore {
         // World identity and blueprint edits have their own SQLite writes.
         // Reconcile just changed fingerprints on a query, as a recovery path
         // for metadata edits made without a story save.
-        const library=this.worlds.list();
-        const state=this.current.load().state;
-        syncUniverseSources(this.current.db,{worldId:this.activeWorldId,state,library});
+        const library=this.refreshSourceIndex();
         const result=discoverIndexedUniverseMentions(this.current.db,{...input,library,limit:80});
         return resolveUniverseCandidates(this.current.db,{
           worldId:this.activeWorldId,focus:input.focus||'locations',library,result
         });
+      },
+      claimConflicts: input => {
+        this.assertWorld(input.worldId);
+        const library=this.refreshSourceIndex();
+        return listPotentialClaimConflicts(this.current.db,{...input,library});
       },
       createTimeline: input => {this.assertWorld(input.worldId);return this.current.worlds.createTimeline(input);},
       forkTimeline: input => this.current.worlds.forkTimeline(input),
