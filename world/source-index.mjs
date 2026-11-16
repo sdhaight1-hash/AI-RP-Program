@@ -88,6 +88,10 @@ export function syncUniverseSources(db,{worldId,state,library}){
     }
     const deletion=db.prepare('DELETE FROM universe_source_documents WHERE source_key=?');
     for(const key of previous.keys())if(!existing.has(key)){deletion.run(key);removed++;}
+    // Dismissed sources that no longer exist cannot suppress future mentions.
+    // Prune only on the authoritative source-update transaction, not on reads.
+    if(removed)db.prepare(`DELETE FROM universe_candidate_dismissals
+      WHERE source_key NOT IN (SELECT source_key FROM universe_source_documents)`).run();
   };
   // A SAVEPOINT is safe both during the canonical story transaction and on
   // explicit refreshes after separate universe metadata updates.
