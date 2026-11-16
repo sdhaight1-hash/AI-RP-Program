@@ -195,6 +195,63 @@ async function main(){
       return !!row?.querySelector('.entry-photo-gallery img[src^="/api/worlds/photos/"]');
     `),'Atlas gallery displays uploaded photo after refresh');
     await screenshot('02c1-inline-atlas-gallery');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      const controls=row?.querySelector('.entry-photo-gallery');
+      return !!controls?.querySelector('.entry-photo-drop-zone')
+        &&!!controls?.querySelector('button')
+        &&!!controls?.querySelector('.entry-photo-visibility');
+    `),true,'gallery exposes drag-drop, cover, visibility and order controls');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      const bytes=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO/+vXkAAAAASUVORK5CYII='),x=>x.charCodeAt(0));
+      const photo=new File([bytes],'dragged-photo.png',{type:'image/png'});
+      const transfer=new DataTransfer();transfer.items.add(photo);
+      row.querySelector('.entry-photo-drop-zone')
+        .dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));
+      return true;
+    `),true,'dropping a photo triggers an upload rather than only opening the file selector');
+    await until(async()=>store.worlds.list().photos.filter(p=>p.entryType==='location'&&
+      p.entryId===store.worlds.list().locations.find(x=>x.name===atlasName)?.id).length===2,
+      'drag-and-drop photo appears as second entry media');
+    await until(async()=>script(`
+      const row=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      return row?.querySelectorAll('.entry-photo-item').length===2;
+    `),'two photos appear after drag-and-drop');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      const second=row?.querySelectorAll('.entry-photo-item')[1];
+      const cover=[...second?.querySelectorAll('button')||[]]
+        .find(x=>x.textContent==='Make cover');
+      cover?.click();return !!cover;
+    `),true,'user can choose the second photo as cover');
+    await until(async()=>{
+      const loc=store.worlds.list().locations.find(x=>x.name===atlasName);
+      const photos=store.worlds.list().photos.filter(x=>x.entryId===loc?.id);
+      return photos.length===2&&photos[1].isCover===1;
+    },'cover selection persisted by stable photo ID');
+    await until(async()=>script(`
+      const row=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      return row?.querySelectorAll('.entry-photo-item')[0]?.querySelector('.entry-photo-visibility');
+    `),'visibility control remains after cover refresh');
+    await script(`
+      const row=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      const select=row.querySelector('.entry-photo-item .entry-photo-visibility');
+      select.value='spoiler';select.dispatchEvent(new Event('change',{bubbles:true}));
+      return true;
+    `);
+    await until(async()=>{
+      const loc=store.worlds.list().locations.find(x=>x.name===atlasName);
+      return store.worlds.list().photos.some(x=>x.entryId===loc?.id&&x.visibility==='spoiler');
+    },'spoiler visibility persists on selected photo');
+    await screenshot('02c2-ordered-photos-and-spoiler-controls');
+
     await screenshot('02c-inline-atlas');
 
     const inlineEntityName='Inline Relations Test Entity';
@@ -333,6 +390,11 @@ async function main(){
     assert.equal(await script(`
       return !!document.querySelector('#universe-photo-gallery .entry-photo-gallery input[type=file]');
     `),true,'existing universe identity supports visual references without creating another universe');
+    assert.equal(await script(`
+      const link=document.querySelector('#universe-export-sqlite');
+      return !!link&&link.href.includes('/api/worlds/export?worldId=')
+        &&link.textContent.includes('with photos');
+    `),true,'full universe export is discoverable beside its photo gallery');
     await screenshot('03-world-timelines-editor');
     const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
       encodeURIComponent(store.activeWorldId))).json()).revision;
