@@ -203,9 +203,11 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             'X-Content-Type-Options':'nosniff'
           });
           const stream=createReadStream(zip);
-          const cleanup=()=>{void rm(stage,{recursive:true,force:true}).catch(()=>{});};
-          res.once('close',cleanup);
-          stream.once('error',()=>{res.destroy();cleanup();});
+          // On Windows an open stream can prevent unlinking its archive.
+          // Clean up only once the file descriptor has actually closed.
+          stream.once('close',()=>{void rm(stage,{recursive:true,force:true}).catch(()=>{});});
+          res.once('close',()=>stream.destroy());
+          stream.once('error',()=>res.destroy());
           stream.pipe(res);
           return;
         }catch(error){
@@ -230,9 +232,9 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
             'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'
           });
           const stream=createReadStream(snapshot);
-          const cleanup=()=>{void rm(snapshot,{force:true}).catch(()=>{});};
-          res.once('close',cleanup);
-          stream.once('error',()=>{res.destroy();cleanup();});
+          stream.once('close',()=>{void rm(snapshot,{force:true}).catch(()=>{});});
+          res.once('close',()=>stream.destroy());
+          stream.once('error',()=>res.destroy());
           stream.pipe(res);
           return;
         }catch(error){
