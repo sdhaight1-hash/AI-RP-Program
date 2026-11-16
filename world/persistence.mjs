@@ -384,7 +384,7 @@ export class WorldRepository {
   createRelationship({worldId,fromId,toId,kind='acquaintance',notes=''}) {
     if(fromId===toId)throw new Error('Relationship cannot reference itself');
     if(typeof kind!=='string'||!kind.trim()||kind.length>70)throw new TypeError('Invalid relationship kind');
-    const comment=bounded(notes,'relationship notes',2000);
+    const comment=bounded(notes,'relationship notes',MAX_AUTHORED_TEXT);
     for(const id of [fromId,toId]) {
       const entity=this.db.prepare('SELECT world_id AS worldId FROM world_entities WHERE id=?').get(id);
       if(!entity||entity.worldId!==worldId)throw new Error('Relationship entities must belong to the same world');
