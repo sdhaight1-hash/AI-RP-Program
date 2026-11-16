@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,rmSync,writeFileSync,mkdirSync,symlinkSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {WorldPartitionStore} from '../world/partition-store.mjs';
 import {createApp} from '../server.mjs';
 import {verifyEntryImage} from '../world/media.mjs';
+import {crc32,makeUniverseZip} from '../world/export-bundle.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO/+vXkAAAAASUVORK5CYII=','base64');
 test('entry photo validation rejects forged MIME types, invalid bytes and oversized images',()=>{
@@ -181,4 +183,86 @@ test('universe SQLite export includes canon, story and gallery BLOBs in a readab
     try{assert.equal(other.prepare('SELECT count(*) AS n FROM universe_entry_photos').get().n,0);}
     finally{other.close();}
   }finally{await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
+});
+
+function unpackStoredZip(bytes){
+  const end=bytes.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]));
+  assert.ok(end>=0,'ZIP end-of-directory record exists');
+  const count=bytes.readUInt16LE(end+10),entries=new Map();
+  let position=bytes.readUInt32LE(end+16);
+  for(let i=0;i<count;i++){
+    assert.equal(bytes.readUInt32LE(position),0x02014b50);
+    assert.equal(bytes.readUInt16LE(position+10),0,'archive uses portable stored mode');
+    const checksum=bytes.readUInt32LE(position+16),size=bytes.readUInt32LE(position+20);
+    const nameLen=bytes.readUInt16LE(position+28);
+    const extraLen=bytes.readUInt16LE(position+30),commentLen=bytes.readUInt16LE(position+32);
+    const offset=bytes.readUInt32LE(position+42);
+    const name=bytes.toString('utf8',position+46,position+46+nameLen);
+    assert.equal(bytes.readUInt32LE(offset),0x04034b50);
+    const start=offset+30+bytes.readUInt16LE(offset+26)+bytes.readUInt16LE(offset+28);
+    const data=bytes.subarray(start,start+size);
+    assert.equal(data.length,size);
+    assert.equal(crc32(data),checksum,'ZIP data CRC must match central-directory metadata');
+    entries.set(name,data);
+    position+=46+nameLen+extraLen+commentLen;
+  }
+  return entries;
+}
+test('complete universe ZIP preserves gallery BLOBs, external portraits and hashes without crossing worlds',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-zip-universe-'));
+  const store=new WorldPartitionStore(dir),worldId=store.activeWorldId;
+  const place=store.worlds.createLocation({worldId,name:'Maple Square',kind:'town'});
+  const image=store.worlds.addPhoto({worldId,entryType:'location',entryId:place.id,
+    mimeType:'image/png',caption:'Before sunset',bytes:png});
+  const portraitDirectory=store.assetDir('portraits');
+  mkdirSync(portraitDirectory,{recursive:true});
+  writeFileSync(join(portraitDirectory,'character.webp'),'asset binary for portrait');
+  const foreign=store.worlds.createWorld({name:'Different world'});
+  mkdirSync(store.forWorld(foreign.id).assetDir('portraits'),{recursive:true});
+  writeFileSync(join(store.forWorld(foreign.id).assetDir('portraits'),'secret.webp'),'OTHER WORLD DATA');
+  const server=createApp({store,fetchImpl:async()=>{throw Error('No model needed')}});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch('http://127.0.0.1:'+server.address().port+
+      '/api/worlds/export/bundle?worldId='+worldId);
+    assert.equal(response.status,200,await response.clone().text().catch(()=>''));
+    assert.match(response.headers.get('content-type'),/application\/zip/);
+    const entries=unpackStoredZip(Buffer.from(await response.arrayBuffer()));
+    assert.ok(entries.has('world.sqlite'));
+    assert.deepEqual(entries.get('assets/portraits/character.webp'),
+      Buffer.from('asset binary for portrait'));
+    assert.equal(entries.has('assets/portraits/secret.webp'),false,
+      'a world archive must never include another universe asset');
+    const manifest=JSON.parse(entries.get('manifest.json').toString('utf8'));
+    assert.equal(manifest.worldId,worldId);
+    for(const item of manifest.files)
+      assert.equal(createHash('sha256').update(entries.get(item.path)).digest('hex'),item.sha256);
+    const snapshot=join(dir,'restored-from-zip.sqlite');
+    writeFileSync(snapshot,entries.get('world.sqlite'));
+    const db=new DatabaseSync(snapshot);
+    try{
+      const record=db.prepare('SELECT content FROM universe_entry_photos WHERE id=?').get(image.id);
+      assert.deepEqual(Buffer.from(record.content),png);
+      assert.ok(db.prepare('SELECT id FROM world_locations WHERE id=?').get(place.id));
+      assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+    }finally{db.close();}
+    const denied=await fetch('http://127.0.0.1:'+server.address().port+
+      '/api/worlds/export/bundle?worldId=missing');
+    assert.notEqual(denied.status,200);
+  }finally{await new Promise(resolve=>server.close(resolve));rmSync(dir,{recursive:true,force:true});}
+});
+test('ZIP builder rejects symlinked assets rather than exporting files outside the universe',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-zip-symlink-'));
+  const folder=join(dir,'world'),portrait=join(folder,'portraits');
+  mkdirSync(portrait,{recursive:true});
+  const outside=join(dir,'secret');writeFileSync(outside,'private content');
+  symlinkSync(outside,join(portrait,'linked-photo'));
+  const snapshot=join(dir,'world.sqlite');writeFileSync(snapshot,'placeholder');
+  await assert.rejects(makeUniverseZip({
+    worldId:'testing',snapshotPath:snapshot,worldFolder:folder,outputPath:join(dir,'export.zip')
+  }),/linked asset/);
+  rmSync(dir,{recursive:true,force:true});
+});
+test('CRC-32 implementation follows the ZIP standard known-answer test',()=>{
+  assert.equal(crc32(Buffer.from('123456789')),0xcbf43926);
 });
