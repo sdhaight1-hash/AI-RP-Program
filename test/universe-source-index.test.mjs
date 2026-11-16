@@ -253,3 +253,24 @@ test('deleting canonical entries removes indexed descriptions in the same transa
     assert.equal(scope.db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('source index preserves canonical private-lore trust metadata',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'rp-source-private-lore-'));
+  const store=new WorldPartitionStore(dir);
+  try{
+    const worldId=store.activeWorldId,scope=store.forWorld(worldId);
+    const state=makeEmptyWorldState();
+    state.lore=[
+      {id:'private-lore',content:'A secret at Moonstone Tower.',
+        keywords:['Moonstone'],visibility:'private',knownBy:[],alwaysActive:false},
+      {id:'public-lore',content:'A public square at Harbor Market.',
+        keywords:['Harbor'],visibility:'public',knownBy:[],alwaysActive:false}
+    ];
+    scope.save(state,scope.load().revision,{worldId});
+    assert.equal(findUniverseSources(scope.db,{query:'Moonstone Tower'})
+      .find(x=>x.id==='private-lore')?.trust,'private');
+    assert.equal(findUniverseSources(scope.db,{query:'Harbor Market'})
+      .find(x=>x.id==='public-lore')?.trust,'lore');
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});
