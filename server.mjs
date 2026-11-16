@@ -1,6 +1,8 @@
 import http from 'node:http';
 import { createInterface } from 'node:readline';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -168,7 +170,8 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const worldId=requestUrl.searchParams.get('worldId');
         requireWorldScope(worldId);
         try{
-          const photo=store.worlds.getPhoto({worldId,id:path.split('/').at(-1)});
+          const photo=store.worlds.getPhoto({worldId,id:path.split('/').at(-1),
+            publicOnly:requestUrl.searchParams.get('view')==='player'});
           if(!photo)return json(res,404,{error:'Photo not found in this universe'});
           res.writeHead(200,{'Content-Type':photo.mimeType,'Content-Length':photo.bytes.length,
             'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});
@@ -180,9 +183,37 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try{return json(res,200,store.worlds.removePhoto(input));}
         catch(error){return json(res,404,{error:error.message});}
       }
+      if(req.method==='GET'&&path==='/api/worlds/export'){
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        // VACUUM INTO writes a consistent SQLite snapshot including uploaded
+        // image BLOBs, story records, canon and memory; it does not rely on
+        // unsafe copying of a live WAL database file.
+        const filename='ai-rp-universe-'+worldId+'.sqlite';
+        const snapshot=join(tmpdir(),'ai-rp-export-'+randomUUID()+'.sqlite');
+        try{
+          store.db.exec("VACUUM INTO '"+snapshot.replaceAll("'","''")+"'");
+          const bytes=(await import('node:fs/promises')).stat(snapshot);
+          const size=(await bytes).size;
+          res.writeHead(200,{
+            'Content-Type':'application/vnd.sqlite3','Content-Length':size,
+            'Content-Disposition':'attachment; filename="'+filename+'"',
+            'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'
+          });
+          const stream=createReadStream(snapshot);
+          const cleanup=()=>{void rm(snapshot,{force:true}).catch(()=>{});};
+          res.once('close',cleanup);
+          stream.once('error',()=>{res.destroy();cleanup();});
+          stream.pipe(res);
+          return;
+        }catch(error){
+          await rm(snapshot,{force:true}).catch(()=>{});
+          return json(res,500,{error:'Could not create a consistent universe snapshot'});
+        }
+      }
       if(req.method==='PATCH'&&path==='/api/worlds/photos'){
         const input=await readJson(req,3500);requireWorldScope(input.worldId);
-        try{return json(res,200,store.worlds.updatePhotoCaption(input));}
+        try{return json(res,200,store.worlds.updatePhoto(input));}
         catch(error){return json(res,422,{error:error.message});}
       }
       if (req.method === 'POST' && path === '/api/portraits') {
