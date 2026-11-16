@@ -80,7 +80,7 @@ async function readBinary(req, limit = 1_500_000) {
   const chunks = []; let length = 0;
   for await (const chunk of req) {
     length += chunk.length;
-    if (length > limit) throw new RangeError('Portrait exceeds the 1.5 MB upload limit');
+    if (length > limit) throw new RangeError('Image upload exceeds the '+limit+' byte limit');
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
