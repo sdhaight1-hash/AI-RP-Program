@@ -7,7 +7,7 @@ import {
   LEGACY_WORLD_ID, LEGACY_CANON_ID, legacyTimelineId, playerActorId,
   newWorldRecord, newTimelineRecord, cleanTitle, assertActorAuthority,
 } from './canon.mjs';
-import { bounded, worldZone, worldInstant, LOCATION_KINDS, ENTITY_KINDS } from './geography.mjs';
+import { bounded, MAX_AUTHORED_TEXT, worldZone, worldInstant, LOCATION_KINDS, ENTITY_KINDS } from './geography.mjs';
 
 const now = () => Date.now();
 function assertNoAliasNameCollision(db,worldId,entryType,name,targetId=null){
@@ -223,8 +223,8 @@ export class WorldRepository {
     if(old.name!==expectedName||old.description!==expectedDescription)
       throw Error('Universe details changed; reload and review before saving');
     const cleanName=cleanTitle(name,'Universe name');
-    if(typeof description!=='string'||description.length>4000)
-      throw Error('Universe foundation must be 4,000 characters or fewer');
+    if(typeof description!=='string'||description.length>MAX_AUTHORED_TEXT)
+      throw Error('Universe foundation exceeds the supported authoring size');
     this.db.prepare('UPDATE worlds SET name=?,description=? WHERE id=? AND name=? AND description=?')
       .run(cleanName,description.trim(),worldId,expectedName,expectedDescription);
     return {id:worldId,name:cleanName,description:description.trim()};
@@ -289,7 +289,7 @@ export class WorldRepository {
 
   createLocation({worldId,name,parentId=null,kind='other',description=''}) {
     if(!LOCATION_KINDS.includes(kind))throw new TypeError('Invalid location kind');
-    const title=cleanTitle(name,'Location name');const detail=bounded(description,'description',4000);
+    const title=cleanTitle(name,'Location name');const detail=bounded(description,'description',MAX_AUTHORED_TEXT);
     const world=this.db.prepare('SELECT id FROM worlds WHERE id=?').get(worldId);
     if(!world)throw new Error('World does not exist');
     if(parentId !== null) {
@@ -327,7 +327,7 @@ export class WorldRepository {
       .get(worldId,sourceCharacterId))
       throw new Error('Character already has a linked world entity; edit the existing person instead');
     const value={id:randomUUID(),worldId,name:cleanTitle(name,'Entity name'),kind,sourceCharacterId,
-      description:bounded(description,'entity description',4000)};
+      description:bounded(description,'entity description',MAX_AUTHORED_TEXT)};
     const exists=this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND name=? COLLATE NOCASE LIMIT 1')
       .get(worldId,value.name);
     if(exists&&!sourceCharacterId)
@@ -359,7 +359,7 @@ export class WorldRepository {
     if(previous.name!==expectedName||previous.kind!==expectedKind||previous.description!==expectedDescription)
       throw Error('Canon entry changed; reload before overwriting');
     if(!ENTITY_KINDS.includes(kind))throw Error('Invalid entity kind');
-    const title=cleanTitle(name,'Entity name'),detail=bounded(description,'entity description',4000);
+    const title=cleanTitle(name,'Entity name'),detail=bounded(description,'entity description',MAX_AUTHORED_TEXT);
     const duplicate=this.db.prepare('SELECT 1 FROM world_entities WHERE world_id=? AND name=? COLLATE NOCASE AND id<>? LIMIT 1')
       .get(worldId,title,id);
     if(duplicate)throw Error('Another canon entity already has that name');
