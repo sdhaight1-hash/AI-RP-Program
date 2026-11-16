@@ -1,4 +1,4 @@
-import {listEntryPhotos,addEntryPhoto,readEntryPhoto,deleteEntryPhoto,updateEntryPhotoCaption} from './media.mjs';
+import {listEntryPhotos,addEntryPhoto,readEntryPhoto,deleteEntryPhoto,updateEntryPhotoCaption,updateEntryPhoto} from './media.mjs';
 // One durable SQLite database per fictional world. The registry contains only
 // world labels and selection state: no lore, character data or story history.
 import { DatabaseSync } from 'node:sqlite';
@@ -136,6 +136,7 @@ export class WorldPartitionStore {
       getPhoto: input => {this.assertWorld(input.worldId);return readEntryPhoto(this.current.db,input);},
       removePhoto: input => {this.assertWorld(input.worldId);return deleteEntryPhoto(this.current.db,input);},
       updatePhotoCaption: input => {this.assertWorld(input.worldId);return updateEntryPhotoCaption(this.current.db,input);},
+      updatePhoto: input => {this.assertWorld(input.worldId);return updateEntryPhoto(this.current.db,input);},
       createWorld: input => this.createWorld(input),
       updateWorld: input => this.updateWorld(input),
       saveBlueprint: input => {this.assertWorld(input.worldId);return this.current.worlds.saveBlueprint(input);},
