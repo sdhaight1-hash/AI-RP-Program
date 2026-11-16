@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createInterface } from 'node:readline';
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, mkdtemp, stat } from 'node:fs/promises';
+import {makeUniverseZip} from './world/export-bundle.mjs';
 import { createReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -183,6 +184,35 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         try{return json(res,200,store.worlds.removePhoto(input));}
         catch(error){return json(res,404,{error:error.message});}
       }
+      if(req.method==='GET'&&path==='/api/worlds/export/bundle'){
+        const worldId=requestUrl.searchParams.get('worldId');
+        requireWorldScope(worldId);
+        if(typeof store.worldFile!=='function')
+          return json(res,422,{error:'Universe bundle requires partitioned storage'});
+        const stage=await mkdtemp(join(tmpdir(),'ai-rp-universe-bundle-'));
+        try{
+          const snapshot=join(stage,'world.sqlite'),zip=join(stage,'universe.zip');
+          store.db.exec("VACUUM INTO '"+snapshot.replaceAll("'","''")+"'");
+          await makeUniverseZip({worldId,snapshotPath:snapshot,
+            worldFolder:dirname(store.worldFile(worldId)),outputPath:zip});
+          const length=(await stat(zip)).size;
+          res.writeHead(200,{
+            'Content-Type':'application/zip',
+            'Content-Disposition':'attachment; filename="ai-rp-universe-'+worldId+'.zip"',
+            'Content-Length':length,'Cache-Control':'private, no-store',
+            'X-Content-Type-Options':'nosniff'
+          });
+          const stream=createReadStream(zip);
+          const cleanup=()=>{void rm(stage,{recursive:true,force:true}).catch(()=>{});};
+          res.once('close',cleanup);
+          stream.once('error',()=>{res.destroy();cleanup();});
+          stream.pipe(res);
+          return;
+        }catch(error){
+          await rm(stage,{recursive:true,force:true}).catch(()=>{});
+          return json(res,500,{error:'Cannot export universe bundle: '+error.message});
+        }
+      }
       if(req.method==='GET'&&path==='/api/worlds/export'){
         const worldId=requestUrl.searchParams.get('worldId');
         requireWorldScope(worldId);
@@ -193,8 +223,7 @@ export function createApp({ lmUrl = DEFAULT_INFERENCE_URL, fetchImpl = fetch, st
         const snapshot=join(tmpdir(),'ai-rp-export-'+randomUUID()+'.sqlite');
         try{
           store.db.exec("VACUUM INTO '"+snapshot.replaceAll("'","''")+"'");
-          const bytes=(await import('node:fs/promises')).stat(snapshot);
-          const size=(await bytes).size;
+          const size=(await stat(snapshot)).size;
           res.writeHead(200,{
             'Content-Type':'application/vnd.sqlite3','Content-Length':size,
             'Content-Disposition':'attachment; filename="'+filename+'"',
