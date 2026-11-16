@@ -1,4 +1,5 @@
 import {makeLocationAuthoringRequest,makeEntityAuthoringRequest} from '../authoring/world-scene.mjs';
+import {mountEntryPhotoGallery} from './world-entry-media.mjs';
 import {makeSourceMentionRequest,parseSourceMentionSuggestions} from '../world/assisted-extraction.mjs';
 
 function mountMentionRecommendations(host,{el,worldId,focus,entries=[],onChoose,fetch,getModel,onReviewComplete}){
@@ -252,6 +253,10 @@ export function renderAtlasPanel(host,session,api) {
   for(const loc of locations){
     const card=el('div','','lore-card');const parentName=locations.find(x=>x.id===loc.parentId)?.name;
     card.append(el('strong',loc.name),el('p',`${loc.kind}${parentName?' · inside '+parentName:''}${loc.description?' · '+loc.description:''}`,'help'));
+    mountEntryPhotoGallery(card,{
+      worldId:world.id,entryType:'location',entryId:loc.id,entryName:loc.name,
+      photos:worldLibrary.photos||[],fetchImpl:fetch,refreshWorldLibrary,showError
+    });
     const origin=(worldLibrary.entryProvenance||[]).find(x=>x.entryType==='location'&&x.entryId===loc.id);
     if(origin)card.append(el('p',`Source: ${origin.trust} · ${origin.sourceStatus} · “${origin.quote}”`,'help'));
     const use=el('button','Use as scene location','subtle-button');use.disabled=!session;
@@ -360,6 +365,10 @@ export function renderRelationsPanel(host,api) {
   for(const entity of entities){
     const row=el('div','','lore-card');
     row.append(el('strong',entity.name),el('p',entity.kind+(entity.description?' · '+entity.description:''),'help'));
+    mountEntryPhotoGallery(row,{
+      worldId:world.id,entryType:'entity',entryId:entity.id,entryName:entity.name,
+      photos:worldLibrary.photos||[],fetchImpl:fetch,refreshWorldLibrary,showError
+    });
     const origin=(worldLibrary.entryProvenance||[]).find(x=>x.entryType==='entity'&&x.entryId===entity.id);
     if(origin)row.append(el('p',`Source: ${origin.trust} · ${origin.sourceStatus} · “${origin.quote}”`,'help'));
     const character=entity.sourceCharacterId

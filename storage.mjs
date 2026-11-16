@@ -8,6 +8,7 @@ import { normalizeState } from './engine.mjs';
 import { canKnowLore } from './harness.mjs';
 import { bindTimelineIds } from './world/canon.mjs';
 import { initializeWorldSchema, WorldRepository, synchronizeSceneTimelines } from './world/persistence.mjs';
+import {initializeEntryPhotos} from './world/media.mjs';
 import { EventLedger, initializeEventLedger, sourceFingerprint } from './world/event-ledger.mjs';
 import { initializeMemorySchema, syncConversationMemories } from './memory/store.mjs';
 import { initializeFactSchema } from './memory/facts.mjs';
@@ -70,6 +71,7 @@ export class StudioStore {
       this.db.close();throw error;
     }
     initializeWorldSchema(this.db, persisted, this.scopeWorldId);
+    initializeEntryPhotos(this.db);
     initializeUniverseSourceIndex(this.db);
     initializeEventLedger(this.db);
     initializeMemorySchema(this.db);

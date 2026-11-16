@@ -450,6 +450,27 @@ function renderHeader() {
   if (c?.portrait) stageImage.src = portraitSrc(c.portrait); else stageImage.removeAttribute('src');
   atmosphere(c?.color || '#a68dd6');
   $('lore-active').textContent = s && c ? 'World-scoped actor memory · inspect Context for retrieved evidence' : '';
+  const images=$('scene-photo-strip');
+  images.replaceChildren();
+  const currentLocation=worldLibrary?.locations?.find(x=>x.worldId===activeWorldId&&
+    (x.id===s?.locationId||(!s?.locationId&&s?.location&&x.name===s.location)));
+  const placePhotos=(worldLibrary?.photos||[]).filter(x=>
+    x.worldId===activeWorldId&&
+    (currentLocation?x.entryType==='location'&&x.entryId===currentLocation.id:
+      x.entryType==='universe'&&x.entryId===activeWorldId)).slice(0,4);
+  for(const photo of placePhotos){
+    const link=document.createElement('a');
+    link.href='/api/worlds/photos/'+encodeURIComponent(photo.id)+
+      '?worldId='+encodeURIComponent(activeWorldId);
+    link.target='_blank';link.rel='noopener noreferrer';
+    link.title=photo.caption||('View '+(currentLocation?.name||'universe')+' photo');
+    const picture=document.createElement('img');
+    picture.src=link.href;picture.loading='lazy';
+    picture.alt=photo.caption||('Visual reference: '+(currentLocation?.name||'universe'));
+    link.append(picture);images.append(link);
+  }
+  images.classList.toggle('hidden',!placePhotos.length);
+
 }
 
 function field(key, label, value, options = {}) {

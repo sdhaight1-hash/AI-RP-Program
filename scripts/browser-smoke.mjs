@@ -169,6 +169,32 @@ async function main(){
         [...document.querySelectorAll('#atlas-places .lore-card strong')]
           .some(x=>x.textContent===${JSON.stringify(atlasName)});
     `),'inline Atlas refreshed with newly saved place');
+    assert.equal(await script(`
+      const card=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      return !!card?.querySelector('.entry-photo-gallery input[type="file"]')
+        &&!!card?.querySelector('.entry-photo-gallery button');
+    `),true,'Atlas photos must be attached to persisted place entries');
+    await script(`
+      const card=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      const bytes=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO/+vXkAAAAASUVORK5CYII='),x=>x.charCodeAt(0));
+      const file=new File([bytes],'atlas-reference.png',{type:'image/png'});
+      const transfer=new DataTransfer();transfer.items.add(file);
+      card.querySelector('.entry-photo-gallery input[type="file"]').files=transfer.files;
+      card.querySelector('.entry-photo-gallery input[aria-label^="Caption"]').value='Local harbor reference';
+      [...card.querySelectorAll('.entry-photo-gallery button')]
+        .find(x=>x.textContent==='Add selected photos').click();
+      return true;
+    `);
+    await until(async()=>store.worlds.list().photos.some(p=>p.entryType==='location'&&
+      p.caption==='Local harbor reference'),'Atlas photo upload persisted in owning SQLite database');
+    await until(async()=>script(`
+      const row=[...document.querySelectorAll('#atlas-places .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(atlasName)});
+      return !!row?.querySelector('.entry-photo-gallery img[src^="/api/worlds/photos/"]');
+    `),'Atlas gallery displays uploaded photo after refresh');
+    await screenshot('02c1-inline-atlas-gallery');
     await screenshot('02c-inline-atlas');
 
     const inlineEntityName='Inline Relations Test Entity';
@@ -199,6 +225,11 @@ async function main(){
         &&!!document.querySelector('#relations-entity-kind option[value="community"]')
         &&!!document.querySelector('.universe-mention-panel');
     `),true,'Worldbuilding editor must expose rich collective types and source-backed recommendations');
+    assert.equal(await script(`
+      const row=[...document.querySelectorAll('#relations-list .lore-card')]
+        .find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(inlineEntityName)});
+      return !!row?.querySelector('.entry-photo-gallery input[type="file"]');
+    `),true,'organizations, families, communities and cultures share entry photo galleries');
     await screenshot('02d-inline-relations');
     assert.equal(await script(`
       window.confirm=()=>true;
@@ -299,6 +330,9 @@ async function main(){
       'blueprint editing cannot create a new universe');
     await screenshot('03c-reviewed-universe-blueprint');
     await screenshot('03b-in-place-universe-revision');
+    assert.equal(await script(`
+      return !!document.querySelector('#universe-photo-gallery .entry-photo-gallery input[type=file]');
+    `),true,'existing universe identity supports visual references without creating another universe');
     await screenshot('03-world-timelines-editor');
     const beforeImpact=(await(await fetch(base+'/api/state?worldId='+
       encodeURIComponent(store.activeWorldId))).json()).revision;
