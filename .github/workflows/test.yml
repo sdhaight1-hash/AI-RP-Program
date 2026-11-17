@@ -40,3 +40,20 @@ jobs:
           name: ui-review-screenshots
           path: artifacts/ui-review/*.png
           if-no-files-found: ignore
+
+  windows-storage:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Windows SQLite, world isolation and backup/recovery regression tests
+        run: npm test
+      - name: Windows large-story storage baseline
+        run: npm run eval:scale -- --ci
+      - name: Windows normalized-primary storage baseline
+        run: npm run eval:scale -- --ci --primary
+      - name: Windows append-journal storage baseline
+        run: npm run eval:scale -- --ci --journal
